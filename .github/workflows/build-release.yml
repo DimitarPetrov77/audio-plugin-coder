@@ -9,9 +9,10 @@ on:
       plugin_name:
         description: 'Plugin name to build'
         required: true
+        default: 'ModularRandomizer'
         type: string
       platforms:
-        description: 'Platforms to build (windows,macos,linux,all)'
+        description: 'Platforms to build'
         default: 'all'
         type: choice
         options:
@@ -22,16 +23,24 @@ on:
           - windows,macos
           - windows,linux
           - macos,linux
+      version:
+        description: 'Version string (e.g. 1.0.0)'
+        required: true
+        default: '1.0.0'
+        type: string
 
 env:
   BUILD_TYPE: Release
 
 jobs:
   # ============================================
-  # WINDOWS BUILD
+  # WINDOWS BUILD + INSTALLER
   # ============================================
   build-windows:
-    if: github.event.inputs.platforms == 'all' || contains(github.event.inputs.platforms, 'windows') || github.event_name == 'push'
+    if: >-
+      github.event.inputs.platforms == 'all' ||
+      contains(github.event.inputs.platforms, 'windows') ||
+      github.event_name == 'push'
     runs-on: windows-latest
     steps:
       - name: Checkout repository
@@ -44,31 +53,86 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Configure CMake
-        run: |
-          cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 
       - name: Build VST3
-        run: |
-          cmake --build build --config Release --target "${{ inputs.plugin_name }}_VST3"
+        run: cmake --build build --config Release --target "${{ inputs.plugin_name || 'ModularRandomizer' }}_VST3"
 
       - name: Build Standalone
+        run: cmake --build build --config Release --target "${{ inputs.plugin_name || 'ModularRandomizer' }}_Standalone"
+
+      - name: Verify build artifacts
+        shell: pwsh
         run: |
-          cmake --build build --config Release --target "${{ inputs.plugin_name }}_Standalone"
+          $plugin = "${{ inputs.plugin_name || 'ModularRandomizer' }}"
+          $vst3 = Get-ChildItem -Path build -Recurse -Filter "*.vst3" -Directory | Select-Object -First 1
+          $exe = Get-ChildItem -Path build -Recurse -Filter "${plugin}.exe" | Select-Object -First 1
+          
+          Write-Host "VST3 bundle: $($vst3.FullName)" -ForegroundColor Green
+          Write-Host "Standalone:  $($exe.FullName)" -ForegroundColor Green
+          
+          if (-not $vst3) { throw "VST3 build not found!" }
+          if (-not $exe)  { throw "Standalone build not found!" }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          Write-Host "Inno Setup installed" -ForegroundColor Green
+
+      - name: Build Windows Installer
+        shell: pwsh
+        run: |
+          $plugin = "${{ inputs.plugin_name || 'ModularRandomizer' }}"
+          $version = "${{ inputs.version || '1.0.0' }}"
+          $issPath = "plugins/$plugin/installer/windows.iss"
+          $distDir = "plugins/$plugin/dist"
+          
+          if (Test-Path $issPath) {
+            # Create dist directory
+            New-Item -ItemType Directory -Path $distDir -Force | Out-Null
+            
+            # Build installer with version override
+            & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+              /DPluginVersion="$version" `
+              /DBuildDir="$((Resolve-Path build).Path)" `
+              $issPath
+            
+            Write-Host "Installer created!" -ForegroundColor Green
+            Get-ChildItem "$distDir" -Filter "*.exe"
+          } else {
+            Write-Host "No Inno Setup script found at $issPath — packaging as ZIP" -ForegroundColor Yellow
+            # Fallback: create ZIP with raw binaries
+            New-Item -ItemType Directory -Path $distDir -Force | Out-Null
+            $vst3Dir = (Get-ChildItem -Path build -Recurse -Filter "*.vst3" -Directory | Select-Object -First 1).FullName
+            $exePath = (Get-ChildItem -Path build -Recurse -Filter "${plugin}.exe" | Select-Object -First 1).FullName
+            
+            $stagingDir = "$distDir\${plugin}-${version}-Windows"
+            New-Item -ItemType Directory -Path "$stagingDir\VST3" -Force | Out-Null
+            Copy-Item -Path $vst3Dir -Destination "$stagingDir\VST3\" -Recurse
+            if ($exePath) { Copy-Item $exePath "$stagingDir\" }
+            if (Test-Path "plugins/$plugin/installer/LICENSE.txt") {
+              Copy-Item "plugins/$plugin/installer/LICENSE.txt" "$stagingDir\"
+            }
+            Compress-Archive -Path "$stagingDir\*" -DestinationPath "$distDir\${plugin}-${version}-Windows.zip"
+          }
 
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-${{ inputs.plugin_name }}
+          name: windows-${{ inputs.plugin_name || 'ModularRandomizer' }}
           path: |
-            build/*_artefacts/Release/*.vst3
-            build/*_artefacts/Release/*.exe
+            plugins/${{ inputs.plugin_name || 'ModularRandomizer' }}/dist/*
           retention-days: 30
 
   # ============================================
-  # MACOS BUILD
+  # MACOS BUILD + INSTALLER
   # ============================================
   build-macos:
-    if: github.event.inputs.platforms == 'all' || contains(github.event.inputs.platforms, 'macos') || github.event_name == 'push'
+    if: >-
+      github.event.inputs.platforms == 'all' ||
+      contains(github.event.inputs.platforms, 'macos') ||
+      github.event_name == 'push'
     runs-on: macos-latest
     steps:
       - name: Checkout repository
@@ -77,10 +141,6 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Install Dependencies
-        run: |
-          brew install cmake || true
-
       - name: Configure CMake
         run: |
           cmake -S . -B build -G Xcode \
@@ -88,32 +148,111 @@ jobs:
             -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13
 
       - name: Build VST3
-        run: |
-          cmake --build build --config Release --target "${{ inputs.plugin_name }}_VST3"
+        run: cmake --build build --config Release --target "${{ inputs.plugin_name || 'ModularRandomizer' }}_VST3"
 
       - name: Build AU
-        run: |
-          cmake --build build --config Release --target "${{ inputs.plugin_name }}_AU"
+        run: cmake --build build --config Release --target "${{ inputs.plugin_name || 'ModularRandomizer' }}_AU"
 
       - name: Build Standalone
+        run: cmake --build build --config Release --target "${{ inputs.plugin_name || 'ModularRandomizer' }}_Standalone"
+
+      - name: Create macOS Installer Package
         run: |
-          cmake --build build --config Release --target "${{ inputs.plugin_name }}_Standalone"
+          PLUGIN="${{ inputs.plugin_name || 'ModularRandomizer' }}"
+          VERSION="${{ inputs.version || '1.0.0' }}"
+          DIST_DIR="plugins/$PLUGIN/dist"
+          STAGING="$DIST_DIR/staging"
+          
+          mkdir -p "$STAGING/vst3" "$STAGING/au" "$STAGING/app" "$DIST_DIR"
+          
+          # Find built artifacts
+          VST3_PATH=$(find build -name "*.vst3" -type d | head -1)
+          AU_PATH=$(find build -name "*.component" -type d | head -1)
+          APP_PATH=$(find build -name "*.app" -type d | head -1)
+          
+          echo "VST3: $VST3_PATH"
+          echo "AU:   $AU_PATH"
+          echo "App:  $APP_PATH"
+          
+          # Create component packages
+          if [ -d "$VST3_PATH" ]; then
+            pkgbuild \
+              --component "$VST3_PATH" \
+              --install-location "/Library/Audio/Plug-Ins/VST3" \
+              "$STAGING/${PLUGIN}-VST3.pkg"
+          fi
+          
+          if [ -d "$AU_PATH" ]; then
+            pkgbuild \
+              --component "$AU_PATH" \
+              --install-location "/Library/Audio/Plug-Ins/Components" \
+              "$STAGING/${PLUGIN}-AU.pkg"
+          fi
+          
+          if [ -d "$APP_PATH" ]; then
+            pkgbuild \
+              --component "$APP_PATH" \
+              --install-location "/Applications" \
+              "$STAGING/${PLUGIN}-App.pkg"
+          fi
+          
+          # Create combined installer package
+          # Build a distribution XML for the combined installer
+          cat > "$STAGING/distribution.xml" << 'DISTXML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <installer-gui-script minSpecVersion="2">
+              <title>PLUGIN_NAME</title>
+              <options customize="allow" require-scripts="false"/>
+              <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
+              <choices-outline>
+                  <line choice="vst3"/>
+                  <line choice="au"/>
+                  <line choice="app"/>
+              </choices-outline>
+              <choice id="vst3" title="VST3 Plugin" description="Install VST3 to /Library/Audio/Plug-Ins/VST3">
+                  <pkg-ref id="com.noizefield.PLUGIN_NAME.vst3"/>
+              </choice>
+              <choice id="au" title="Audio Unit" description="Install AU to /Library/Audio/Plug-Ins/Components">
+                  <pkg-ref id="com.noizefield.PLUGIN_NAME.au"/>
+              </choice>
+              <choice id="app" title="Standalone App" description="Install standalone app to /Applications">
+                  <pkg-ref id="com.noizefield.PLUGIN_NAME.app"/>
+              </choice>
+              <pkg-ref id="com.noizefield.PLUGIN_NAME.vst3" version="VERSION" onConclusion="none">PLUGIN_NAME-VST3.pkg</pkg-ref>
+              <pkg-ref id="com.noizefield.PLUGIN_NAME.au" version="VERSION" onConclusion="none">PLUGIN_NAME-AU.pkg</pkg-ref>
+              <pkg-ref id="com.noizefield.PLUGIN_NAME.app" version="VERSION" onConclusion="none">PLUGIN_NAME-App.pkg</pkg-ref>
+          </installer-gui-script>
+          DISTXML
+          
+          # Replace placeholders
+          sed -i '' "s/PLUGIN_NAME/$PLUGIN/g" "$STAGING/distribution.xml"
+          sed -i '' "s/VERSION/$VERSION/g" "$STAGING/distribution.xml"
+          
+          # Build the product archive (combined installer)
+          productbuild \
+            --distribution "$STAGING/distribution.xml" \
+            --package-path "$STAGING" \
+            "$DIST_DIR/${PLUGIN}-${VERSION}-macOS.pkg"
+          
+          echo "macOS installer created: $DIST_DIR/${PLUGIN}-${VERSION}-macOS.pkg"
+          ls -la "$DIST_DIR/"
 
       - name: Upload macOS Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: macos-${{ inputs.plugin_name }}
+          name: macos-${{ inputs.plugin_name || 'ModularRandomizer' }}
           path: |
-            build/*_artefacts/Release/*.vst3
-            build/*_artefacts/Release/*.component
-            build/*_artefacts/Release/*.app
+            plugins/${{ inputs.plugin_name || 'ModularRandomizer' }}/dist/*.pkg
           retention-days: 30
 
   # ============================================
   # LINUX BUILD
   # ============================================
   build-linux:
-    if: github.event.inputs.platforms == 'all' || contains(github.event.inputs.platforms, 'linux') || github.event_name == 'push'
+    if: >-
+      github.event.inputs.platforms == 'all' ||
+      contains(github.event.inputs.platforms, 'linux') ||
+      github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -141,33 +280,58 @@ jobs:
             xvfb
 
       - name: Configure CMake
-        run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build VST3
-        run: |
-          cmake --build build --target "${{ inputs.plugin_name }}_VST3"
-
-      - name: Build LV2
-        run: |
-          xvfb-run cmake --build build --target "${{ inputs.plugin_name }}_LV2"
+        run: cmake --build build --target "${{ inputs.plugin_name || 'ModularRandomizer' }}_VST3"
 
       - name: Build Standalone
+        run: xvfb-run cmake --build build --target "${{ inputs.plugin_name || 'ModularRandomizer' }}_Standalone"
+
+      - name: Package Linux binaries
         run: |
-          xvfb-run cmake --build build --target "${{ inputs.plugin_name }}_Standalone"
+          PLUGIN="${{ inputs.plugin_name || 'ModularRandomizer' }}"
+          VERSION="${{ inputs.version || '1.0.0' }}"
+          DIST_DIR="plugins/$PLUGIN/dist"
+          STAGING="$DIST_DIR/${PLUGIN}-${VERSION}-Linux"
+          
+          mkdir -p "$STAGING/VST3"
+          
+          # Find and copy artifacts
+          VST3_PATH=$(find build -name "*.vst3" -type d | head -1)
+          STANDALONE=$(find build -name "$PLUGIN" -type f -executable | head -1)
+          
+          if [ -d "$VST3_PATH" ]; then
+            cp -r "$VST3_PATH" "$STAGING/VST3/"
+          fi
+          
+          if [ -f "$STANDALONE" ]; then
+            cp "$STANDALONE" "$STAGING/"
+            chmod +x "$STAGING/$PLUGIN"
+          fi
+          
+          # Copy license
+          if [ -f "plugins/$PLUGIN/installer/LICENSE.txt" ]; then
+            cp "plugins/$PLUGIN/installer/LICENSE.txt" "$STAGING/"
+          fi
+          
+          # Create tar.gz
+          cd "$DIST_DIR"
+          tar -czf "${PLUGIN}-${VERSION}-Linux.tar.gz" "${PLUGIN}-${VERSION}-Linux/"
+          
+          echo "Linux package created"
+          ls -la
 
       - name: Upload Linux Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: linux-${{ inputs.plugin_name }}
+          name: linux-${{ inputs.plugin_name || 'ModularRandomizer' }}
           path: |
-            build/**/Release/VST3/
-            build/**/Release/LV2/
-            build/**/Release/Standalone/${{ inputs.plugin_name }}
+            plugins/${{ inputs.plugin_name || 'ModularRandomizer' }}/dist/*.tar.gz
           retention-days: 30
 
   # ============================================
-  # CREATE RELEASE
+  # CREATE GITHUB RELEASE
   # ============================================
   release:
     needs: [build-windows, build-macos, build-linux]
@@ -176,80 +340,39 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
       - name: Download All Artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
-          pattern: "*-${{ inputs.plugin_name }}"
+          path: release-artifacts
 
-      - name: List Downloaded Artifacts
+      - name: List artifacts
         run: |
           echo "Downloaded artifacts:"
-          find artifacts -type f
-
-      - name: Create Release Archives
-        run: |
-          PLUGIN_NAME="${{ inputs.plugin_name }}"
-          VERSION="${{ github.ref_name }}"
-          
-          mkdir -p release
-          
-          # Package Windows artifacts
-          if [ -d "artifacts/windows-${PLUGIN_NAME}" ]; then
-            cd "artifacts/windows-${PLUGIN_NAME}"
-            zip -r "../../release/${PLUGIN_NAME}-${VERSION}-Windows.zip" .
-            cd ../..
-          fi
-          
-          # Package macOS artifacts
-          if [ -d "artifacts/macos-${PLUGIN_NAME}" ]; then
-            cd "artifacts/macos-${PLUGIN_NAME}"
-            zip -r "../../release/${PLUGIN_NAME}-${VERSION}-macOS.zip" .
-            cd ../..
-          fi
-          
-          # Package Linux artifacts
-          if [ -d "artifacts/linux-${PLUGIN_NAME}" ]; then
-            cd "artifacts/linux-${PLUGIN_NAME}"
-            zip -r "../../release/${PLUGIN_NAME}-${VERSION}-Linux.zip" .
-            cd ../..
-          fi
-          
-          echo "Release archives created:"
-          ls -la release/
+          find release-artifacts -type f
 
       - name: Create GitHub Release
         if: github.event_name == 'push'
         uses: softprops/action-gh-release@v1
         with:
-          files: release/*
+          files: release-artifacts/**/*
           generate_release_notes: true
           body: |
-            ## ${{ inputs.plugin_name }} Release
+            ## ${{ inputs.plugin_name || 'ModularRandomizer' }} ${{ github.ref_name }}
             
-            ### Installation
-            - **Windows**: Extract the ZIP and run the installer or copy VST3 to your plugins folder
-            - **macOS**: Extract the ZIP and install VST3/AU components to the appropriate folders
-            - **Linux**: Extract the ZIP and copy VST3/LV2 to your plugins folder
-            
-            ### Supported Formats
-            - VST3 (All platforms)
-            - AU (macOS only)
-            - LV2 (Linux only)
-            - Standalone (All platforms)
+            ### Downloads
+            - **Windows**: Run the Setup installer (VST3 + Standalone)
+            - **macOS**: Open the .pkg installer (VST3 + AU + Standalone)
+            - **Linux**: Extract tar.gz, copy VST3 to ~/.vst3/
             
             ### System Requirements
-            - **Windows**: Windows 10/11, 64-bit, WebView2 Runtime
-            - **macOS**: macOS 10.13+, Intel or Apple Silicon
-            - **Linux**: Ubuntu 20.04+ or equivalent, WebKitGTK
+            - **Windows**: Windows 10/11 64-bit, WebView2 Runtime
+            - **macOS**: macOS 10.13+, Intel or Apple Silicon (Universal Binary)
+            - **Linux**: Ubuntu 20.04+, WebKitGTK 4.1
 
-      - name: Upload Release Artifacts (Manual Trigger)
+      - name: Upload combined release (manual trigger)
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
-          name: release-${{ inputs.plugin_name }}
-          path: release/*
+          name: release-all-platforms
+          path: release-artifacts/**/*
           retention-days: 30
