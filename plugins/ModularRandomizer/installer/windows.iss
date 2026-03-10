@@ -4,8 +4,8 @@
 
 #define PluginName    "ModularRandomizer"
 #define PluginVersion "1.0.0"
-#define Publisher     "Noizefield"
-#define PublisherURL  "https://noizefield.com"
+#define Publisher     "Dimitar Petrov"
+#define PublisherURL  "https://dimitarp.com"
 
 ; These paths are relative to the .iss file location
 ; Override via /D on command line for CI builds:
@@ -30,6 +30,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 WizardStyle=modern
 LicenseFile=LICENSE.txt
+SetupIconFile=icon.ico
 UninstallDisplayIcon={app}\{#PluginName}.exe
 DisableProgramGroupPage=yes
 DisableDirPage=no

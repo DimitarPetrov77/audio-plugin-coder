@@ -135,4 +135,4 @@ cmake --build build --config Release --target ModularRandomizer_VST3
 
 ## License
 
-Copyright © Noizefield
+Copyright © Dimitar Petrov

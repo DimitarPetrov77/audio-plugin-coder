@@ -19,7 +19,7 @@ elseif(UNIX)
     set(NEEDS_WEBVIEW2 FALSE)
     set(NEEDS_WEB_BROWSER TRUE)
     set(WEBVIEW_BACKEND "WebKitGTK")
-    set(LV2_URI "https://github.com/noizefield/audio-plugin-coder/ModularRandomizer")
+    set(LV2_URI "https://dimitarp.com/audio-plugin-coder/ModularRandomizer")
 else()
     message(FATAL_ERROR "Unsupported platform")
 endif()
@@ -73,18 +73,18 @@ set_target_properties(ModularRandomizerWebUI PROPERTIES
 # PLUGIN TARGET
 # ============================================
 juce_add_plugin(ModularRandomizer
-    COMPANY_NAME "Noizefield"
+    COMPANY_NAME "Dimitar Petrov"
     IS_SYNTH FALSE
     NEEDS_MIDI_INPUT TRUE
     NEEDS_MIDI_OUTPUT FALSE
     IS_MIDI_EFFECT FALSE
     EDITOR_WANTS_KEYBOARD_FOCUS TRUE
     COPY_PLUGIN_AFTER_BUILD FALSE
-    PLUGIN_MANUFACTURER_CODE Nzfd
+    PLUGIN_MANUFACTURER_CODE DmPt
     PLUGIN_CODE MdRn
     FORMATS ${PLUGIN_FORMATS}
     PRODUCT_NAME "ModularRandomizer"
-    BUNDLE_ID "com.noizefield.modularrandomizer"
+    BUNDLE_ID "com.dimitarp.modularrandomizer"
     PLUGIN_NAME "ModularRandomizer"
     DESCRIPTION "Multi-Plugin Parameter Randomizer"
 

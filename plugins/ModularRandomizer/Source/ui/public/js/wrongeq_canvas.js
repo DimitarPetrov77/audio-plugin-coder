@@ -4675,7 +4675,7 @@ function weqCreateVirtualBlock() {
         hostId: WEQ_VIRTUAL_ID,
         name: '⬡ WrongEQ',
         path: '__virtual__',
-        manufacturer: 'Noizefield',
+        manufacturer: 'Dimitar Petrov',
         params: params,
         expanded: true,
         searchFilter: '',

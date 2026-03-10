@@ -8,7 +8,7 @@ By installing, copying, or otherwise using ModularRandomizer ("the Software"),
 you agree to be bound by the terms of this agreement.
 
 1. GRANT OF LICENSE
-   Noizefield grants you a non-exclusive, non-transferable license to install
+   Dimitar Petrov grants you a non-exclusive, non-transferable license to install
    and use the Software on any number of computers you personally own or control.
 
 2. PERMITTED USE
@@ -24,7 +24,7 @@ you agree to be bound by the terms of this agreement.
 
 4. INTELLECTUAL PROPERTY
    The Software is protected by copyright laws and international treaties.
-   All rights not expressly granted are reserved by Noizefield.
+   All rights not expressly granted are reserved by Dimitar Petrov.
 
 5. DISCLAIMER OF WARRANTY
    THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS
@@ -32,7 +32,7 @@ you agree to be bound by the terms of this agreement.
    FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
 
 6. LIMITATION OF LIABILITY
-   IN NO EVENT SHALL NOIZEFIELD BE LIABLE FOR ANY DIRECT, INDIRECT,
+   IN NO EVENT SHALL DIMITAR PETROV BE LIABLE FOR ANY DIRECT, INDIRECT,
    INCIDENTAL, SPECIAL, OR CONSEQUENTIAL DAMAGES ARISING FROM THE USE
    OR INABILITY TO USE THE SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY
    OF SUCH DAMAGES.
@@ -46,5 +46,5 @@ you agree to be bound by the terms of this agreement.
 By installing this Software, you acknowledge that you have read, understood,
 and agree to be bound by these terms.
 
-Copyright (c) 2026 Noizefield — https://noizefield.com
+Copyright (c) 2026 Dimitar Petrov — https://dimitarp.com
 ================================================================================
