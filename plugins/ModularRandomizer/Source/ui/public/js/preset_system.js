@@ -1430,10 +1430,9 @@ function applyGlobalPreset(data, presetName) {
                     routingMode = data.routingMode;
                     var setRoutFn = (window.__JUCE__ && window.__JUCE__.backend) ? window.__juceGetNativeFunction('setRoutingMode') : null;
                     if (setRoutFn) setRoutFn(routingMode);
-                    // Update routing toggle buttons
-                    document.querySelectorAll('.routing-btn').forEach(function (b) {
-                        b.classList.toggle('on', parseInt(b.dataset.rmode) === routingMode);
-                    });
+                    // Update routing dropdown
+                    document.getElementById('routingSelect').value = routingMode;
+                    document.getElementById('routingSelect').classList.toggle('weq-active', routingMode === 2);
                     if (typeof weqSetVisible === 'function') weqSetVisible(routingMode === 2);
                 }
 
@@ -1561,10 +1560,9 @@ function applyGlobalPreset(data, presetName) {
                         var setRmFn = window.__juceGetNativeFunction('setRoutingMode');
                         setRmFn(routingMode);
                     }
-                    // Update routing toggle buttons
-                    document.querySelectorAll('.routing-btn').forEach(function (b) {
-                        b.classList.toggle('on', parseInt(b.dataset.rmode) === routingMode);
-                    });
+                    // Update routing dropdown
+                    document.getElementById('routingSelect').value = routingMode;
+                    document.getElementById('routingSelect').classList.toggle('weq-active', routingMode === 2);
                     // Show/hide WrongEQ panel
                     if (typeof weqSetVisible === 'function') weqSetVisible(routingMode === 2);
                     // Sync EQ state when entering WrongEQ mode

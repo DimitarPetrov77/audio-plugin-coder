@@ -2397,7 +2397,7 @@ select.lane-morph-knob {
 .lane-canvas-wrap {
     flex: 1;
     position: relative;
-    background: var(--bg-inset);
+    background: var(--canvas-bg, var(--bg-inset));
     min-width: 0;
     overflow: hidden;
 }

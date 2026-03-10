@@ -75,7 +75,95 @@
 .bypass.on {
     background: var(--accent);
     border-color: var(--accent);
-    color: var(--fire-text)
+    color: var(--fire-text);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 50%, transparent),
+        0 0 20px color-mix(in srgb, var(--accent) 25%, transparent);
+    animation: bypass-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes bypass-pulse {
+
+    0%,
+    100% {
+        box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 40%, transparent);
+    }
+
+    50% {
+        box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 70%, transparent), 0 0 28px color-mix(in srgb, var(--accent) 30%, transparent);
+    }
+}
+
+/* When bypass is on, dim the entire rack area */
+.app.bypassed .rack {
+    opacity: 0.35;
+    pointer-events: none;
+    filter: grayscale(40%);
+    transition: opacity .25s, filter .25s;
+}
+
+.app.bypassed .status {
+    opacity: 0.5;
+}
+
+/* Routing area in header */
+.routing-area {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.routing-label {
+    font-size: 9px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    white-space: nowrap;
+}
+
+.routing-select {
+    background: var(--bg-cell);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    outline: none;
+    transition: border-color .15s;
+}
+
+.routing-select:hover {
+    border-color: var(--border-focus);
+}
+
+.routing-select:focus {
+    border-color: var(--accent);
+}
+
+.routing-select option {
+    background: var(--bg-panel);
+    color: var(--text-primary);
+}
+
+.routing-select.weq-active {
+    border-color: var(--accent);
+    color: var(--accent);
+    animation: routing-glow 2.5s ease-in-out infinite;
+}
+
+@keyframes routing-glow {
+
+    0%,
+    100% {
+        box-shadow: 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent);
+    }
+
+    50% {
+        box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 55%, transparent),
+            0 0 24px color-mix(in srgb, var(--accent) 20%, transparent);
+    }
 }
 
 .mix-area {

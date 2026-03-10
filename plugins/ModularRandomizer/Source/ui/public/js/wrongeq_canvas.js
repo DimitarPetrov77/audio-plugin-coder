@@ -1372,7 +1372,7 @@ function weqDrawCanvas() {
     ctx.clearRect(0, 0, W, H);
     try {
         // Background
-        ctx.fillStyle = weqCssVar('--bg-inset', '#1a1a20');
+        ctx.fillStyle = weqCssVar('--canvas-bg', '') || weqCssVar('--bg-inset', '#1a1a20');
         ctx.fillRect(0, 0, W, H);
 
         // Bypass overlay: dim the whole canvas

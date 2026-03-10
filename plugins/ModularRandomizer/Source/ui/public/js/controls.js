@@ -5,6 +5,8 @@
 // Bypass button — connected to JUCE BYPASS toggle relay
 document.getElementById('bypassBtn').onclick = function () {
     this.classList.toggle('on');
+    var isOn = this.classList.contains('on');
+    document.querySelector('.app').classList.toggle('bypassed', isOn);
     // Send to JUCE backend if available
     if (window.__JUCE__ && window.__JUCE__.getToggleState) {
         try {
@@ -61,23 +63,21 @@ document.getElementById('internalBpmInput').onchange = function () {
     syncBlocksToHost();
     saveUiStateToHost();
 };
-// Plugin Routing mode toggle
-document.querySelectorAll('.routing-btn').forEach(function (btn) {
-    btn.onclick = function () {
-        var mode = parseInt(btn.dataset.rmode);
-        routingMode = mode;
-        document.querySelectorAll('.routing-btn').forEach(function (b) { b.classList.toggle('on', parseInt(b.dataset.rmode) === mode); });
-        if (window.__JUCE__ && window.__JUCE__.backend) {
-            var fn = window.__juceGetNativeFunction('setRoutingMode');
-            fn(mode);
-        }
-        // Show/hide WrongEQ button
-        if (typeof weqSetVisible === 'function') weqSetVisible(mode === 2);
-        // Sync EQ state to C++ when entering WrongEQ mode
-        if (mode === 2 && typeof weqSyncToHost === 'function') weqSyncToHost();
-        renderAllPlugins(); saveUiStateToHost();
-    };
-});
+// Plugin Routing mode toggle (dropdown)
+document.getElementById('routingSelect').onchange = function () {
+    var mode = parseInt(this.value);
+    routingMode = mode;
+    this.classList.toggle('weq-active', mode === 2);
+    if (window.__JUCE__ && window.__JUCE__.backend) {
+        var fn = window.__juceGetNativeFunction('setRoutingMode');
+        fn(mode);
+    }
+    // Show/hide WrongEQ button
+    if (typeof weqSetVisible === 'function') weqSetVisible(mode === 2);
+    // Sync EQ state to C++ when entering WrongEQ mode
+    if (mode === 2 && typeof weqSyncToHost === 'function') weqSyncToHost();
+    renderAllPlugins(); saveUiStateToHost();
+};
 document.getElementById('addRnd').onclick = function () { addBlock('randomize'); };
 document.getElementById('addEnv').onclick = function () { addBlock('envelope'); };
 document.getElementById('addSmp').onclick = function () { addBlock('sample'); };

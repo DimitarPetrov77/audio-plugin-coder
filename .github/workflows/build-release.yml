@@ -124,6 +124,54 @@ jobs:
             Compress-Archive -Path "$stagingDir\*" -DestinationPath "$distDir\${plugin}-${version}-Windows.zip"
           }
 
+      - name: Create portable ZIP
+        shell: pwsh
+        run: |
+          $plugin = "${{ inputs.plugin_name || 'ModularRandomizer' }}"
+          $version = "${{ inputs.version || '1.0.0' }}"
+          $distDir = "plugins/$plugin/dist"
+          $zipDir = "$distDir/${plugin}-${version}-Windows-Portable"
+          
+          New-Item -ItemType Directory -Path "$zipDir/VST3" -Force | Out-Null
+          
+          # Copy VST3 bundle
+          $vst3Dir = (Get-ChildItem -Path build -Recurse -Filter "*.vst3" -Directory | Select-Object -First 1).FullName
+          if ($vst3Dir) { Copy-Item -Path $vst3Dir -Destination "$zipDir/VST3/" -Recurse }
+          
+          # Copy Standalone
+          $exePath = (Get-ChildItem -Path build -Recurse -Filter "${plugin}.exe" | Select-Object -First 1).FullName
+          if ($exePath) { Copy-Item $exePath "$zipDir/" }
+          
+          # Copy LICENSE
+          if (Test-Path "plugins/$plugin/installer/LICENSE.txt") {
+            Copy-Item "plugins/$plugin/installer/LICENSE.txt" "$zipDir/"
+          }
+          
+          # Create README
+          @"
+          $plugin v${version} - Portable Install
+          ============================================
+          
+          WINDOWS INSTALL INSTRUCTIONS
+          ----------------------------
+          
+          VST3 Plugin:
+            Copy the entire "VST3\${plugin}.vst3" folder to:
+            C:\Program Files\Common Files\VST3\
+          
+          Standalone App:
+            Run ${plugin}.exe from anywhere.
+          
+          After copying, restart your DAW and rescan plugins.
+          
+          NOTE: Windows SmartScreen may show a warning because the
+          software is not code-signed. Click "More info" then
+          "Run anyway" - this is safe.
+          "@ | Out-File -FilePath "$zipDir/README.txt" -Encoding utf8
+          
+          Compress-Archive -Path "$zipDir/*" -DestinationPath "$distDir/${plugin}-${version}-Windows-Portable.zip"
+          Write-Host "Portable ZIP created" -ForegroundColor Green
+
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v5
         with:
@@ -217,17 +265,17 @@ jobs:
                   <line choice="app"/>
               </choices-outline>
               <choice id="vst3" title="VST3 Plugin" description="Install VST3 to /Library/Audio/Plug-Ins/VST3">
-                  <pkg-ref id="com.noizefield.PLUGIN_NAME.vst3"/>
+                  <pkg-ref id="com.dimitarp.PLUGIN_NAME.vst3"/>
               </choice>
               <choice id="au" title="Audio Unit" description="Install AU to /Library/Audio/Plug-Ins/Components">
-                  <pkg-ref id="com.noizefield.PLUGIN_NAME.au"/>
+                  <pkg-ref id="com.dimitarp.PLUGIN_NAME.au"/>
               </choice>
               <choice id="app" title="Standalone App" description="Install standalone app to /Applications">
-                  <pkg-ref id="com.noizefield.PLUGIN_NAME.app"/>
+                  <pkg-ref id="com.dimitarp.PLUGIN_NAME.app"/>
               </choice>
-              <pkg-ref id="com.noizefield.PLUGIN_NAME.vst3" version="VERSION" onConclusion="none">PLUGIN_NAME-VST3.pkg</pkg-ref>
-              <pkg-ref id="com.noizefield.PLUGIN_NAME.au" version="VERSION" onConclusion="none">PLUGIN_NAME-AU.pkg</pkg-ref>
-              <pkg-ref id="com.noizefield.PLUGIN_NAME.app" version="VERSION" onConclusion="none">PLUGIN_NAME-App.pkg</pkg-ref>
+              <pkg-ref id="com.dimitarp.PLUGIN_NAME.vst3" version="VERSION" onConclusion="none">PLUGIN_NAME-VST3.pkg</pkg-ref>
+              <pkg-ref id="com.dimitarp.PLUGIN_NAME.au" version="VERSION" onConclusion="none">PLUGIN_NAME-AU.pkg</pkg-ref>
+              <pkg-ref id="com.dimitarp.PLUGIN_NAME.app" version="VERSION" onConclusion="none">PLUGIN_NAME-App.pkg</pkg-ref>
           </installer-gui-script>
           DISTXML
           
@@ -244,12 +292,67 @@ jobs:
           echo "macOS installer created: $DIST_DIR/${PLUGIN}-${VERSION}-macOS.pkg"
           ls -la "$DIST_DIR/"
 
+      - name: Create portable ZIP
+        run: |
+          PLUGIN="${{ inputs.plugin_name || 'ModularRandomizer' }}"
+          VERSION="${{ inputs.version || '1.0.0' }}"
+          DIST_DIR="plugins/$PLUGIN/dist"
+          ZIP_DIR="$DIST_DIR/${PLUGIN}-${VERSION}-macOS-Portable"
+          
+          mkdir -p "$ZIP_DIR/VST3" "$ZIP_DIR/AU" "$ZIP_DIR/App"
+          
+          # Find and copy artifacts
+          VST3_PATH=$(find build -name "*.vst3" -type d | head -1)
+          AU_PATH=$(find build -name "*.component" -type d | head -1)
+          APP_PATH=$(find build -name "*.app" -type d | head -1)
+          
+          [ -d "$VST3_PATH" ] && cp -R "$VST3_PATH" "$ZIP_DIR/VST3/"
+          [ -d "$AU_PATH" ]   && cp -R "$AU_PATH"   "$ZIP_DIR/AU/"
+          [ -d "$APP_PATH" ]  && cp -R "$APP_PATH"  "$ZIP_DIR/App/"
+          
+          # Copy license
+          [ -f "plugins/$PLUGIN/installer/LICENSE.txt" ] && \
+            cp "plugins/$PLUGIN/installer/LICENSE.txt" "$ZIP_DIR/"
+          
+          # Create README
+          cat > "$ZIP_DIR/README.txt" << EOF
+          $PLUGIN v${VERSION} - Portable Install
+          ============================================
+          
+          MACOS INSTALL INSTRUCTIONS
+          --------------------------
+          
+          VST3 Plugin:
+            Copy the .vst3 bundle from the VST3 folder to:
+            /Library/Audio/Plug-Ins/VST3/
+            (or ~/Library/Audio/Plug-Ins/VST3/ for current user only)
+          
+          Audio Unit (AU):
+            Copy the .component bundle from the AU folder to:
+            /Library/Audio/Plug-Ins/Components/
+            (or ~/Library/Audio/Plug-Ins/Components/ for current user only)
+          
+          Standalone App:
+            Drag the .app from the App folder to /Applications.
+          
+          After copying, restart your DAW and rescan plugins.
+          
+          NOTE: macOS Gatekeeper may block unsigned software.
+            Right-click the plugin/app -> Open, then click "Open" again.
+            Or run in Terminal: xattr -cr /path/to/plugin.vst3
+          EOF
+          
+          # Create ZIP
+          cd "$DIST_DIR"
+          zip -r "${PLUGIN}-${VERSION}-macOS-Portable.zip" "${PLUGIN}-${VERSION}-macOS-Portable/"
+          echo "macOS portable ZIP created"
+
       - name: Upload macOS Artifacts
         uses: actions/upload-artifact@v5
         with:
           name: macos-${{ inputs.plugin_name || 'ModularRandomizer' }}
           path: |
-            plugins/${{ inputs.plugin_name || 'ModularRandomizer' }}/dist/*.pkg
+            plugins/${{ inputs.plugin_name || 'ModularRandomizer' }}/dist/*
           retention-days: 30
 
   # ============================================
@@ -378,8 +481,8 @@ jobs:
             ## ${{ inputs.plugin_name || 'ModularRandomizer' }} ${{ github.ref_name }}
             
             ### Downloads
-            - **Windows**: Run the Setup installer (VST3 + Standalone)
-            - **macOS**: Open the .pkg installer (VST3 + AU + Standalone)
+            - **Windows**: Run the Setup installer, or use the Portable ZIP (extract and copy VST3 folder to `C:\Program Files\Common Files\VST3\`)
+            - **macOS**: Open the .pkg installer, or use the Portable ZIP (copy .vst3 to `/Library/Audio/Plug-Ins/VST3/`)
             - **Linux**: Extract tar.gz, copy VST3 to ~/.vst3/
             
             ### System Requirements

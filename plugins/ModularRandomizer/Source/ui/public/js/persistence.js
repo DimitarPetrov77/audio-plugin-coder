@@ -332,9 +332,8 @@ function restoreFromHost() {
             // Restore routing mode
             if (saved && saved.routingMode !== undefined) {
                 routingMode = saved.routingMode;
-                document.querySelectorAll('.routing-btn').forEach(function (b) {
-                    b.classList.toggle('on', parseInt(b.dataset.rmode) === routingMode);
-                });
+                document.getElementById('routingSelect').value = routingMode;
+                document.getElementById('routingSelect').classList.toggle('weq-active', routingMode === 2);
                 if (window.__JUCE__ && window.__JUCE__.backend) {
                     var rmFn = window.__juceGetNativeFunction('setRoutingMode');
                     rmFn(routingMode);
@@ -410,9 +409,8 @@ function restoreFromHost() {
             // Restore also from getFullState response
             if (result.routingMode !== undefined && !(saved && saved.routingMode !== undefined)) {
                 routingMode = result.routingMode;
-                document.querySelectorAll('.routing-btn').forEach(function (b) {
-                    b.classList.toggle('on', parseInt(b.dataset.rmode) === routingMode);
-                });
+                document.getElementById('routingSelect').value = routingMode;
+                document.getElementById('routingSelect').classList.toggle('weq-active', routingMode === 2);
             }
             // Restore bus assignments
             if (saved && saved.pluginBuses) {

@@ -438,11 +438,12 @@ var THEMES = {
             '--snap-ring-color': '#1F5FA6',
             '--snap-ring-opacity': '0.45',
 
-            '--lane-color': '#1A6E5A',
-            '--lane-grid': 'rgba(10,10,10,0.08)',
-            '--lane-grid-label': 'rgba(10,10,10,0.20)',
-            '--lane-playhead': 'rgba(10,10,10,0.60)',
-            '--lane-active': '#1F5FA6',
+            '--lane-color': '#4A8AB0',
+            // Lane grid overrides for dark canvas bg
+            '--lane-grid': 'rgba(255,255,255,0.07)',
+            '--lane-grid-label': 'rgba(255,255,255,0.20)',
+            '--lane-playhead': 'rgba(255,255,255,0.70)',
+            '--lane-active': '#4A9ED0',
 
             '--range-arc': '#E87040',
 
@@ -459,7 +460,22 @@ var THEMES = {
             '--toast-info-bg': 'linear-gradient(135deg,#E0E8F4,#D4DCE8)', '--toast-info-border': '#1F5FA6',
             '--toast-text': '#0A0A0A',
             '--preset-flash-color': '#1F5FA6', '--preset-flash-glow': 'rgba(31,95,166,0.4)',
-            '--drag-highlight': '#1F5FA6'
+            '--drag-highlight': '#1F5FA6',
+
+            // ── CANVAS OVERRIDE (keep canvases dark in light theme) ──
+            '--canvas-bg': '#1A1A20',
+            '--canvas-text': '#C0C0CC',
+            '--canvas-grid': 'rgba(255,255,255,0.08)',
+            '--canvas-grid-label': 'rgba(255,255,255,0.22)',
+
+            // ── WRONGEQ OVERRIDES (dark panels in light theme) ──
+            '--weq-panel-bg': '#1E1E24',
+            '--weq-panel-border': '#3A3A48',
+            '--weq-panel-text': '#C8C8D8',
+            '--weq-panel-muted': '#808090',
+            '--weq-side-bg': '#141418',
+            '--weq-cell-bg': '#282830',
+            '--weq-cell-hover': '#32323C'
         },
         bcolors: [
             '#1F5FA6',  // steel blue — rand
@@ -1038,11 +1054,12 @@ var THEMES = {
             '--snap-ring-opacity': '0.60',
 
             // ── LANE / AUTOMATION ─────────────────────────────────────
-            '--lane-color': '#000080',
-            '--lane-grid': 'rgba(0,0,0,0.08)',
-            '--lane-grid-label': 'rgba(0,0,0,0.30)',
-            '--lane-playhead': 'rgba(0,0,0,0.80)',
-            '--lane-active': '#008000',
+            '--lane-color': '#4444FF',
+            // Lane grid overrides for dark canvas bg
+            '--lane-grid': 'rgba(255,255,255,0.07)',
+            '--lane-grid-label': 'rgba(255,255,255,0.22)',
+            '--lane-playhead': 'rgba(255,255,255,0.70)',
+            '--lane-active': '#00CC00',
 
             // ── RANGE ARC ─────────────────────────────────────────────
             '--range-arc': '#0000FF',
@@ -1069,6 +1086,21 @@ var THEMES = {
 
             '--preset-flash-color': '#000080',
             '--preset-flash-glow': 'rgba(0,0,128,0.35)',
+
+            // ── CANVAS OVERRIDE (keep canvases dark in light theme) ──
+            '--canvas-bg': '#1A1A2C',
+            '--canvas-text': '#B0B0CC',
+            '--canvas-grid': 'rgba(255,255,255,0.08)',
+            '--canvas-grid-label': 'rgba(255,255,255,0.22)',
+
+            // ── WRONGEQ OVERRIDES (dark panels in light theme) ──
+            '--weq-panel-bg': '#1C1C2A',
+            '--weq-panel-border': '#3A3A58',
+            '--weq-panel-text': '#C0C0D8',
+            '--weq-panel-muted': '#808098',
+            '--weq-side-bg': '#12121E',
+            '--weq-cell-bg': '#282840',
+            '--weq-cell-hover': '#34344C'
         },
 
         bcolors: [

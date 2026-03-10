@@ -469,12 +469,12 @@
             'Collapse plugins in the rack when not editing \u2014 saves polling CPU.'
         ]) +
 
-        heading('Parallel Routing') +
+        heading('Routing Modes') +
+        para('Use the <b>Routing Mode</b> dropdown in the header bar to switch between plugin routing modes:') +
         bullet([
-            'Switch to <b>Parallel</b> mode in Settings to route plugins into separate buses.',
-            'Each bus has independent <b>Volume</b>, <b>Mute</b>, and <b>Solo</b> controls.',
-            'Drag plugins between buses, or use the bus selector dropdown on each plugin card.',
-            'Buses are mixed together at the output with unity gain.'
+            '<b>Sequential</b>: all plugins process in series (one after another). Simple and familiar.',
+            '<b>Parallel</b>: plugins are grouped into buses with independent volume, mute, and solo. Buses are mixed at the output.',
+            '<b>WrongEQ</b>: multiband frequency-split routing \u2014 each EQ point acts as a crossover, splitting audio into independent bands with per-band plugin chains.'
         ]) +
 
         heading('DAW Integration') +
