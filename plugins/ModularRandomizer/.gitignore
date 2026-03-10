@@ -1,0 +1,32 @@
+# Build artifacts
+build/
+builds/
+cmake-build-*/
+*.vst3
+*.dll
+*.exe
+*.lib
+*.exp
+*.obj
+*.o
+*.pdb
+*.ilk
+
+# IDE files
+.vs/
+.vscode/
+*.vcxproj.user
+*.suo
+*.sln.docstates
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Binary data (generated at build time)
+JuceLibraryCode/
+
+# Private repo git data
+.git_backup/

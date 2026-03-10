@@ -1,0 +1,127 @@
+@font-face {
+    font-family: 'Share Tech Mono';
+    src: url('fonts/ShareTechMono-Regular.ttf') format('truetype');
+    font-weight: 400;
+    font-style: normal;
+    font-display: block;
+}
+
+@font-face {
+    font-family: 'VT323';
+    src: url('fonts/VT323-Regular.ttf') format('truetype');
+    font-weight: 400;
+    font-style: normal;
+    font-display: block;
+}
+
+:root {
+    --bg-app: #252018;
+    --bg-panel: #302A22;
+    --bg-cell: #443E38;
+    --bg-cell-hover: #524C44;
+    --bg-inset: #1E1A14;
+    --bg-input: #1E1A14;
+    --border: #685E50;
+    --border-strong: #887868;
+    --border-focus: #A89880;
+    --text-primary: #FAF6F0;
+    --text-secondary: #DDD6C8;
+    --text-muted: #B0A898;
+    --input-text: #FAF6F0;
+    --accent: #2D6B3F;
+    --accent-hover: #245A34;
+    --accent-light: rgba(45, 107, 63, 0.22);
+    --accent-border: rgba(45, 107, 63, 0.55);
+    --accent-rgb: 45, 107, 63;
+    --locked-bg: rgba(160, 60, 50, 0.18);
+    --locked-border: rgba(160, 60, 50, 0.4);
+    --locked-icon: #C04040;
+    --auto-lock-bg: rgba(180, 150, 60, 0.15);
+    --auto-lock-border: rgba(180, 150, 60, 0.35);
+    --midi-dot: #50A858;
+    --rand-color: #2D6B3F;
+    --env-color: #A08420;
+    --sample-color: #8B3030;
+    --morph-color: #5C6BC0;
+    --shapes-color: #9C5BBF;
+    --thumb-color: #F0E8D8;
+
+    /* Knobs */
+    --knob-track: #3A3428;
+    --knob-value: #2D6B3F;
+    --knob-dot: #70B080;
+
+    /* Preset/Plugin headers */
+    --pf-bg: #1E1A14;
+    --pf-border: #685E50;
+    --pf-text: #B0A898;
+    --ph-bg: #1E1A14;
+    --ph-border: #685E50;
+    --ph-text: #FAF6F0;
+
+    /* Sliders & bars */
+    --slider-track: #685E50;
+    --slider-thumb: #F0E8D8;
+    --bar-track: #302A22;
+    --bar-fill: #2D6B3F;
+
+    /* Card buttons */
+    --card-btn-bg: #1E1A14;
+    --card-btn-border: #685E50;
+    --card-btn-text: #B0A898;
+    --card-btn-hover: #302A22;
+
+    /* Fire (active mode button) */
+    --fire-text: #FAF6F0;
+    --fire-active-bg: #2D6B3F;
+
+    /* Snap ring */
+    --snap-ring-color: #5C6BC0;
+    --snap-ring-opacity: 0.55;
+
+    /* Status indicator backgrounds */
+    --si-rand-bg: rgba(45, 107, 63, 0.18);
+    --si-env-bg: rgba(160, 132, 32, 0.18);
+    --si-smp-bg: rgba(139, 48, 48, 0.18);
+    --si-morph-bg: rgba(92, 107, 192, 0.18);
+    --si-shapes-bg: rgba(156, 91, 191, 0.18);
+
+    /* Lane / automation */
+    --lane-color: #3A9CA0;
+    --lane-grid: rgba(255, 255, 255, 0.18);
+    --lane-grid-label: rgba(255, 255, 255, 0.28);
+    --lane-playhead: rgba(255, 255, 255, 0.65);
+    --lane-active: #5ED45E;
+
+    /* Misc */
+    --range-arc: #ff8c42;
+    --scrollbar-thumb: rgba(255, 255, 255, 0.2);
+    --scrollbar-track: transparent;
+
+    /* Bus */
+    --bus-mute-bg: #CC4444;
+    --bus-mute-text: #FFFFFF;
+    --bus-solo-bg: #CCAA33;
+    --bus-solo-text: #1a1a1a;
+    --bus-group-tint: 8%;
+    --bus-header-tint: 16%;
+    --bus-tint: 0%;
+    --bus-badge-text: #000000;
+
+    /* Toast notifications */
+    --toast-success-bg: linear-gradient(135deg, #0a3a1a, #082a10);
+    --toast-success-border: #4a8;
+    --toast-error-bg: linear-gradient(135deg, #4a1010, #2a0808);
+    --toast-error-border: #ff3333;
+    --toast-info-bg: linear-gradient(135deg, #102040, #081828);
+    --toast-info-border: #4a8cff;
+    --toast-text: #ffffff;
+
+    /* Preset flash confirmation */
+    --preset-flash-color: #4a8;
+    --preset-flash-glow: rgba(74, 170, 136, 0.5);
+
+    /* Fonts */
+    --font-sans: 'Inter', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Consolas', monospace;
+}

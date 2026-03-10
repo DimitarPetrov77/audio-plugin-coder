@@ -1,0 +1,1598 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Modular Randomizer v3</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+        :root {
+            --bg-app: #F0F0F0;
+            --bg-panel: #FAFAFA;
+            --bg-cell: #FFFFFF;
+            --bg-cell-hover: #F5F5F5;
+            --bg-inset: #E8E8E8;
+            --border: #DEDEDE;
+            --border-strong: #C0C0C0;
+            --border-focus: #999999;
+            --text-primary: #333333;
+            --text-secondary: #777777;
+            --text-muted: #AAAAAA;
+            --text-inverse: #FFFFFF;
+            --accent: #FF5500;
+            --accent-hover: #E64D00;
+            --accent-light: #FFF0E6;
+            --accent-border: #FFB380;
+            --locked-bg: #FFF0F0;
+            --locked-border: #FFCCCC;
+            --locked-icon: #CC3333;
+            --auto-lock-bg: #FFF5E6;
+            --auto-lock-border: #FFD699;
+            --midi-dot: #33CC33;
+            --env-color: #22AAFF;
+            --env-light: #E6F5FF;
+            --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+            --font-mono: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--bg-app);
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+            font-size: 11px;
+            width: 920px;
+            height: 620px;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .app {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        /* ═══════════════ HEADER ═══════════════ */
+        .header {
+            display: flex;
+            align-items: center;
+            height: 40px;
+            padding: 0 12px;
+            background: var(--bg-panel);
+            border-bottom: 1px solid var(--border-strong);
+            gap: 12px;
+            flex-shrink: 0;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .brand-mark {
+            width: 12px;
+            height: 12px;
+            background: var(--accent);
+            border-radius: 2px;
+        }
+
+        .brand-name {
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.8px;
+        }
+
+        .h-div {
+            width: 1px;
+            height: 20px;
+            background: var(--border);
+        }
+
+        .plugin-area {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .plugin-area>label {
+            font-size: 9px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .sel {
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+            font-size: 11px;
+            padding: 4px 22px 4px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23999'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 6px center;
+            min-width: 120px;
+        }
+
+        .sel:hover {
+            border-color: var(--border-focus);
+        }
+
+        .sm-btn {
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            font-family: var(--font-sans);
+            font-size: 9px;
+            padding: 3px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        .sm-btn:hover {
+            border-color: var(--border-focus);
+            color: var(--text-primary);
+        }
+
+        .h-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-left: auto;
+        }
+
+        .bypass {
+            width: 26px;
+            height: 24px;
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            color: var(--text-muted);
+            font-size: 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .bypass:hover {
+            border-color: var(--border-focus);
+            color: var(--text-primary);
+        }
+
+        .bypass.on {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+
+        .mix-area {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .mix-area label {
+            font-size: 9px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .mix-area .mix-val {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--text-secondary);
+            min-width: 28px;
+        }
+
+        /* ═══════════════ CUSTOM SLIDER ═══════════════ */
+        .slider-wrap {
+            position: relative;
+            height: 16px;
+            display: flex;
+            align-items: center;
+        }
+
+        .slider-track {
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: var(--bg-inset);
+            border-radius: 2px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+
+        .slider-fill {
+            position: absolute;
+            height: 4px;
+            background: var(--accent);
+            border-radius: 2px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 16px;
+            background: transparent;
+            outline: none;
+            position: relative;
+            z-index: 2;
+        }
+
+        input[type="range"]::-webkit-slider-runnable-track {
+            height: 4px;
+            background: var(--bg-inset);
+            border-radius: 2px;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px;
+            height: 14px;
+            background: white;
+            border: 2px solid var(--border-strong);
+            border-radius: 50%;
+            cursor: pointer;
+            margin-top: -5px;
+            transition: border-color 80ms;
+        }
+
+        input[type="range"]::-webkit-slider-thumb:hover {
+            border-color: var(--accent);
+        }
+
+        input[type="range"]:active::-webkit-slider-thumb {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-light);
+        }
+
+        .mix-area input[type="range"] {
+            width: 70px;
+        }
+
+        /* ═══════════════ PARAM GRID ═══════════════ */
+        .params-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .sec-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 4px 12px;
+            background: var(--bg-panel);
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+            height: 28px;
+        }
+
+        .sec-title {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+        }
+
+        .sec-actions {
+            display: flex;
+            gap: 4px;
+        }
+
+        .grid-scroll {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px 12px;
+        }
+
+        .grid-scroll::-webkit-scrollbar {
+            width: 5px;
+        }
+
+        .grid-scroll::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .grid-scroll::-webkit-scrollbar-thumb {
+            background: var(--border-strong);
+            border-radius: 3px;
+        }
+
+        .g {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(94px, 1fr));
+            gap: 4px;
+        }
+
+        .pc {
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            padding: 7px 8px;
+            cursor: pointer;
+            position: relative;
+            min-height: 50px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            transition: all 80ms ease-out;
+        }
+
+        .pc:hover {
+            background: var(--bg-cell-hover);
+            border-color: var(--border-focus);
+        }
+
+        .pc.sel {
+            background: var(--accent-light);
+            border-color: var(--accent-border);
+        }
+
+        .pc.sel .pb-f {
+            background: var(--accent);
+        }
+
+        .pc.lk {
+            background: var(--locked-bg);
+            border-color: var(--locked-border);
+            cursor: default;
+        }
+
+        .pc.lk:hover {
+            background: var(--locked-bg);
+            border-color: var(--locked-border);
+        }
+
+        .pc.lk .lk-i {
+            display: block;
+        }
+
+        .pc.alk {
+            background: var(--auto-lock-bg);
+            border-color: var(--auto-lock-border);
+            cursor: default;
+        }
+
+        .pc.alk:hover {
+            background: var(--auto-lock-bg);
+            border-color: var(--auto-lock-border);
+        }
+
+        .pc.alk .lk-i {
+            display: block;
+            color: #CC8800;
+        }
+
+        .pn {
+            font-size: 10px;
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .pv {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--text-secondary);
+        }
+
+        .lk-i {
+            display: none;
+            position: absolute;
+            top: 3px;
+            right: 5px;
+            font-size: 8px;
+            color: var(--locked-icon);
+        }
+
+        .pb {
+            height: 2px;
+            background: var(--bg-inset);
+            border-radius: 1px;
+            margin-top: 4px;
+            overflow: hidden;
+        }
+
+        .pb-f {
+            height: 100%;
+            background: var(--border-strong);
+            border-radius: 1px;
+            transition: width 180ms ease-out;
+        }
+
+        /* ═══════════════ BLOCKS STRIP ═══════════════ */
+        .blocks-section {
+            flex-shrink: 0;
+            border-top: 1px solid var(--border-strong);
+            background: var(--bg-panel);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .blocks-scroll {
+            overflow-x: auto;
+            overflow-y: hidden;
+            padding: 10px 12px;
+            display: flex;
+            gap: 10px;
+            align-items: stretch;
+        }
+
+        .blocks-scroll::-webkit-scrollbar {
+            height: 4px;
+        }
+
+        .blocks-scroll::-webkit-scrollbar-thumb {
+            background: var(--border-strong);
+            border-radius: 2px;
+        }
+
+        .bcard {
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            min-width: 270px;
+            max-width: 290px;
+            flex-shrink: 0;
+        }
+
+        .bcard.active {
+            border-left: 3px solid var(--accent);
+        }
+
+        .bhead {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 10px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+        }
+
+        .bhead:hover {
+            background: var(--bg-cell-hover);
+        }
+
+        .btitle {
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .bsum {
+            font-size: 10px;
+            color: var(--text-secondary);
+            margin-left: 6px;
+        }
+
+        .bclose {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 14px;
+            cursor: pointer;
+            padding: 0;
+            line-height: 1;
+        }
+
+        .bclose:hover {
+            color: var(--text-primary);
+        }
+
+        .bbody {
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .bbody.hide {
+            display: none;
+        }
+
+        .brow {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .blbl {
+            font-size: 9px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--text-muted);
+        }
+
+        /* Segmented control */
+        .seg {
+            display: flex;
+            background: var(--bg-inset);
+            border-radius: 3px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+
+        .seg button {
+            flex: 1;
+            padding: 5px 2px;
+            background: none;
+            border: none;
+            border-right: 1px solid var(--border);
+            color: var(--text-muted);
+            font-family: var(--font-sans);
+            font-size: 10px;
+            font-weight: 500;
+            cursor: pointer;
+        }
+
+        .seg button:last-child {
+            border-right: none;
+        }
+
+        .seg button:hover {
+            color: var(--text-secondary);
+            background: var(--bg-cell-hover);
+        }
+
+        .seg button.on {
+            background: var(--accent);
+            color: white;
+        }
+
+        .seg button.env-on {
+            background: var(--env-color);
+            color: white;
+        }
+
+        /* Sub controls */
+        .sub {
+            display: none;
+            padding-top: 6px;
+        }
+
+        .sub.vis {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .sub-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .sub-lbl {
+            font-size: 9px;
+            color: var(--text-secondary);
+            min-width: 40px;
+        }
+
+        .sub-sel {
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 10px;
+            padding: 2px 20px 2px 6px;
+            border-radius: 2px;
+            cursor: pointer;
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23999'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 4px center;
+        }
+
+        .sub-val {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--text-secondary);
+            min-width: 30px;
+            text-align: right;
+        }
+
+        .sub-input {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--text-primary);
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            padding: 2px 4px;
+            width: 38px;
+            text-align: center;
+        }
+
+        .sub-input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .note-disp {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            font-weight: 500;
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            padding: 2px 6px;
+            min-width: 32px;
+            text-align: center;
+        }
+
+        /* Toggle */
+        .tgl-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .tgl {
+            width: 28px;
+            height: 14px;
+            background: var(--bg-inset);
+            border: 1px solid var(--border);
+            border-radius: 7px;
+            cursor: pointer;
+            position: relative;
+            flex-shrink: 0;
+        }
+
+        .tgl::after {
+            content: '';
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            background: white;
+            border: 1px solid var(--border-strong);
+            border-radius: 50%;
+            top: 1px;
+            left: 1px;
+            transition: all 80ms;
+        }
+
+        .tgl.on {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+
+        .tgl.on::after {
+            left: 15px;
+            border-color: var(--accent);
+        }
+
+        .tgl-lbl {
+            font-size: 10px;
+            color: var(--text-secondary);
+        }
+
+        /* Slider row (label + slider + value) */
+        .sl-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .sl-row input[type="range"] {
+            flex: 1;
+        }
+
+        .sl-lbl {
+            font-size: 9px;
+            color: var(--text-secondary);
+            min-width: 32px;
+        }
+
+        .sl-val {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--text-secondary);
+            min-width: 32px;
+            text-align: right;
+        }
+
+        /* Dual range (min/max) */
+        .dual-range {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .dual-range .sl-row {
+            gap: 4px;
+        }
+
+        /* Targets */
+        .tgt-box {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 3px;
+            min-height: 22px;
+            padding: 4px;
+            background: var(--bg-app);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+        }
+
+        .tg {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            background: var(--accent-light);
+            border: 1px solid var(--accent-border);
+            color: var(--accent);
+            font-size: 9px;
+            font-weight: 500;
+            padding: 1px 6px;
+            border-radius: 2px;
+        }
+
+        .tg .tx {
+            cursor: pointer;
+            opacity: 0.6;
+            font-size: 10px;
+        }
+
+        .tg .tx:hover {
+            opacity: 1;
+        }
+
+        .tg-empty {
+            font-size: 9px;
+            color: var(--text-muted);
+            padding: 1px 4px;
+        }
+
+        /* Fire button */
+        .fire {
+            width: 100%;
+            height: 28px;
+            background: var(--accent);
+            border: none;
+            border-radius: 3px;
+            color: white;
+            font-family: var(--font-sans);
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            cursor: pointer;
+        }
+
+        .fire:hover {
+            background: var(--accent-hover);
+        }
+
+        .fire:active {
+            transform: scale(0.98);
+        }
+
+        .fire.flash {
+            animation: fl 250ms ease-out;
+        }
+
+        @keyframes fl {
+            0% {
+                box-shadow: 0 0 12px var(--accent);
+            }
+
+            100% {
+                box-shadow: none;
+            }
+        }
+
+        /* ═══════════════ ENVELOPE FOLLOWER SECTION ═══════════════ */
+        .env-meter {
+            height: 40px;
+            background: var(--bg-inset);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .env-meter-fill {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(to top, var(--env-color), rgba(34, 170, 255, 0.3));
+            transition: height 30ms linear;
+        }
+
+        .env-meter-line {
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: var(--accent);
+            opacity: 0.5;
+        }
+
+        .env-label {
+            position: absolute;
+            right: 4px;
+            top: 2px;
+            font-family: var(--font-mono);
+            font-size: 9px;
+            color: var(--text-secondary);
+        }
+
+        .env-active-dot {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--env-color);
+            margin-right: 4px;
+            animation: env-pulse 1s ease-in-out infinite;
+        }
+
+        @keyframes env-pulse {
+
+            0%,
+            100% {
+                opacity: 0.4;
+            }
+
+            50% {
+                opacity: 1;
+            }
+        }
+
+        /* Add block */
+        .add-blk {
+            min-width: 100px;
+            min-height: 60px;
+            background: none;
+            border: 1px dashed var(--border);
+            border-radius: 4px;
+            color: var(--text-muted);
+            font-family: var(--font-sans);
+            font-size: 11px;
+            cursor: pointer;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .add-blk:hover {
+            border-color: var(--border-focus);
+            color: var(--text-secondary);
+        }
+
+        /* ═══════════════ STATUS BAR ═══════════════ */
+        .status {
+            display: flex;
+            align-items: center;
+            height: 22px;
+            padding: 0 12px;
+            background: var(--bg-panel);
+            border-top: 1px solid var(--border);
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--text-muted);
+            gap: 16px;
+            flex-shrink: 0;
+        }
+
+        .sd {
+            display: inline-block;
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            margin-right: 3px;
+        }
+
+        .sd.on {
+            background: var(--midi-dot);
+        }
+
+        .sd.off {
+            background: var(--border-strong);
+        }
+
+        .sd.env {
+            background: var(--env-color);
+        }
+
+        /* ═══════════════ CONTEXT MENU ═══════════════ */
+        .ctx {
+            display: none;
+            position: fixed;
+            background: var(--bg-cell);
+            border: 1px solid var(--border-strong);
+            border-radius: 4px;
+            padding: 4px 0;
+            min-width: 130px;
+            z-index: 100;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .ctx.vis {
+            display: block;
+        }
+
+        .ctx-i {
+            padding: 5px 12px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+
+        .ctx-i:hover {
+            background: var(--accent-light);
+        }
+
+        .ctx-s {
+            height: 1px;
+            background: var(--border);
+            margin: 4px 0;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app">
+        <!-- HEADER -->
+        <div class="header">
+            <div class="brand">
+                <div class="brand-mark"></div><span class="brand-name">MODULAR RANDOMIZER</span>
+            </div>
+            <div class="h-div"></div>
+            <div class="plugin-area">
+                <label>Plugin</label>
+                <select class="sel" id="plugSel">
+                    <option value="">— Select —</option>
+                    <option value="serum" selected>Serum</option>
+                    <option value="vital">Vital</option>
+                    <option value="diva">Diva</option>
+                </select>
+                <button class="sm-btn">Open Editor</button>
+            </div>
+            <div class="h-right">
+                <button class="bypass" id="bypassBtn">⏻</button>
+                <div class="mix-area">
+                    <label>Mix</label>
+                    <input type="range" id="mixSlider" min="0" max="100" value="100">
+                    <span class="mix-val" id="mixVal">100%</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- PARAM GRID -->
+        <div class="params-section">
+            <div class="sec-bar">
+                <span class="sec-title">Parameters</span>
+                <div class="sec-actions">
+                    <button class="sm-btn" id="selAll">Select All</button>
+                    <button class="sm-btn" id="clrSel">Clear</button>
+                </div>
+            </div>
+            <div class="grid-scroll">
+                <div class="g" id="grid"></div>
+            </div>
+        </div>
+
+        <!-- BLOCKS -->
+        <div class="blocks-section">
+            <div class="sec-bar"><span class="sec-title">Logic Blocks</span></div>
+            <div class="blocks-scroll" id="bscroll"></div>
+        </div>
+
+        <!-- STATUS -->
+        <div class="status">
+            <span><span class="sd on"></span><span id="stPlug">Serum</span></span>
+            <span><span id="stP">32</span> params</span>
+            <span><span id="stL">1</span> locked</span>
+            <span><span id="stB">1</span> blocks</span>
+            <span>120 BPM</span>
+            <span><span class="sd off" id="midiD"></span>MIDI</span>
+            <span><span class="sd off" id="envD"></span>ENV</span>
+        </div>
+    </div>
+
+    <!-- CONTEXT MENU -->
+    <div class="ctx" id="ctx">
+        <div class="ctx-i" id="cL">🔒 Lock</div>
+        <div class="ctx-i" id="cU">🔓 Unlock</div>
+        <div class="ctx-s"></div>
+        <div class="ctx-i" id="cS">Select</div>
+        <div class="ctx-i" id="cD">Deselect</div>
+    </div>
+
+    <script>
+        // ════════════════════════════════════════════════
+        // DATA
+        // ════════════════════════════════════════════════
+        const P = [
+            { id: 'osc1_wave', name: 'Osc1 Wave', v: .25 }, { id: 'osc1_semi', name: 'Osc1 Semi', v: .5 },
+            { id: 'osc1_fine', name: 'Osc1 Fine', v: .5 }, { id: 'osc1_lvl', name: 'Osc1 Level', v: .8 },
+            { id: 'osc2_wave', name: 'Osc2 Wave', v: 0 }, { id: 'osc2_semi', name: 'Osc2 Semi', v: .5 },
+            { id: 'osc2_fine', name: 'Osc2 Fine', v: .5 }, { id: 'osc2_lvl', name: 'Osc2 Level', v: .6 },
+            { id: 'flt_cut', name: 'Filter Cut', v: .65 }, { id: 'flt_res', name: 'Filter Res', v: .3 },
+            { id: 'flt_drv', name: 'Filter Drive', v: .1 }, { id: 'flt_type', name: 'Filter Type', v: 0 },
+            { id: 'e1_a', name: 'Env1 Atk', v: .05 }, { id: 'e1_d', name: 'Env1 Dec', v: .3 },
+            { id: 'e1_s', name: 'Env1 Sus', v: .7 }, { id: 'e1_r', name: 'Env1 Rel', v: .4 },
+            { id: 'e2_a', name: 'Env2 Atk', v: .1 }, { id: 'e2_d', name: 'Env2 Dec', v: .5 },
+            { id: 'e2_s', name: 'Env2 Sus', v: .6 }, { id: 'e2_r', name: 'Env2 Rel', v: .35 },
+            { id: 'lfo_rate', name: 'LFO Rate', v: .5 }, { id: 'lfo_shape', name: 'LFO Shape', v: 0 },
+            { id: 'fx_rev', name: 'Reverb', v: .2 }, { id: 'fx_dly', name: 'Delay', v: .15 },
+            { id: 'fx_chr', name: 'Chorus', v: 0 }, { id: 'fx_dst', name: 'Distortion', v: 0 },
+            { id: 'uni_v', name: 'Unison', v: .14 }, { id: 'uni_d', name: 'Uni Detune', v: .3 },
+            { id: 'mac1', name: 'Macro 1', v: .5 }, { id: 'mac2', name: 'Macro 2', v: .5 },
+            { id: 'm_vol', name: 'Master Vol', v: .8, lk: true, alk: true },
+            { id: 'm_pan', name: 'Master Pan', v: .5 },
+        ];
+        P.forEach(p => { if (!p.lk) p.lk = false; if (!p.alk) p.alk = false; });
+
+        let sel = new Set(), blocks = [], actId = null, bc = 0, ctxP = null;
+        const NN = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+        const mn = n => NN[n % 12] + (Math.floor(n / 12) - 1);
+
+        // Envelope follower simulation
+        let envValue = 0;
+        let envActive = false;
+
+        // ════════════════════════════════════════════════
+        // PARAM GRID
+        // ════════════════════════════════════════════════
+        function renderGrid() {
+            const g = document.getElementById('grid');
+            g.innerHTML = '';
+            P.forEach(p => {
+                const c = document.createElement('div');
+                c.className = 'pc';
+                if (p.alk) c.classList.add('alk');
+                else if (p.lk) c.classList.add('lk');
+                if (sel.has(p.id)) c.classList.add('sel');
+                c.innerHTML = `
+      <span class="pn">${p.name}</span>
+      <span class="pv">${(p.v * 100).toFixed(0)}%</span>
+      <span class="lk-i">${p.alk ? '⚠' : '🔒'}</span>
+      <div class="pb"><div class="pb-f" style="width:${p.v * 100}%"></div></div>`;
+                c.onclick = () => {
+                    if (p.lk || p.alk) return;
+                    sel.has(p.id) ? sel.delete(p.id) : sel.add(p.id);
+                    renderGrid(); updateTgts();
+                };
+                c.oncontextmenu = e => { e.preventDefault(); ctxP = p; showCtx(e.clientX, e.clientY, p); };
+                g.appendChild(c);
+            });
+            updStatus();
+        }
+
+        // ════════════════════════════════════════════════
+        // CONTEXT MENU
+        // ════════════════════════════════════════════════
+        function showCtx(x, y, p) {
+            const m = document.getElementById('ctx');
+            m.style.left = Math.min(x, 880) + 'px';
+            m.style.top = Math.min(y, 560) + 'px';
+            m.classList.add('vis');
+            document.getElementById('cL').style.display = (p.lk || p.alk) ? 'none' : '';
+            document.getElementById('cU').style.display = (p.lk && !p.alk) ? '' : 'none';
+            document.getElementById('cS').style.display = (!p.lk && !sel.has(p.id)) ? '' : 'none';
+            document.getElementById('cD').style.display = sel.has(p.id) ? '' : 'none';
+        }
+        document.addEventListener('click', () => document.getElementById('ctx').classList.remove('vis'));
+        document.getElementById('cL').onclick = () => { if (ctxP) { ctxP.lk = true; sel.delete(ctxP.id); renderGrid(); updateTgts(); } };
+        document.getElementById('cU').onclick = () => { if (ctxP && !ctxP.alk) { ctxP.lk = false; renderGrid(); } };
+        document.getElementById('cS').onclick = () => { if (ctxP && !ctxP.lk) { sel.add(ctxP.id); renderGrid(); updateTgts(); } };
+        document.getElementById('cD').onclick = () => { if (ctxP) { sel.delete(ctxP.id); renderGrid(); updateTgts(); } };
+
+        // ════════════════════════════════════════════════
+        // LOGIC BLOCKS
+        // ════════════════════════════════════════════════
+        function addBlock(mode = 'randomize') {
+            const id = ++bc;
+            blocks.push({
+                id, mode, // 'randomize' or 'envelope'
+                trigger: 'manual', beatDiv: '1/4',
+                midiMode: 'any_note', midiNote: 60, midiCC: 1, velScale: false,
+                threshold: -12, retrigger: 100,
+                rMin: 0, rMax: 100,
+                quantize: false, qSteps: 12,
+                movement: 'instant', glideMs: 200,
+                // Envelope follower params
+                envAtk: 10, envRel: 100, envSens: 50, envInvert: false,
+                expanded: true,
+            });
+            if (!actId) actId = id;
+            renderBlocks(); updStatus();
+        }
+
+        function renderBlocks() {
+            const c = document.getElementById('bscroll');
+            c.innerHTML = '';
+
+            blocks.forEach(b => {
+                const card = document.createElement('div');
+                card.className = 'bcard' + (b.id === actId ? ' active' : '');
+
+                let sumText;
+                if (b.mode === 'envelope') {
+                    sumText = `Envelope · Atk ${b.envAtk}ms · Rel ${b.envRel}ms`;
+                } else {
+                    const tl = { manual: 'Manual', tempo: 'Tempo', midi: 'MIDI', audio: 'Audio' }[b.trigger];
+                    const ml = b.movement === 'instant' ? 'Instant' : `Smooth ${b.glideMs}ms`;
+                    sumText = `${tl} · ${ml}`;
+                }
+
+                card.innerHTML = `
+      <div class="bhead" data-id="${b.id}">
+        <div>
+          <span class="btitle">Block ${b.id}</span>
+          <span class="bsum">${sumText}</span>
+        </div>
+        <button class="bclose" data-id="${b.id}">×</button>
+      </div>
+      <div class="bbody ${b.expanded ? '' : 'hide'}">
+
+        <!-- MODE SELECTOR -->
+        <div class="brow">
+          <span class="blbl">Mode</span>
+          <div class="seg" data-b="${b.id}" data-f="mode">
+            <button class="${b.mode === 'randomize' ? 'on' : ''}" data-v="randomize">Randomize</button>
+            <button class="${b.mode === 'envelope' ? 'env-on' : ''}" data-v="envelope">Envelope</button>
+          </div>
+        </div>
+
+        ${b.mode === 'randomize' ? renderRandomizeBody(b) : renderEnvelopeBody(b)}
+
+        <!-- TARGETS -->
+        <div class="brow">
+          <span class="blbl">Targets</span>
+          <div class="tgt-box" id="tgt-${b.id}">${getTgtHTML()}</div>
+        </div>
+
+        ${b.mode === 'randomize' ? `<button class="fire" data-b="${b.id}">FIRE</button>` : ''}
+      </div>`;
+                c.appendChild(card);
+            });
+
+            // Add buttons
+            const wrap = document.createElement('div');
+            wrap.style.cssText = 'display:flex;flex-direction:column;gap:6px;flex-shrink:0;';
+
+            const addR = document.createElement('button');
+            addR.className = 'add-blk';
+            addR.innerHTML = '+ Randomizer';
+            addR.onclick = () => addBlock('randomize');
+
+            const addE = document.createElement('button');
+            addE.className = 'add-blk';
+            addE.innerHTML = '+ Envelope';
+            addE.style.borderColor = 'var(--env-color)';
+            addE.style.color = 'var(--env-color)';
+            addE.onclick = () => addBlock('envelope');
+
+            wrap.appendChild(addR);
+            wrap.appendChild(addE);
+            c.appendChild(wrap);
+
+            wireBlocks();
+        }
+
+        function renderRandomizeBody(b) {
+            return `
+    <!-- TRIGGER -->
+    <div class="brow">
+      <span class="blbl">Trigger</span>
+      <div class="seg" data-b="${b.id}" data-f="trigger">
+        <button class="${b.trigger === 'manual' ? 'on' : ''}" data-v="manual">Manual</button>
+        <button class="${b.trigger === 'tempo' ? 'on' : ''}" data-v="tempo">Tempo</button>
+        <button class="${b.trigger === 'midi' ? 'on' : ''}" data-v="midi">MIDI</button>
+        <button class="${b.trigger === 'audio' ? 'on' : ''}" data-v="audio">Audio</button>
+      </div>
+
+      <!-- Tempo -->
+      <div class="sub ${b.trigger === 'tempo' ? 'vis' : ''}">
+        <div class="sub-row">
+          <span class="sub-lbl">Division</span>
+          <select class="sub-sel" data-b="${b.id}" data-f="beatDiv">
+            ${['1/1', '1/2', '1/4', '1/8', '1/16', '1/32'].map(d => `<option ${b.beatDiv === d ? 'selected' : ''}>${d}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+
+      <!-- MIDI -->
+      <div class="sub ${b.trigger === 'midi' ? 'vis' : ''}">
+        <div class="sub-row">
+          <span class="sub-lbl">Mode</span>
+          <select class="sub-sel" data-b="${b.id}" data-f="midiMode">
+            <option value="any_note" ${b.midiMode === 'any_note' ? 'selected' : ''}>Any Note</option>
+            <option value="specific_note" ${b.midiMode === 'specific_note' ? 'selected' : ''}>Note</option>
+            <option value="cc" ${b.midiMode === 'cc' ? 'selected' : ''}>CC</option>
+          </select>
+          ${b.midiMode === 'specific_note' ? `
+            <span class="note-disp">${mn(b.midiNote)}</span>
+            <input type="range" min="0" max="127" value="${b.midiNote}" style="width:60px" data-b="${b.id}" data-f="midiNote">
+          `: ''}
+          ${b.midiMode === 'cc' ? `
+            <span class="sub-lbl" style="min-width:auto">CC#</span>
+            <input class="sub-input" type="number" min="0" max="127" value="${b.midiCC}" data-b="${b.id}" data-f="midiCC" style="width:38px">
+          `: ''}
+        </div>
+        <div class="sub-row">
+          <div class="tgl ${b.velScale ? 'on' : ''}" data-b="${b.id}" data-f="velScale"></div>
+          <span class="tgl-lbl">Velocity scales range</span>
+        </div>
+      </div>
+
+      <!-- Audio threshold -->
+      <div class="sub ${b.trigger === 'audio' ? 'vis' : ''}">
+        <div class="sl-row">
+          <span class="sl-lbl">Thresh</span>
+          <input type="range" min="-60" max="0" value="${b.threshold}" data-b="${b.id}" data-f="threshold">
+          <span class="sl-val">${b.threshold} dB</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- RANGE -->
+    <div class="brow">
+      <span class="blbl">Range</span>
+      <div class="dual-range">
+        <div class="sl-row">
+          <span class="sl-lbl">Min</span>
+          <input type="range" min="0" max="100" value="${b.rMin}" data-b="${b.id}" data-f="rMin">
+          <span class="sl-val">${b.rMin}%</span>
+        </div>
+        <div class="sl-row">
+          <span class="sl-lbl">Max</span>
+          <input type="range" min="0" max="100" value="${b.rMax}" data-b="${b.id}" data-f="rMax">
+          <span class="sl-val">${b.rMax}%</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- QUANTIZE -->
+    <div class="brow">
+      <div class="tgl-row">
+        <div class="tgl ${b.quantize ? 'on' : ''}" data-b="${b.id}" data-f="quantize"></div>
+        <span class="tgl-lbl">Quantize</span>
+        <input class="sub-input" type="number" value="${b.qSteps}" min="2" max="128"
+          data-b="${b.id}" data-f="qSteps" ${b.quantize ? '' : 'disabled'}>
+        <span class="sub-lbl" style="min-width:auto">steps</span>
+      </div>
+    </div>
+
+    <!-- MOVEMENT -->
+    <div class="brow">
+      <span class="blbl">Movement</span>
+      <div class="seg" data-b="${b.id}" data-f="movement">
+        <button class="${b.movement === 'instant' ? 'on' : ''}" data-v="instant">Instant</button>
+        <button class="${b.movement === 'glide' ? 'on' : ''}" data-v="glide">Smooth</button>
+      </div>
+      ${b.movement === 'glide' ? `
+        <div class="sl-row" style="margin-top:4px">
+          <span class="sl-lbl">Time</span>
+          <input type="range" min="1" max="2000" value="${b.glideMs}" data-b="${b.id}" data-f="glideMs">
+          <span class="sl-val">${b.glideMs}ms</span>
+        </div>`: ''}
+    </div>`;
+        }
+
+        function renderEnvelopeBody(b) {
+            return `
+    <div class="brow">
+      <span class="blbl"><span class="env-active-dot"></span>Envelope Follower</span>
+      <div class="env-meter" id="envMeter-${b.id}">
+        <div class="env-meter-fill" id="envFill-${b.id}" style="height:0%"></div>
+        <span class="env-label" id="envLbl-${b.id}">0%</span>
+      </div>
+    </div>
+
+    <div class="brow">
+      <span class="blbl">Response</span>
+      <div class="sl-row">
+        <span class="sl-lbl">Attack</span>
+        <input type="range" min="1" max="500" value="${b.envAtk}" data-b="${b.id}" data-f="envAtk">
+        <span class="sl-val">${b.envAtk}ms</span>
+      </div>
+      <div class="sl-row">
+        <span class="sl-lbl">Release</span>
+        <input type="range" min="1" max="2000" value="${b.envRel}" data-b="${b.id}" data-f="envRel">
+        <span class="sl-val">${b.envRel}ms</span>
+      </div>
+    </div>
+
+    <div class="brow">
+      <span class="blbl">Mapping</span>
+      <div class="sl-row">
+        <span class="sl-lbl">Gain</span>
+        <input type="range" min="0" max="100" value="${b.envSens}" data-b="${b.id}" data-f="envSens">
+        <span class="sl-val">${b.envSens}%</span>
+      </div>
+      <div class="dual-range">
+        <div class="sl-row">
+          <span class="sl-lbl">Min</span>
+          <input type="range" min="0" max="100" value="${b.rMin}" data-b="${b.id}" data-f="rMin">
+          <span class="sl-val">${b.rMin}%</span>
+        </div>
+        <div class="sl-row">
+          <span class="sl-lbl">Max</span>
+          <input type="range" min="0" max="100" value="${b.rMax}" data-b="${b.id}" data-f="rMax">
+          <span class="sl-val">${b.rMax}%</span>
+        </div>
+      </div>
+      <div class="tgl-row">
+        <div class="tgl ${b.envInvert ? 'on' : ''}" data-b="${b.id}" data-f="envInvert"></div>
+        <span class="tgl-lbl">Invert</span>
+      </div>
+    </div>`;
+        }
+
+        function getTgtHTML() {
+            if (!sel.size) return '<span class="tg-empty">Click parameters to assign</span>';
+            return [...sel].map(id => {
+                const p = P.find(pp => pp.id === id);
+                return `<span class="tg">${p.name}<span class="tx" data-p="${id}">×</span></span>`;
+            }).join('');
+        }
+
+        function updateTgts() {
+            blocks.forEach(b => {
+                const box = document.getElementById(`tgt-${b.id}`);
+                if (box) box.innerHTML = getTgtHTML();
+            });
+            wireTgtX();
+        }
+
+        function wireTgtX() {
+            document.querySelectorAll('.tx').forEach(x => {
+                x.onclick = e => { e.stopPropagation(); sel.delete(x.dataset.p); renderGrid(); updateTgts(); };
+            });
+        }
+
+        function wireBlocks() {
+            // Head click
+            document.querySelectorAll('.bhead').forEach(h => {
+                h.onclick = e => {
+                    if (e.target.classList.contains('bclose')) return;
+                    const id = +h.dataset.id;
+                    const b = blocks.find(bb => bb.id === id);
+                    if (actId === id) { b.expanded = !b.expanded; }
+                    else { blocks.forEach(bb => bb.expanded = false); b.expanded = true; actId = id; }
+                    renderBlocks();
+                };
+            });
+
+            // Close
+            document.querySelectorAll('.bclose').forEach(btn => {
+                btn.onclick = e => {
+                    e.stopPropagation();
+                    const id = +btn.dataset.id;
+                    blocks = blocks.filter(b => b.id !== id);
+                    if (actId === id) actId = blocks.length ? blocks[0].id : null;
+                    renderBlocks(); updStatus();
+                };
+            });
+
+            // Seg controls
+            document.querySelectorAll('.seg').forEach(seg => {
+                seg.querySelectorAll('button').forEach(btn => {
+                    btn.onclick = () => {
+                        const bId = +seg.dataset.b, f = seg.dataset.f, v = btn.dataset.v;
+                        const b = blocks.find(bb => bb.id === bId);
+                        b[f] = v;
+                        renderBlocks();
+                    };
+                });
+            });
+
+            // Toggles
+            document.querySelectorAll('.tgl').forEach(t => {
+                t.onclick = () => {
+                    const bId = +t.dataset.b, f = t.dataset.f;
+                    const b = blocks.find(bb => bb.id === bId);
+                    b[f] = !b[f];
+                    renderBlocks();
+                };
+            });
+
+            // Selects
+            document.querySelectorAll('.sub-sel').forEach(s => {
+                s.onchange = () => {
+                    const bId = +s.dataset.b, f = s.dataset.f;
+                    const b = blocks.find(bb => bb.id === bId);
+                    b[f] = s.value;
+                    renderBlocks();
+                };
+            });
+
+            // All range sliders in blocks
+            document.querySelectorAll('.bbody input[type="range"]').forEach(sl => {
+                if (!sl.dataset.b) return;
+                sl.oninput = () => {
+                    const bId = +sl.dataset.b, f = sl.dataset.f;
+                    const b = blocks.find(bb => bb.id === bId);
+                    const val = parseFloat(sl.value);
+                    b[f] = val;
+                    // Update adjacent value display
+                    const row = sl.closest('.sl-row, .sub-row');
+                    if (row) {
+                        const vEl = row.querySelector('.sl-val, .sub-val');
+                        if (vEl) {
+                            if (f === 'threshold') vEl.textContent = val + ' dB';
+                            else if (f === 'glideMs') vEl.textContent = val + 'ms';
+                            else if (f === 'envAtk' || f === 'envRel') vEl.textContent = val + 'ms';
+                            else if (f === 'midiNote') {
+                                vEl.textContent = val;
+                                const nd = row.querySelector('.note-disp');
+                                if (nd) nd.textContent = mn(val);
+                            }
+                            else vEl.textContent = val + '%';
+                        }
+                    }
+                };
+            });
+
+            // Number inputs
+            document.querySelectorAll('.sub-input').forEach(inp => {
+                if (!inp.dataset.b) return;
+                inp.onchange = () => {
+                    const bId = +inp.dataset.b, f = inp.dataset.f;
+                    const b = blocks.find(bb => bb.id === bId);
+                    b[f] = Math.max(0, Math.min(128, parseInt(inp.value) || 0));
+                };
+            });
+
+            // Fire
+            document.querySelectorAll('.fire').forEach(btn => {
+                btn.onclick = () => {
+                    btn.classList.add('flash');
+                    setTimeout(() => btn.classList.remove('flash'), 250);
+                    randomize(+btn.dataset.b);
+                    flashDot('midiD');
+                };
+            });
+
+            wireTgtX();
+        }
+
+        // ════════════════════════════════════════════════
+        // RANDOMIZATION
+        // ════════════════════════════════════════════════
+        function randomize(bId) {
+            const b = blocks.find(bb => bb.id === bId);
+            if (!b) return;
+            const mn = b.rMin / 100, mx = b.rMax / 100;
+            sel.forEach(id => {
+                const p = P.find(pp => pp.id === id);
+                if (!p || p.lk || p.alk) return;
+                let val = mn + Math.random() * (mx - mn);
+                if (b.quantize && b.qSteps > 1) {
+                    const step = 1 / b.qSteps;
+                    val = Math.round(val / step) * step;
+                }
+                p.v = Math.max(0, Math.min(1, val));
+            });
+            renderGrid();
+        }
+
+        // ════════════════════════════════════════════════
+        // ENVELOPE FOLLOWER SIMULATION
+        // ════════════════════════════════════════════════
+        // Simulates audio input with a repeating kick pattern
+        let simTime = 0;
+        function simEnvelope() {
+            simTime += 30;
+            // Simulate a kick every 500ms (120bpm)
+            const phase = (simTime % 500) / 500;
+            let rawEnv;
+            if (phase < 0.02) rawEnv = 1.0; // transient
+            else if (phase < 0.15) rawEnv = Math.exp(-(phase - 0.02) * 20); // fast decay
+            else rawEnv = Math.exp(-(phase - 0.15) * 3) * 0.1; // tail
+
+            blocks.forEach(b => {
+                if (b.mode !== 'envelope') return;
+                // Apply attack/release smoothing
+                const atkCoeff = Math.exp(-1 / (b.envAtk * 0.03));
+                const relCoeff = Math.exp(-1 / (b.envRel * 0.03));
+                const target = rawEnv * (b.envSens / 50);
+
+                if (target > envValue) envValue = envValue * atkCoeff + target * (1 - atkCoeff);
+                else envValue = envValue * relCoeff + target * (1 - relCoeff);
+
+                const clamped = Math.max(0, Math.min(1, envValue));
+                const mapped = b.envInvert ? (1 - clamped) : clamped;
+
+                // Update meter
+                const fill = document.getElementById(`envFill-${b.id}`);
+                const lbl = document.getElementById(`envLbl-${b.id}`);
+                if (fill) fill.style.height = (clamped * 100) + '%';
+                if (lbl) lbl.textContent = (clamped * 100).toFixed(0) + '%';
+
+                // Apply to selected params
+                const mn = b.rMin / 100, mx = b.rMax / 100;
+                sel.forEach(id => {
+                    const p = P.find(pp => pp.id === id);
+                    if (!p || p.lk || p.alk) return;
+                    p.v = mn + mapped * (mx - mn);
+                });
+
+                // Update env status dot
+                const dot = document.getElementById('envD');
+                if (dot) {
+                    dot.className = 'sd' + (clamped > 0.05 ? ' env' : '');
+                }
+            });
+
+            // Only re-render grid if envelope blocks exist and params are selected
+            const hasEnv = blocks.some(b => b.mode === 'envelope');
+            if (hasEnv && sel.size > 0) {
+                // Efficient: just update values, not full re-render
+                P.forEach(p => {
+                    const cell = document.querySelector(`[data-pid="${p.id}"]`);
+                    // We'll use a lightweight update via direct DOM
+                });
+                renderGrid(); // Full re-render for now (demo)
+            }
+
+            requestAnimationFrame(() => setTimeout(simEnvelope, 30));
+        }
+
+        // ════════════════════════════════════════════════
+        // HEADER
+        // ════════════════════════════════════════════════
+        document.getElementById('bypassBtn').onclick = function () { this.classList.toggle('on'); };
+        document.getElementById('mixSlider').oninput = function () {
+            document.getElementById('mixVal').textContent = this.value + '%';
+        };
+        document.getElementById('selAll').onclick = () => {
+            P.forEach(p => { if (!p.lk && !p.alk) sel.add(p.id); });
+            renderGrid(); updateTgts();
+        };
+        document.getElementById('clrSel').onclick = () => {
+            sel.clear(); renderGrid(); updateTgts();
+        };
+
+        function flashDot(id) {
+            const d = document.getElementById(id);
+            d.classList.add('on');
+            setTimeout(() => d.classList.remove('on'), 150);
+        }
+
+        function updStatus() {
+            document.getElementById('stP').textContent = P.length;
+            document.getElementById('stL').textContent = P.filter(p => p.lk || p.alk).length;
+            document.getElementById('stB').textContent = blocks.length;
+        }
+
+        // ════════════════════════════════════════════════
+        // INIT
+        // ════════════════════════════════════════════════
+        renderGrid();
+        addBlock('randomize');
+        simEnvelope();
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,150 @@
+/* Settings panel */
+.settings-wrap {
+    position: relative
+}
+
+.settings-btn {
+    background: var(--bg-cell);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text-secondary);
+    font-size: 15px;
+    padding: 3px 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px
+}
+
+.settings-btn:hover {
+    border-color: var(--border-focus);
+    color: var(--text-primary)
+}
+
+.settings-btn-label {
+    font-size: 10px;
+    font-family: var(--font-sans);
+    font-weight: 500;
+    letter-spacing: .3px
+}
+
+.settings-drop {
+    display: none;
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    padding: 10px 12px;
+    min-width: 220px;
+    z-index: 150;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, .5)
+}
+
+.settings-drop.vis {
+    display: block
+}
+
+.settings-section {
+    margin-bottom: 10px
+}
+
+.settings-section:last-child {
+    margin-bottom: 0
+}
+
+.settings-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .6px;
+    color: var(--text-muted);
+    margin-bottom: 6px
+}
+
+.theme-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 4px
+}
+
+.theme-card {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    background: var(--bg-cell);
+    border: 2px solid transparent;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: border-color 80ms;
+    position: relative
+}
+
+.theme-card:hover {
+    border-color: var(--border-focus)
+}
+
+.theme-card.active {
+    border-color: var(--accent)
+}
+
+.theme-default-badge {
+    position: absolute;
+    right: 4px;
+    top: 2px;
+    font-size: 10px;
+    color: var(--accent);
+    opacity: 0.85;
+    pointer-events: none;
+    line-height: 1
+}
+
+.theme-swatch {
+    display: flex;
+    gap: 2px;
+    flex-shrink: 0
+}
+
+.theme-swatch span {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    border: 1px solid rgba(0, 0, 0, .15)
+}
+
+.theme-name {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-primary)
+}
+
+.settings-row {
+    display: flex;
+    align-items: center;
+    gap: 6px
+}
+
+.settings-row label {
+    font-size: 10px;
+    color: var(--text-secondary);
+    min-width: 36px
+}
+
+.settings-row select {
+    flex: 1;
+    background: var(--bg-cell);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 11px;
+    padding: 4px 8px;
+    cursor: pointer;
+    outline: none
+}
+
+.settings-row select:hover {
+    border-color: var(--border-focus)
+}

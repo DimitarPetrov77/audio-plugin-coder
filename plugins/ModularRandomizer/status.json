@@ -1,0 +1,553 @@
+{
+    "plugin_name": "ModularRandomizer",
+    "version": "v0.5.0",
+    "current_phase": "code_complete",
+    "ui_framework": "webview",
+    "complexity_score": 9,
+    "created_at": "2026-02-24T10:19:00Z",
+    "last_modified": "2026-03-02T00:15:00Z",
+    "description": "Multi-plugin parameter randomizer VST3/Standalone. Hosts multiple VST3 plugins in series or parallel (bus-based routing), exposes all their parameters, and modulates them via configurable logic blocks (randomize, envelope follower, sample modulator, morph pad, shapes LFO, shapes range, lane automation). WebView2-based UI with real-time visualization, modulation arc display, 10 themes, granular undo/redo, visibility-culled rendering, async plugin loading, and hosted-plugin gesture detection.",
+    "build": {
+        "formats": [
+            "VST3",
+            "Standalone"
+        ],
+        "platform": "Windows",
+        "webview_backend": "WebView2",
+        "vst3_path": "build/plugins/ModularRandomizer/ModularRandomizer_artefacts/Release/VST3/ModularRandomizer.vst3",
+        "standalone_path": "build/plugins/ModularRandomizer/ModularRandomizer_artefacts/Release/Standalone/ModularRandomizer.exe",
+        "last_build": "2026-03-02T00:15:00Z",
+        "build_errors": 0,
+        "dependencies": [
+            "JUCE 8",
+            "CMake 3.22+",
+            "Visual Studio 2022",
+            "Microsoft WebView2 SDK"
+        ]
+    },
+    "architecture": {
+        "source_files": {
+            "PluginProcessor.cpp": "1370+ lines — Constructor, lifecycle, createParameterLayout, updateLogicBlocks (with paramTouched cleanup), state save/restore, sample modulator API, GestureListener registration, rebuildPluginSlots with safe listener removal, JUCE boilerplate",
+            "ProcessBlock.cpp": "1862 lines — processBlock (audio pipeline), SEH crash guard, logic block engine (all 7 block types incl. lane), glide processing, NaN sanitization, dry/wet mix, depth-zero skip for shapes_range",
+            "PluginHosting.cpp": "540+ lines — Plugin scan, findPluginDescription (thread-safe), instantiatePlugin (COM-safe), remove, param access, proxy parameter pool, DAW automation bridge, glide FIFO API",
+            "PluginProcessor.h": "820+ lines — All data structures (HostedPlugin, LogicBlock, GestureListener, ProxyParameter, readback FIFOs, crash event FIFO, pluginSlots[32] O(1) lookup, paramTouched atomic flags)",
+            "PluginEditor.cpp": "1300+ lines — WebView2 bridge, 20+ native functions, async plugin loading, 2-tier real-time polling with visibility culling, crash notification relay",
+            "PluginEditor.h": "130+ lines — Editor class with WebView, relays, attachments, expandedPluginIds, paramIdentCache, modulatedParamKeys",
+            "ParameterIDs.hpp": "Parameter ID string constants (MIX, BYPASS)"
+        },
+        "ui_modules": {
+            "index.html": "Main HTML shell with all panels and modals",
+            "js/state.js": "Global state variables and data structures",
+            "js/juce_bridge.js": "JUCE WebView native function bridge helpers",
+            "js/juce_integration.js": "JUCE relay/attachment integration for MIX and BYPASS",
+            "js/theme_system.js": "10 themes with comprehensive CSS variable system (100+ vars per theme), settings panel, dynamic slider styling",
+            "js/undo_system.js": "Granular undo/redo: single param (setParam), multi-param (applyParamBatch), full-state (applyParamBatch) entry types",
+            "js/plugin_rack.js": "Plugin card rendering, param display, knob SVGs, drag-to-assign, bulk select, loading feedback, visibility culling, scroll-based dirty tracking",
+            "js/logic_blocks.js": "Block card rendering, morph pad, shapes pad, wiring, all block UIs, batch randomize (applyParamBatch)",
+            "js/context_menus.js": "Right-click menus for params and plugins (lock/unlock, bypass, presets)",
+            "js/preset_system.js": "Per-plugin presets (batch IPC), global presets (batch IPC), search, type toggle, delete confirmation, dirty indicator",
+            "js/realtime.js": "RT data listener, envelope/sample/morph readback, auto-locate, crash toast, live BPM display, visibility-culled param refresh",
+            "js/controls.js": "Header controls, keyboard shortcuts, collapse/expand all, plugin loading state, themed toast notifications",
+            "js/persistence.js": "State save/restore to/from processor (survives editor close/reopen)"
+        },
+        "css_modules": [
+            "css/variables.css — 110+ CSS custom properties with defaults",
+            "css/base.css",
+            "css/header.css — Bus group/header/mute/solo styling with CSS variable theming",
+            "css/plugin_rack.css — Loading cards, preset flash, parameter rows (6-row fixed layout)",
+            "css/logic_blocks.css",
+            "css/dialogs.css",
+            "css/themes.css",
+            "css/overrides.css"
+        ]
+    },
+    "features": {
+        "plugin_hosting": {
+            "vst3_scanning": "Recursive filesystem scan of user-configured directories",
+            "plugin_loading": {
+                "async": "Two-phase async loading: disk scan on background thread, COM instantiation on message thread",
+                "findPluginDescription": "Phase 1 — thread-safe cache lookup + disk scan (no UI freeze)",
+                "instantiatePlugin": "Phase 2 — createPluginInstance + bus layout + prepareToPlay (message thread, COM-safe)",
+                "loadPlugin": "Convenience wrapper calling both phases in sequence (used by setStateInformation)",
+                "crash_protection": "try/catch around createPluginInstance and prepareToPlay"
+            },
+            "serial_processing": "Hosted plugins process audio in series (chain order)",
+            "parallel_processing": {
+                "routing_modes": [
+                    "Sequential",
+                    "Parallel"
+                ],
+                "bus_system": "Up to 8 parallel buses, plugins assigned to buses via UI badge",
+                "bus_ui": {
+                    "color_coding": "Per-theme bus color palettes (8 colors per theme), 10px color dot with glow",
+                    "header_strip": "Bus name, volume slider, mute/solo buttons, collapse chevron",
+                    "tint_system": "color-mix() based background tinting (8-12% group, 16-22% header) via --bus-tint CSS variable",
+                    "badge_dropdown": "Colored bus assignment dropdown on plugin cards with --bus-badge-text theming"
+                },
+                "equal_gain": "Output summed with 1/sqrt(N) equal-gain compensation per active bus",
+                "single_bus_optimization": "Falls back to sequential path when only 1 bus is active",
+                "zero_allocation": "8 pre-allocated bus buffers in prepareToPlay, atomic routing mode toggle",
+                "crash_rollback": "Uses reserved 8th buffer as scratch for crash rollback (no audio-thread allocation)"
+            },
+            "plugin_editor_windows": "Native floating editor windows for each hosted plugin",
+            "plugin_bypass": "Per-plugin bypass toggle",
+            "plugin_removal": "Clean unload with resource release",
+            "crash_protection": {
+                "seh_guard": "Windows Structured Exception Handling (__try/__except) catches access violations and stack overflows in processBlock",
+                "cpp_exception_guard": "try/catch(...) wraps all hosted plugin processBlock calls",
+                "nan_inf_sanitization": "Post-plugin output buffer scan replaces NaN/Inf with 0.0f",
+                "auto_bypass": "Crashed plugins are immediately bypassed, buffer rolled back to pre-crash state",
+                "crash_notification": "Lock-free FIFO relays crash events to UI as themed toast notifications with re-enable button",
+                "reset_crash": "Users can re-enable crashed plugins via UI button (re-prepares the plugin)"
+            }
+        },
+        "logic_blocks": {
+            "types": {
+                "randomize": "Discrete parameter randomization with range, quantize, glide. Batch IPC via applyParamBatch (1 call for N params)",
+                "envelope": "Continuous audio-reactive envelope follower (attack/release/sensitivity/invert)",
+                "sample": "Audio file modulator (WAV/AIFF/FLAC/MP3/OGG), loop/oneshot/pingpong modes, speed control, reverse, jump modes",
+                "morph_pad": "XY pad with up to 12 snapshots, IDW interpolation, manual/auto/trigger modes",
+                "shapes": "Geometric LFO with 11 shape types, depth/speed/spin controls, tracking modes",
+                "shapes_range": "Per-parameter variant of shapes with individual range controls per target"
+            },
+            "common_features": {
+                "targets": "Any block can target any combination of hosted plugin parameters",
+                "assign_mode": "Click block → click params to assign (Ctrl/Shift for multi-select, All/None bulk buttons)",
+                "colored_dots": "8-color palette for visual parameter-to-block mapping",
+                "enable_bypass": "Per-block enable/disable toggle",
+                "polarity": "Bipolar / Unipolar Up / Unipolar Down modes for relative modulation",
+                "clock_source": "Per-block choice of DAW tempo or internal tempo"
+            },
+            "trigger_types": [
+                "manual",
+                "tempo (beat divisions)",
+                "MIDI (any note / specific note / CC)",
+                "audio threshold (main or sidechain)"
+            ],
+            "beat_divisions": [
+                "4/1",
+                "2/1",
+                "1/1",
+                "1/2",
+                "1/2.",
+                "1/2T",
+                "1/4",
+                "1/4.",
+                "1/4T",
+                "1/8",
+                "1/8.",
+                "1/8T",
+                "1/16",
+                "1/16T",
+                "1/32",
+                "1/64"
+            ],
+            "range_modes": [
+                "absolute",
+                "relative"
+            ],
+            "movement_modes": [
+                "instant",
+                "glide (with configurable duration in ms)"
+            ]
+        },
+        "morph_pad": {
+            "modes": [
+                "manual (XY drag)",
+                "auto (algorithmic exploration)",
+                "trigger (MIDI/tempo/audio-driven stepping)"
+            ],
+            "auto_explore_modes": [
+                "wander (Perlin noise)",
+                "bounce (angle-based)",
+                "shapes (geometric LFO)",
+                "orbit (around snapshots)",
+                "path (sequential segment travel)"
+            ],
+            "lfo_shapes": [
+                "circle",
+                "figure8",
+                "sweepX",
+                "sweepY",
+                "pentagram",
+                "hexagram",
+                "rose4",
+                "lissajous",
+                "spiral"
+            ],
+            "snapshot_features": [
+                "12 sector positions (clock-face)",
+                "capture/restore param values",
+                "snapshot library (load from presets)",
+                "snap radius control (IDW falloff)"
+            ],
+            "tempo_sync": "BPM-synced speed with configurable beat divisions (8 bars down to 1/64)",
+            "jitter": "Random perturbation amount (0-100%)",
+            "glide": "Smooth interpolation between positions (configurable ms)"
+        },
+        "shapes_block": {
+            "shape_types": [
+                "circle",
+                "figure8",
+                "sweepX",
+                "sweepY",
+                "pentagram",
+                "hexagram",
+                "rose4",
+                "lissajous",
+                "spiral"
+            ],
+            "tracking_modes": [
+                "horizontal (X projection)",
+                "vertical (Y projection)",
+                "distance (radius from center)"
+            ],
+            "controls": [
+                "size (shape radius)",
+                "spin (rotation speed, CW/CCW)",
+                "speed (dot velocity)",
+                "depth (modulation amount)"
+            ],
+            "tempo_sync": "BPM-synced speed with beat divisions",
+            "trigger_mode": "Free-running or MIDI-triggered phase reset",
+            "per_param_ranges": "shapes_range mode: individual depth per target parameter with anchor positions",
+            "modulation_arc": "Real-time fill arc visualization on knobs showing current modulation position, driven by computeModCurrent() with unified single-path rendering"
+        },
+        "lane_block": {
+            "description": "Per-parameter automation lanes with drawable envelope curves",
+            "features": [
+                "Multi-param lanes with independent envelopes",
+                "Draw/erase/line tools with configurable grid",
+                "Forward/reverse/pingpong play modes",
+                "Smooth/step/ramp interpolation",
+                "Per-lane depth, slew, warp, phase controls",
+                "Loop length with beat-synced or free-run timing",
+                "Per-lane mute and collapse"
+            ]
+        },
+        "parameter_management": {
+            "parameter_locking": "Lock/unlock individual params (locked params excluded from randomization and assignment)",
+            "auto_locate": "Scroll-to and flash parameters touched in hosted plugin's own editor",
+            "self_write_filtering": "Logic blocks, glides, DAW automation, and JS calls are excluded from auto-locate detection",
+            "param_touch_tracking": "Suspend modulation while user is grabbing a parameter via UI knob, hosted plugin gesture listener, or DAW automation (3-layer touch detection)",
+            "gesture_listeners": "Per-plugin GestureListener structs detect hosted plugin UI interactions via JUCE's AudioProcessorParameter::Listener, setting paramTouched atomics for conflict-free modulation suspension",
+            "proxy_parameter_pool": "256-slot pool exposing hosted plugin params to DAW automation with dynamic names",
+            "o1_lookup": "pluginSlots[32] array for O(1) parameter access by plugin ID (replacing O(N) linear scans)"
+        },
+        "preset_system": {
+            "per_plugin_presets": "Save/load parameter snapshots per hosted plugin with search and type toggle. Uses applyParamBatch for loading.",
+            "per_plugin_snapshots": "Save/load snapshots (lighter-weight, for morph pad)",
+            "snapshot_library": "Browse and load presets/snapshots from any plugin into morph pad",
+            "global_presets": "Save/load entire session with dirty indicator, nav arrows, search. Uses applyParamBatch for param restore.",
+            "delete_confirmation": "Two-step delete confirmation for all preset types",
+            "save_feedback": "Visual flash confirmation on successful save (themed via --preset-flash-color/--preset-flash-glow)"
+        },
+        "performance": {
+            "visibility_culling_js": {
+                "description": "refreshParamDisplay pre-computes visible parameter IDs by walking expanded card DOM children against scroll bounds",
+                "collapsed_cost": "Zero — collapsed cards contribute no DOM queries",
+                "scroll_debounce": "60ms debounce with dirtyPluginParams + requestAnimationFrame"
+            },
+            "visibility_culling_cpp": {
+                "description": "Tier 1 (60Hz) and Tier 2 (6Hz) polling skip plugins not in expandedPluginIds set",
+                "resync_on_expand": "lastParamValues cleared when plugin expands → forces full value resync",
+                "cache_rebuild": "paramIdentCache rebuild (every 1s) also skips collapsed plugins"
+            },
+            "batch_ipc": {
+                "applyParamBatch": "Single IPC call for N parameter changes (JSON array of {p, i, v})",
+                "used_by": [
+                    "randomize()",
+                    "performUndo() multiParam",
+                    "performRedo() multiParam",
+                    "applyFullSnapshot()",
+                    "preset load (per-plugin)",
+                    "preset load (global)"
+                ]
+            },
+            "o1_param_lookup": "pluginSlots[32] array replaces O(N) linear scans in getParamValueFast, getParamDisplayTextFast, glide pool, randomize",
+            "persistent_rng": "static juce::Random messageThreadRng (no identical sequences on rapid fire)"
+        },
+        "ui_system": {
+            "themes": {
+                "count": 10,
+                "list": [
+                    "Earthy (warm dark)",
+                    "DAW Teal (dark teal/cyan)",
+                    "Grey (neutral mid-tone, light variant)",
+                    "Light (bright Ableton-style)",
+                    "Grey (clinical, second variant)",
+                    "Medical Vintage (phosphor chartreuse)",
+                    "Slate Studio (deep purple-gray)",
+                    "Vintage Console (warm amber)",
+                    "Win98 (retro Windows classic)",
+                    "Warm Tape (analog mahogany/VU yellow)"
+                ],
+                "variable_categories": [
+                    "Background layers (app/panel/cell/hover/inset)",
+                    "Border (normal/strong/focus)",
+                    "Text (primary/secondary/muted/input)",
+                    "Accent (base/hover/light/border)",
+                    "Mode colors (rand/env/sample/morph/shapes)",
+                    "Knob (track/value/dot) + per-mode variants",
+                    "Preset/plugin headers (bg/border/text)",
+                    "Status indicator backgrounds (per-mode)",
+                    "Fire button (text/active-bg)",
+                    "Arc/snap ring colors + opacity",
+                    "Slider/bar (track/thumb/fill)",
+                    "Card buttons (bg/border/text/hover)",
+                    "Lane/automation (color/grid/label/playhead/active)",
+                    "Scrollbar (thumb/track)",
+                    "Bus (mute-bg/mute-text/solo-bg/solo-text/group-tint/header-tint/badge-text)",
+                    "Toast notifications (success/error/info bg+border, text)",
+                    "Preset flash (color/glow)"
+                ]
+            },
+            "settings_panel": "Dropdown with theme picker grid, UI scale slider, auto-locate toggle, internal tempo BPM",
+            "ui_scale": "Adjustable from 0.25x to 3x via settings dropdown",
+            "real_time_visualization": {
+                "envelope_levels": "Per-block envelope follower level bars (from C++ at 60Hz)",
+                "sample_playheads": "Per-block waveform playhead position",
+                "morph_playheads": "Per-block XY dot position synced from C++ auto modes",
+                "shape_dots": "Per-block shape dot position + SVG rotation synced from C++",
+                "shape_readout_lines": "Visual tracking indicator (horizontal/vertical line or distance circle)",
+                "trigger_flash": "Visual flash on MIDI/tempo/audio triggers",
+                "param_knob_svgs": "Real-time SVG arc knobs with range arc overlay (visibility-culled)",
+                "param_value_text": "Real-time parameter display text from plugin getText() (visibility-culled)",
+                "rms_levels": "Main and sidechain audio RMS for UI"
+            },
+            "plugin_rack_layout": {
+                "param_rows": "Exactly 6 rows visible per plugin card (36px row height, 216px max-height)",
+                "scroll_culling": "Only visible rows within scroll viewport are updated"
+            },
+            "drag_and_drop": "Drag params onto blocks, drag blocks to reorder",
+            "context_menus": "Right-click params (lock/unlock/assign) and plugins (bypass/open editor/presets/remove)",
+            "keyboard_shortcuts": {
+                "ctrl_z": "Undo (works globally, even in inputs)",
+                "ctrl_shift_z": "Redo",
+                "ctrl_y": "Redo (alternative)",
+                "ctrl_s": "Quick-save global preset",
+                "escape": "Close modals / exit assign mode / clear selection",
+                "space": "Trigger active randomizer block",
+                "delete": "Remove selected params from active block",
+                "ctrl_a": "Select all unlocked params (in assign mode)",
+                "r": "Apply range to selected params (shapes_range)"
+            },
+            "undo_redo": {
+                "type": "Granular 3-tier system with batch IPC",
+                "param_undo": "Single knob change → setParam (1 IPC call)",
+                "multi_param_undo": "Randomize/preset load → applyParamBatch (1 IPC call for N params)",
+                "full_state_undo": "Structural changes → applyParamBatch for params + block/plugin restore"
+            },
+            "live_bpm": "Status bar shows actual DAW BPM at ~4Hz refresh",
+            "plugin_loading_feedback": {
+                "loading_card": "Placeholder card with pulse animation and progress bar",
+                "loading_dots": "Animated dots text indicator",
+                "double_click_guard": "pluginLoading flag prevents double-clicks",
+                "async_loading": "Background thread scan → message thread instantiate (UI stays responsive)"
+            },
+            "toast_notifications": {
+                "types": [
+                    "success (green)",
+                    "error (red)",
+                    "info (blue)"
+                ],
+                "theming": "Colors driven by CSS variables (--toast-success-bg/border, etc.)",
+                "animation": "Slide-in/slide-out with auto-dismiss"
+            },
+            "preset_flash": "Border glow animation on preset load, themed via --preset-flash-color/--preset-flash-glow",
+            "collapse_expand_all": "Buttons to collapse/expand all plugin cards at once",
+            "crash_toast": "Red slide-in notification when hosted plugin crashes, with re-enable button"
+        },
+        "audio_engine": {
+            "dry_wet_mix": "0-100% mix control with per-sample crossfade",
+            "global_bypass": "Full plugin bypass (audio passthrough)",
+            "sidechain_input": "Optional sidechain bus for audio-triggered blocks",
+            "midi_input": "Full MIDI note and CC support with channel filtering",
+            "glide_engine": "Lock-free FIFO (512 slots) for smooth per-buffer parameter interpolation",
+            "internal_tempo": "Independent BPM clock (per-block selectable: DAW or internal)",
+            "sample_accurate_triggers": "Tempo-synced triggers use PPQ position for beat-accurate firing",
+            "audio_thread_safety": {
+                "mutex_pattern": "try_to_lock in processBlock prevents priority inversion",
+                "zombie_modulation_fix": "Enum comparison (BlockMode::Shapes) instead of string comparison for mode checks",
+                "persistent_rng": "static Random in randomizeParams, member Random in processor for audio thread"
+            }
+        },
+        "state_persistence": {
+            "processor_state": "Saves/restores all hosted plugins (paths + param values) and UI state in DAW project",
+            "ui_state": "Full JSON serialization of blocks, mappings, locks, theme, scale — survives editor close/reopen",
+            "plugin_id_patching": "Restored plugin IDs match saved IDs to preserve block target references",
+            "null_safe_restore": "All numeric fields use != null checks to prevent data loss when user value is 0 (fixes 15+ silent restore bugs from || operator)"
+        }
+    },
+    "native_functions": [
+        "scanPlugins(scanPaths) → ScannedPlugin[]",
+        "loadPlugin(pluginPath) → { id, name, params[] } (async: bg thread scan → msg thread instantiate)",
+        "removePlugin(pluginId)",
+        "setParam(pluginId, paramIndex, value)",
+        "applyParamBatch(jsonString) — [{p, i, v}, ...] in one IPC call",
+        "touchParam(pluginId, paramIndex)",
+        "untouchParam(pluginId, paramIndex)",
+        "getParams(pluginId) → params[]",
+        "fireRandomize(pluginId, paramIndices[], min, max) → updatedParams[]",
+        "updateBlocks(jsonString)",
+        "updateMorphPlayhead(blockId, x, y)",
+        "startGlide(pluginId, paramIndex, targetValue, durationMs)",
+        "openPluginEditor(pluginId)",
+        "browseSample(blockId) → { name, path, waveform[] }",
+        "setPluginBypass(pluginId, bypass)",
+        "resetPluginCrash(pluginId)",
+        "setExpandedPlugins(pluginIdsJson) — controls C++ visibility culling",
+        "savePluginPreset(pluginName, presetName, jsonData)",
+        "getPluginPresets(pluginName) → presetNames[]",
+        "deletePluginPreset(pluginName, presetName)",
+        "loadPluginPreset(pluginName, presetName) → jsonData",
+        "saveGlobalPreset(presetName, jsonData)",
+        "getGlobalPresets() → presetNames[]",
+        "loadGlobalPreset(presetName) → jsonData",
+        "deleteGlobalPreset(presetName)",
+        "setEditorScale(scale)"
+    ],
+    "rt_events": [
+        "__rt_data__ → { rms, scRms, bpm, playing, ppq, midi[], envLevels[], trigFired[], sampleHeads[], morphHeads[], params[], touchedParam }",
+        "__plugin_crashed__ → { pluginId, pluginName, reason }"
+    ],
+    "phase_history": [
+        {
+            "phase": "ideation_complete",
+            "completed_at": "2026-02-24T10:19:00Z"
+        },
+        {
+            "phase": "plan_complete",
+            "completed_at": "2026-02-24T10:20:55Z",
+            "framework_selected": "webview"
+        },
+        {
+            "phase": "design_complete",
+            "completed_at": "2026-02-24T15:27:00Z",
+            "design_version": "v5",
+            "notes": "Multi-plugin support with collapsible, drag-reorderable plugin cards. Plugin Browser modal with search, category filtering. Relative randomization mode. Persistent block colors. Scoped parameter IDs."
+        },
+        {
+            "phase": "code_complete",
+            "completed_at": "2026-02-24T18:38:00Z",
+            "notes": "Full C++/WebView2 implementation. VST3 + Standalone build successful."
+        },
+        {
+            "phase": "post_v1_features",
+            "completed_at": "2026-02-25T14:34:00Z",
+            "notes": "Polarity control (bipolar/unipolar up/down), auto-locate with self-write filtering, per-plugin bypass."
+        },
+        {
+            "phase": "morph_pad_implementation",
+            "completed_at": "2026-02-25T20:25:00Z",
+            "notes": "Morph Pad logic block: XY pad, snapshots, IDW interpolation, manual/auto/trigger modes, 5 explore modes (wander/bounce/shapes/orbit/path), tempo sync, snap radius, snapshot library."
+        },
+        {
+            "phase": "tempo_sync_and_shapes",
+            "completed_at": "2026-02-27T03:25:00Z",
+            "notes": "Internal tempo control, per-block clock source (DAW/internal), Shapes block and Shapes Range block with 11 geometric shapes, tracking modes, spin, per-param ranges."
+        },
+        {
+            "phase": "debugging_and_bug_fixes",
+            "completed_at": "2026-02-27T16:28:00Z",
+            "notes": "Static analysis pass: normalization fixes, SVG rendering fixes, scope issues, dead code removal."
+        },
+        {
+            "phase": "crash_protection",
+            "completed_at": "2026-02-27T17:38:00Z",
+            "notes": "SEH crash guard (Windows), C++ exception guard, NaN/Inf output sanitization, auto-bypass with UI toast notification, safe plugin loading, plugin crash reset."
+        },
+        {
+            "phase": "ux_improvements",
+            "completed_at": "2026-02-28T04:19:00Z",
+            "notes": "Preset UX overhaul (search, nav arrows, dirty indicator, delete confirmation, save feedback, type toggle). Granular undo/redo system. Keyboard shortcuts. Live BPM display. Plugin loading feedback. Collapse/expand all. Parallel plugin routing with bus-based processing."
+        },
+        {
+            "phase": "theme_system_completion",
+            "completed_at": "2026-02-28T18:27:00Z",
+            "notes": "CSS variable audit: all missing defaults added to variables.css. All 10 themes verified for complete coverage. Added Slate Studio, Vintage Console, Win98, Warm Tape themes."
+        },
+        {
+            "phase": "audio_thread_refactor",
+            "completed_at": "2026-03-01T02:01:00Z",
+            "notes": "Lock-free audio thread: pluginSlots[32] O(1) lookup, persistent RNG, zombie modulation fix (enum comparison), batch IPC for randomize."
+        },
+        {
+            "phase": "performance_optimization",
+            "completed_at": "2026-03-01T15:10:00Z",
+            "notes": "Two-layer visibility culling (JS DOM skip + C++ polling skip for collapsed plugins). Tier 2 getText fix (only calls getText on changed params). Batch IPC for undo/redo/preset load (applyParamBatch). Cache rebuild skips collapsed plugins. Async plugin loading (background thread scan + message thread instantiate). Bus UI overhaul (thicker borders, stronger tints, bigger dots, --bus-badge-text). Toast/preset flash theming (10 new CSS variables across all themes)."
+        },
+        {
+            "phase": "modulation_arc_and_knob_vis",
+            "completed_at": "2026-03-01T18:32:00Z",
+            "notes": "Modulation arc visualization on parameter knobs: real-time fill arc showing current modulation position. computeModCurrent() unified rendering path. getModArcInfo() range/base/color extraction from blocks."
+        },
+        {
+            "phase": "modulation_touch_and_persistence_fixes",
+            "completed_at": "2026-03-02T00:15:00Z",
+            "notes": "Hosted plugin UI gesture detection (GestureListener per-plugin with safe removeListener before destroy). Fixed crash from dangling listener pointers. Shapes_range depth-zero skip prevents blocking unmodulated params. Targeted paramTouched cleanup on block config changes (mode/target changes only). requestAnimationFrame for drag arc (replaces setInterval). Dirty-marking modulated params from morphHeads for continuous fill arc updates. State persistence audit: fixed 15+ data-loss bugs from || operator treating 0 as falsy (midiNote, threshold, morphSpeed, glideMs, etc.) in persistence.js and preset_system.js."
+        }
+    ],
+    "validation": {
+        "creative_brief_exists": true,
+        "parameter_spec_exists": true,
+        "architecture_defined": true,
+        "ui_framework_selected": true,
+        "design_complete": true,
+        "code_complete": true,
+        "build_completed": true,
+        "build_timestamp": "2026-03-02T00:15:00Z",
+        "build_errors": 0,
+        "tests_passed": false,
+        "ship_ready": false
+    },
+    "framework_selection": {
+        "decision": "webview",
+        "rationale": "Multi-plugin hosting with dynamic parameter lists, plugin browser modal, drag-and-drop, morph pad XY visualization, shapes SVG animation, and real-time envelope display best served by HTML/CSS/JS via WebView2.",
+        "implementation_strategy": "phased"
+    },
+    "design": {
+        "current_version": "v5",
+        "style": "Theme-switchable (10 themes), two-panel rack layout",
+        "themes": [
+            "Earthy",
+            "DAW Teal",
+            "Grey",
+            "Light",
+            "Grey (clinical)",
+            "Medical Vintage",
+            "Slate Studio",
+            "Vintage Console",
+            "Win98",
+            "Warm Tape"
+        ],
+        "files": {
+            "ui_spec": "Design/v5-ui-spec.md",
+            "preview": "Design/v5-test.html",
+            "morph_plan": "Design/morph-pad-plan.md"
+        }
+    },
+    "file_sizes": {
+        "PluginProcessor.cpp": "57KB (1370+ lines)",
+        "ProcessBlock.cpp": "100KB (1862 lines)",
+        "PluginHosting.cpp": "19KB (540+ lines)",
+        "PluginProcessor.h": "36KB (820+ lines)",
+        "PluginEditor.cpp": "60KB (1300+ lines)",
+        "PluginEditor.h": "5KB (130+ lines)",
+        "logic_blocks.js": "161KB (2807 lines)",
+        "plugin_rack.js": "63KB (1192 lines)",
+        "preset_system.js": "51KB (1038 lines)",
+        "theme_system.js": "57KB (1108 lines)",
+        "realtime.js": "23KB (457 lines)",
+        "undo_system.js": "6.5KB (179 lines)",
+        "persistence.js": "21KB (391 lines)",
+        "controls.js": "15KB (344 lines)",
+        "context_menus.js": "9.7KB (203 lines)",
+        "total_source_estimate": "~710KB across 20 source files"
+    },
+    "error_recovery": {
+        "last_backup": null,
+        "rollback_available": false,
+        "error_log": []
+    }
+}

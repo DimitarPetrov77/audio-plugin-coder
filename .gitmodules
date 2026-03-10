@@ -7,6 +7,3 @@
 [submodule "_tools/JUCE"]
 	path = _tools/JUCE
 	url = https://github.com/juce-framework/JUCE
-[submodule "plugins/ModularRandomizer"]
-	path = plugins/ModularRandomizer
-	url = https://github.com/DimitarPetrov77/ModularRandomizer.git

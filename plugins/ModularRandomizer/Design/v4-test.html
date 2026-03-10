@@ -1,0 +1,1530 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Modular Randomizer v4</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+        :root {
+            --bg-app: #F0F0F0;
+            --bg-panel: #FAFAFA;
+            --bg-cell: #FFF;
+            --bg-cell-hover: #F5F5F5;
+            --bg-inset: #E8E8E8;
+            --border: #DEDEDE;
+            --border-strong: #C0C0C0;
+            --border-focus: #999;
+            --text-primary: #333;
+            --text-secondary: #777;
+            --text-muted: #AAA;
+            --text-inverse: #FFF;
+            --accent: #FF5500;
+            --accent-hover: #E64D00;
+            --accent-light: #FFF0E6;
+            --accent-border: #FFB380;
+            --locked-bg: #FFF0F0;
+            --locked-border: #FFCCCC;
+            --locked-icon: #CC3333;
+            --auto-lock-bg: #FFF5E6;
+            --auto-lock-border: #FFD699;
+            --midi-dot: #33CC33;
+            --env-color: #22AAFF;
+            --env-light: #E6F5FF;
+            --font-sans: 'Inter', system-ui, sans-serif;
+            --font-mono: 'JetBrains Mono', 'Consolas', monospace;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box
+        }
+
+        body {
+            background: var(--bg-app);
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+            font-size: 11px;
+            width: 960px;
+            height: 640px;
+            overflow: hidden;
+            user-select: none
+        }
+
+        .app {
+            display: flex;
+            flex-direction: column;
+            height: 100%
+        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            height: 38px;
+            padding: 0 12px;
+            background: var(--bg-panel);
+            border-bottom: 1px solid var(--border-strong);
+            gap: 10px;
+            flex-shrink: 0
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 6px
+        }
+
+        .brand-mark {
+            width: 10px;
+            height: 10px;
+            background: var(--accent);
+            border-radius: 2px
+        }
+
+        .brand-name {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 1px
+        }
+
+        .h-div {
+            width: 1px;
+            height: 18px;
+            background: var(--border)
+        }
+
+        .h-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-left: auto
+        }
+
+        .sm-btn {
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            font-family: var(--font-sans);
+            font-size: 9px;
+            padding: 3px 8px;
+            border-radius: 3px;
+            cursor: pointer
+        }
+
+        .sm-btn:hover {
+            border-color: var(--border-focus);
+            color: var(--text-primary)
+        }
+
+        .bypass {
+            width: 24px;
+            height: 22px;
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            color: var(--text-muted);
+            font-size: 11px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center
+        }
+
+        .bypass.on {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white
+        }
+
+        .mix-area {
+            display: flex;
+            align-items: center;
+            gap: 5px
+        }
+
+        .mix-area label {
+            font-size: 9px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: .5px
+        }
+
+        .mix-area .mix-val {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--text-secondary);
+            min-width: 26px
+        }
+
+        .mix-area input[type="range"] {
+            width: 60px
+        }
+
+        .rack {
+            flex: 1;
+            display: flex;
+            min-height: 0;
+            overflow: hidden
+        }
+
+        .plugin-block {
+            width: 240px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            background: var(--bg-panel);
+            border-right: 1px solid var(--border-strong)
+        }
+
+        .pb-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 10px;
+            background: var(--bg-cell);
+            border-bottom: 1px solid var(--border-strong)
+        }
+
+        .pb-title {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted)
+        }
+
+        .pb-load {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 10px;
+            border-bottom: 1px solid var(--border)
+        }
+
+        .pb-load select {
+            flex: 1;
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+            font-size: 11px;
+            padding: 3px 20px 3px 6px;
+            border-radius: 3px;
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23999'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 6px center
+        }
+
+        .pb-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-cell)
+        }
+
+        .pb-toolbar .sm-btn {
+            font-size: 8px;
+            padding: 2px 6px
+        }
+
+        .pb-count {
+            font-family: var(--font-mono);
+            font-size: 9px;
+            color: var(--text-muted);
+            margin-left: auto
+        }
+
+        .param-scroll {
+            flex: 1;
+            overflow-y: auto;
+            padding: 4px
+        }
+
+        .param-scroll::-webkit-scrollbar {
+            width: 4px
+        }
+
+        .param-scroll::-webkit-scrollbar-thumb {
+            background: var(--border-strong);
+            border-radius: 2px
+        }
+
+        .pg-group {
+            margin-bottom: 2px
+        }
+
+        .pg-group-head {
+            font-size: 9px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: .6px;
+            color: var(--text-muted);
+            padding: 4px 6px 2px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px
+        }
+
+        .pg-group-head .chev {
+            font-size: 7px;
+            transition: transform 120ms
+        }
+
+        .pg-group-head .chev.open {
+            transform: rotate(90deg)
+        }
+
+        .pg-items {
+            display: flex;
+            flex-direction: column;
+            gap: 1px
+        }
+
+        .pg-items.collapsed {
+            display: none
+        }
+
+        .pr {
+            display: flex;
+            align-items: center;
+            padding: 3px 6px;
+            border-radius: 2px;
+            cursor: pointer;
+            gap: 4px;
+            min-height: 22px;
+            border: 1px solid transparent
+        }
+
+        .pr:hover {
+            background: var(--bg-cell-hover)
+        }
+
+        .pr.locked {
+            background: var(--locked-bg);
+            border-color: var(--locked-border);
+            cursor: default;
+            opacity: .6
+        }
+
+        .pr.locked:hover {
+            background: var(--locked-bg)
+        }
+
+        .pr-name {
+            font-size: 10px;
+            font-weight: 500;
+            flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis
+        }
+
+        .pr-val {
+            font-family: var(--font-mono);
+            font-size: 9px;
+            color: var(--text-secondary);
+            min-width: 28px;
+            text-align: right
+        }
+
+        .pr-bar {
+            width: 30px;
+            height: 3px;
+            background: var(--bg-inset);
+            border-radius: 1px;
+            overflow: hidden
+        }
+
+        .pr-bar-f {
+            height: 100%;
+            background: var(--border-strong);
+            border-radius: 1px
+        }
+
+        .pr-dots {
+            display: flex;
+            gap: 2px;
+            margin-left: 2px
+        }
+
+        .pr-dot {
+            width: 5px;
+            height: 5px;
+            border-radius: 50%
+        }
+
+        .pr-lock {
+            font-size: 7px
+        }
+
+        .logic-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0
+        }
+
+        .lp-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 4px 10px;
+            background: var(--bg-cell);
+            border-bottom: 1px solid var(--border-strong);
+            height: 28px
+        }
+
+        .lp-title {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted)
+        }
+
+        .lp-scroll {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-content: flex-start
+        }
+
+        .lp-scroll::-webkit-scrollbar {
+            width: 4px
+        }
+
+        .lp-scroll::-webkit-scrollbar-thumb {
+            background: var(--border-strong);
+            border-radius: 2px
+        }
+
+        .lcard {
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            width: calc(50% - 4px);
+            min-width: 320px;
+            flex-shrink: 0
+        }
+
+        .lcard.active {
+            border-left: 3px solid var(--accent)
+        }
+
+        .lcard.active.env-active {
+            border-left-color: var(--env-color)
+        }
+
+        .lhead {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 5px 8px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer
+        }
+
+        .lhead:hover {
+            background: var(--bg-cell-hover)
+        }
+
+        .ltitle {
+            font-size: 11px;
+            font-weight: 600
+        }
+
+        .lsum {
+            font-size: 9px;
+            color: var(--text-secondary);
+            margin-left: 6px
+        }
+
+        .lclose {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 13px;
+            cursor: pointer;
+            padding: 0
+        }
+
+        .lclose:hover {
+            color: var(--text-primary)
+        }
+
+        .lbody {
+            padding: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px
+        }
+
+        .lbody.hide {
+            display: none
+        }
+
+        .block-color {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 2px;
+            margin-right: 4px;
+            flex-shrink: 0
+        }
+
+        .blbl {
+            font-size: 9px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: .6px;
+            color: var(--text-muted)
+        }
+
+        .brow {
+            display: flex;
+            flex-direction: column;
+            gap: 3px
+        }
+
+        .seg {
+            display: flex;
+            background: var(--bg-inset);
+            border-radius: 3px;
+            overflow: hidden;
+            border: 1px solid var(--border)
+        }
+
+        .seg button {
+            flex: 1;
+            padding: 4px 2px;
+            background: none;
+            border: none;
+            border-right: 1px solid var(--border);
+            color: var(--text-muted);
+            font-family: var(--font-sans);
+            font-size: 10px;
+            font-weight: 500;
+            cursor: pointer
+        }
+
+        .seg button:last-child {
+            border-right: none
+        }
+
+        .seg button:hover {
+            color: var(--text-secondary);
+            background: var(--bg-cell-hover)
+        }
+
+        .seg button.on {
+            background: var(--accent);
+            color: white
+        }
+
+        .seg button.env-on {
+            background: var(--env-color);
+            color: white
+        }
+
+        .sub {
+            display: none;
+            padding-top: 4px
+        }
+
+        .sub.vis {
+            display: flex;
+            flex-direction: column;
+            gap: 4px
+        }
+
+        .sub-row {
+            display: flex;
+            align-items: center;
+            gap: 6px
+        }
+
+        .sub-lbl {
+            font-size: 9px;
+            color: var(--text-secondary);
+            min-width: 36px
+        }
+
+        .sub-sel {
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 10px;
+            padding: 2px 18px 2px 6px;
+            border-radius: 2px;
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23999'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 4px center
+        }
+
+        .sub-input {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--text-primary);
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            padding: 2px 4px;
+            width: 36px;
+            text-align: center
+        }
+
+        .sub-input:focus {
+            outline: none;
+            border-color: var(--accent)
+        }
+
+        .note-disp {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            font-weight: 500;
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            padding: 2px 6px;
+            min-width: 30px;
+            text-align: center
+        }
+
+        .tgl-row {
+            display: flex;
+            align-items: center;
+            gap: 6px
+        }
+
+        .tgl {
+            width: 26px;
+            height: 13px;
+            background: var(--bg-inset);
+            border: 1px solid var(--border);
+            border-radius: 7px;
+            cursor: pointer;
+            position: relative;
+            flex-shrink: 0
+        }
+
+        .tgl::after {
+            content: '';
+            position: absolute;
+            width: 9px;
+            height: 9px;
+            background: white;
+            border: 1px solid var(--border-strong);
+            border-radius: 50%;
+            top: 1px;
+            left: 1px;
+            transition: all 80ms
+        }
+
+        .tgl.on {
+            background: var(--accent);
+            border-color: var(--accent)
+        }
+
+        .tgl.on::after {
+            left: 14px;
+            border-color: var(--accent)
+        }
+
+        .tgl-lbl {
+            font-size: 9px;
+            color: var(--text-secondary)
+        }
+
+        .sl-row {
+            display: flex;
+            align-items: center;
+            gap: 5px
+        }
+
+        .sl-row input[type="range"] {
+            flex: 1
+        }
+
+        .sl-lbl {
+            font-size: 9px;
+            color: var(--text-secondary);
+            min-width: 30px
+        }
+
+        .sl-val {
+            font-family: var(--font-mono);
+            font-size: 9px;
+            color: var(--text-secondary);
+            min-width: 30px;
+            text-align: right
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            height: 14px;
+            background: transparent;
+            outline: none
+        }
+
+        input[type="range"]::-webkit-slider-runnable-track {
+            height: 3px;
+            background: var(--bg-inset);
+            border-radius: 2px
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 12px;
+            height: 12px;
+            background: white;
+            border: 2px solid var(--border-strong);
+            border-radius: 50%;
+            cursor: pointer;
+            margin-top: -4.5px;
+            transition: border-color 80ms
+        }
+
+        input[type="range"]::-webkit-slider-thumb:hover {
+            border-color: var(--accent)
+        }
+
+        input[type="range"]:active::-webkit-slider-thumb {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-light)
+        }
+
+        .tgt-box {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 2px;
+            min-height: 20px;
+            padding: 3px;
+            background: var(--bg-app);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            max-height: 44px;
+            overflow-y: auto
+        }
+
+        .tgt-box::-webkit-scrollbar {
+            width: 3px
+        }
+
+        .tgt-box::-webkit-scrollbar-thumb {
+            background: var(--border-strong);
+            border-radius: 2px
+        }
+
+        .tg {
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+            font-size: 8px;
+            font-weight: 500;
+            padding: 1px 5px;
+            border-radius: 2px
+        }
+
+        .tg .tx {
+            cursor: pointer;
+            opacity: .5;
+            font-size: 9px
+        }
+
+        .tg .tx:hover {
+            opacity: 1
+        }
+
+        .tg-empty {
+            font-size: 9px;
+            color: var(--text-muted);
+            padding: 1px 4px
+        }
+
+        .fire {
+            width: 100%;
+            height: 26px;
+            background: var(--accent);
+            border: none;
+            border-radius: 3px;
+            color: white;
+            font-family: var(--font-sans);
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            cursor: pointer
+        }
+
+        .fire:hover {
+            background: var(--accent-hover)
+        }
+
+        .fire:active {
+            transform: scale(.98)
+        }
+
+        .fire.flash {
+            animation: fl 250ms ease-out
+        }
+
+        @keyframes fl {
+            0% {
+                box-shadow: 0 0 12px var(--accent)
+            }
+
+            100% {
+                box-shadow: none
+            }
+        }
+
+        .env-meter {
+            height: 32px;
+            background: var(--bg-inset);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            position: relative;
+            overflow: hidden
+        }
+
+        .env-meter-fill {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(to top, var(--env-color), rgba(34, 170, 255, .3));
+            transition: height 30ms linear
+        }
+
+        .env-label {
+            position: absolute;
+            right: 4px;
+            top: 2px;
+            font-family: var(--font-mono);
+            font-size: 9px;
+            color: var(--text-secondary)
+        }
+
+        .env-active-dot {
+            display: inline-block;
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: var(--env-color);
+            margin-right: 3px;
+            animation: ep 1s ease-in-out infinite
+        }
+
+        @keyframes ep {
+
+            0%,
+            100% {
+                opacity: .4
+            }
+
+            50% {
+                opacity: 1
+            }
+        }
+
+        .add-wrap {
+            display: flex;
+            gap: 6px;
+            padding: 8px
+        }
+
+        .add-blk {
+            flex: 1;
+            height: 32px;
+            background: none;
+            border: 1px dashed var(--border);
+            border-radius: 4px;
+            color: var(--text-muted);
+            font-family: var(--font-sans);
+            font-size: 10px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center
+        }
+
+        .add-blk:hover {
+            border-color: var(--border-focus);
+            color: var(--text-secondary)
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            height: 20px;
+            padding: 0 12px;
+            background: var(--bg-panel);
+            border-top: 1px solid var(--border);
+            font-family: var(--font-mono);
+            font-size: 9px;
+            color: var(--text-muted);
+            gap: 14px;
+            flex-shrink: 0
+        }
+
+        .sd {
+            display: inline-block;
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            margin-right: 2px
+        }
+
+        .sd.on {
+            background: var(--midi-dot)
+        }
+
+        .sd.off {
+            background: var(--border-strong)
+        }
+
+        .sd.env {
+            background: var(--env-color)
+        }
+
+        .pr.assign-mode {
+            border: 1px dashed var(--border-focus)
+        }
+
+        .pr.assign-mode:hover {
+            border-color: var(--accent);
+            background: var(--accent-light)
+        }
+
+        .assign-banner {
+            display: none;
+            padding: 4px 10px;
+            background: var(--accent-light);
+            border-bottom: 1px solid var(--accent-border);
+            font-size: 10px;
+            color: var(--accent);
+            font-weight: 500;
+            text-align: center
+        }
+
+        .assign-banner.vis {
+            display: block
+        }
+
+        .ctx {
+            display: none;
+            position: fixed;
+            background: var(--bg-cell);
+            border: 1px solid var(--border-strong);
+            border-radius: 4px;
+            padding: 4px 0;
+            min-width: 120px;
+            z-index: 100;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, .1)
+        }
+
+        .ctx.vis {
+            display: block
+        }
+
+        .ctx-i {
+            padding: 4px 10px;
+            font-size: 10px;
+            cursor: pointer
+        }
+
+        .ctx-i:hover {
+            background: var(--accent-light)
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app">
+        <div class="header">
+            <div class="brand">
+                <div class="brand-mark"></div><span class="brand-name">MODULAR RANDOMIZER</span>
+            </div>
+            <div class="h-div"></div>
+            <div class="h-right">
+                <button class="bypass" id="bypassBtn">&#x23FB;</button>
+                <div class="mix-area">
+                    <label>Mix</label>
+                    <input type="range" id="mixSlider" min="0" max="100" value="100">
+                    <span class="mix-val" id="mixVal">100%</span>
+                </div>
+            </div>
+        </div>
+        <div class="rack">
+            <div class="plugin-block" id="pluginBlock">
+                <div class="pb-head"><span class="pb-title">Loaded Plugin</span></div>
+                <div class="pb-load">
+                    <select id="plugSel">
+                        <option value="">-- Select VST --</option>
+                        <option value="serum" selected>Serum</option>
+                        <option value="vital">Vital</option>
+                        <option value="diva">Diva</option>
+                    </select>
+                    <button class="sm-btn" id="openEditor">Editor</button>
+                </div>
+                <div class="pb-toolbar">
+                    <button class="sm-btn" id="selAllBtn">All</button>
+                    <button class="sm-btn" id="clrSelBtn">None</button>
+                    <span class="pb-count" id="paramCount">32 params</span>
+                </div>
+                <div class="assign-banner" id="assignBanner">Click params to assign to <span id="assignTarget"></span>
+                </div>
+                <div class="param-scroll" id="paramScroll"></div>
+            </div>
+            <div class="logic-panel">
+                <div class="lp-bar">
+                    <span class="lp-title">Logic Blocks</span>
+                    <span style="font-size:9px;color:var(--text-muted)" id="blockInfo">0 blocks</span>
+                </div>
+                <div class="lp-scroll" id="lpScroll"></div>
+                <div class="add-wrap">
+                    <button class="add-blk" id="addRnd">+ Randomizer</button>
+                    <button class="add-blk" id="addEnv" style="border-color:var(--env-color);color:var(--env-color)">+
+                        Envelope</button>
+                </div>
+            </div>
+        </div>
+        <div class="status">
+            <span><span class="sd on"></span><span id="stPlug">Serum</span></span>
+            <span><span id="stP">32</span> params</span>
+            <span><span id="stL">1</span> locked</span>
+            <span><span id="stB">0</span> blocks</span>
+            <span>120 BPM</span>
+            <span><span class="sd off" id="midiD"></span>MIDI</span>
+            <span><span class="sd off" id="envD"></span>ENV</span>
+        </div>
+    </div>
+    <div class="ctx" id="ctx">
+        <div class="ctx-i" id="cL">Lock</div>
+        <div class="ctx-i" id="cU">Unlock</div>
+    </div>
+    <script>
+        var BCOLORS = ['#FF5500', '#22AAFF', '#33CC33', '#CC33CC', '#CCAA00', '#CC5533', '#3388CC', '#88AA33'];
+        function bColor(idx) { return BCOLORS[idx % BCOLORS.length]; }
+
+        var GROUPS = {
+            'Oscillator 1': ['osc1_wave', 'osc1_semi', 'osc1_fine', 'osc1_lvl'],
+            'Oscillator 2': ['osc2_wave', 'osc2_semi', 'osc2_fine', 'osc2_lvl'],
+            'Filter': ['flt_cut', 'flt_res', 'flt_drv', 'flt_type'],
+            'Envelope 1': ['e1_a', 'e1_d', 'e1_s', 'e1_r'],
+            'Envelope 2': ['e2_a', 'e2_d', 'e2_s', 'e2_r'],
+            'LFO': ['lfo_rate', 'lfo_shape'],
+            'Effects': ['fx_rev', 'fx_dly', 'fx_chr', 'fx_dst'],
+            'Unison': ['uni_v', 'uni_d'],
+            'Macros': ['mac1', 'mac2'],
+            'Master': ['m_vol', 'm_pan']
+        };
+
+        var P = [
+            { id: 'osc1_wave', name: 'Wave', v: 0.25 }, { id: 'osc1_semi', name: 'Semi', v: 0.5 },
+            { id: 'osc1_fine', name: 'Fine', v: 0.5 }, { id: 'osc1_lvl', name: 'Level', v: 0.8 },
+            { id: 'osc2_wave', name: 'Wave', v: 0 }, { id: 'osc2_semi', name: 'Semi', v: 0.5 },
+            { id: 'osc2_fine', name: 'Fine', v: 0.5 }, { id: 'osc2_lvl', name: 'Level', v: 0.6 },
+            { id: 'flt_cut', name: 'Cutoff', v: 0.65 }, { id: 'flt_res', name: 'Resonance', v: 0.3 },
+            { id: 'flt_drv', name: 'Drive', v: 0.1 }, { id: 'flt_type', name: 'Type', v: 0 },
+            { id: 'e1_a', name: 'Attack', v: 0.05 }, { id: 'e1_d', name: 'Decay', v: 0.3 },
+            { id: 'e1_s', name: 'Sustain', v: 0.7 }, { id: 'e1_r', name: 'Release', v: 0.4 },
+            { id: 'e2_a', name: 'Attack', v: 0.1 }, { id: 'e2_d', name: 'Decay', v: 0.5 },
+            { id: 'e2_s', name: 'Sustain', v: 0.6 }, { id: 'e2_r', name: 'Release', v: 0.35 },
+            { id: 'lfo_rate', name: 'Rate', v: 0.5 }, { id: 'lfo_shape', name: 'Shape', v: 0 },
+            { id: 'fx_rev', name: 'Reverb', v: 0.2 }, { id: 'fx_dly', name: 'Delay', v: 0.15 },
+            { id: 'fx_chr', name: 'Chorus', v: 0 }, { id: 'fx_dst', name: 'Distortion', v: 0 },
+            { id: 'uni_v', name: 'Voices', v: 0.14 }, { id: 'uni_d', name: 'Detune', v: 0.3 },
+            { id: 'mac1', name: 'Macro 1', v: 0.5 }, { id: 'mac2', name: 'Macro 2', v: 0.5 },
+            { id: 'm_vol', name: 'Volume', v: 0.8, lk: true, alk: true }, { id: 'm_pan', name: 'Pan', v: 0.5 }
+        ];
+        P.forEach(function (p) { if (!p.lk) p.lk = false; if (!p.alk) p.alk = false; });
+
+        var PMap = {};
+        P.forEach(function (p) { PMap[p.id] = p; });
+
+        var blocks = [];
+        var bc = 0;
+        var actId = null;
+        var assignMode = null;
+        var ctxP = null;
+        var groupOpen = {};
+        Object.keys(GROUPS).forEach(function (g) { groupOpen[g] = true; });
+        var NN = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+        function midiName(n) { return NN[n % 12] + (Math.floor(n / 12) - 1); }
+        var envValue = 0;
+
+        function renderPluginBlock() {
+            var c = document.getElementById('paramScroll');
+            c.innerHTML = '';
+            var groupKeys = Object.keys(GROUPS);
+            for (var gi = 0; gi < groupKeys.length; gi++) {
+                var group = groupKeys[gi];
+                var ids = GROUPS[group];
+                var gDiv = document.createElement('div');
+                gDiv.className = 'pg-group';
+                var isOpen = groupOpen[group] !== false;
+                gDiv.innerHTML = '<div class="pg-group-head" data-g="' + group + '"><span class="chev ' + (isOpen ? 'open' : '') + '">&#9654;</span>' + group + '</div>';
+                var items = document.createElement('div');
+                items.className = 'pg-items' + (isOpen ? '' : ' collapsed');
+                for (var ii = 0; ii < ids.length; ii++) {
+                    var id = ids[ii];
+                    var p = PMap[id];
+                    if (!p) continue;
+                    var row = document.createElement('div');
+                    row.className = 'pr' + (p.lk ? ' locked' : '') + (assignMode ? ' assign-mode' : '');
+                    var dotsHtml = '';
+                    for (var bi = 0; bi < blocks.length; bi++) {
+                        if (blocks[bi].targets.has(id)) {
+                            dotsHtml += '<span class="pr-dot" style="background:' + bColor(bi) + '"></span>';
+                        }
+                    }
+                    row.innerHTML = '<span class="pr-name">' + p.name + '</span>' +
+                        '<div class="pr-dots">' + dotsHtml + '</div>' +
+                        '<span class="pr-val">' + (p.v * 100).toFixed(0) + '%</span>' +
+                        '<div class="pr-bar"><div class="pr-bar-f" style="width:' + (p.v * 100) + '%"></div></div>' +
+                        (p.lk ? '<span class="pr-lock">' + (p.alk ? '&#9888;' : '&#128274;') + '</span>' : '');
+                    (function (pid, pp) {
+                        row.onclick = function () {
+                            if (pp.lk) return;
+                            if (assignMode) {
+                                var b = null;
+                                for (var i = 0; i < blocks.length; i++) { if (blocks[i].id === assignMode) { b = blocks[i]; break; } }
+                                if (b) { if (b.targets.has(pid)) b.targets.delete(pid); else b.targets.add(pid); }
+                                renderPluginBlock();
+                                renderBlocks();
+                            }
+                        };
+                        row.oncontextmenu = function (e) { e.preventDefault(); ctxP = pp; showCtx(e.clientX, e.clientY, pp); };
+                    })(id, p);
+                    items.appendChild(row);
+                }
+                gDiv.appendChild(items);
+                c.appendChild(gDiv);
+            }
+            c.querySelectorAll('.pg-group-head').forEach(function (h) {
+                h.onclick = function () { groupOpen[h.dataset.g] = !groupOpen[h.dataset.g]; renderPluginBlock(); };
+            });
+            updCounts();
+        }
+
+        function showCtx(x, y, p) {
+            var m = document.getElementById('ctx');
+            m.style.left = Math.min(x, 900) + 'px';
+            m.style.top = Math.min(y, 580) + 'px';
+            m.classList.add('vis');
+            document.getElementById('cL').style.display = (p.lk || p.alk) ? 'none' : '';
+            document.getElementById('cU').style.display = (p.lk && !p.alk) ? '' : 'none';
+        }
+        document.addEventListener('click', function () { document.getElementById('ctx').classList.remove('vis'); });
+        document.getElementById('cL').onclick = function () {
+            if (ctxP) { ctxP.lk = true; blocks.forEach(function (b) { b.targets.delete(ctxP.id); }); renderPluginBlock(); renderBlocks(); }
+        };
+        document.getElementById('cU').onclick = function () {
+            if (ctxP && !ctxP.alk) { ctxP.lk = false; renderPluginBlock(); }
+        };
+
+        function addBlock(mode) {
+            if (!mode) mode = 'randomize';
+            var id = ++bc;
+            blocks.push({
+                id: id, mode: mode, targets: new Set(),
+                trigger: 'manual', beatDiv: '1/4',
+                midiMode: 'any_note', midiNote: 60, midiCC: 1, velScale: false,
+                threshold: -12, rMin: 0, rMax: 100,
+                quantize: false, qSteps: 12, movement: 'instant', glideMs: 200,
+                envAtk: 10, envRel: 100, envSens: 50, envInvert: false,
+                expanded: true
+            });
+            actId = id;
+            assignMode = id;
+            renderBlocks();
+            renderPluginBlock();
+            updCounts();
+        }
+
+        function renderBlocks() {
+            var c = document.getElementById('lpScroll');
+            c.innerHTML = '';
+            for (var bi = 0; bi < blocks.length; bi++) {
+                var b = blocks[bi];
+                var col = bColor(bi);
+                var card = document.createElement('div');
+                card.className = 'lcard' + (b.id === actId ? ' active' : '') + (b.mode === 'envelope' && b.id === actId ? ' env-active' : '');
+
+                var sumText = '';
+                if (b.mode === 'envelope') {
+                    sumText = 'Atk ' + b.envAtk + 'ms / Rel ' + b.envRel + 'ms';
+                } else {
+                    var tl = { manual: 'Manual', tempo: 'Tempo', midi: 'MIDI', audio: 'Audio' }[b.trigger];
+                    sumText = tl + ' / ' + (b.movement === 'instant' ? 'Instant' : 'Smooth ' + b.glideMs + 'ms');
+                }
+
+                var tgtCount = b.targets.size;
+                var tgtHTML = '';
+                if (tgtCount === 0) {
+                    tgtHTML = '<span class="tg-empty">No params - click Assign</span>';
+                } else {
+                    var tgtArr = Array.from(b.targets);
+                    var shown = tgtArr.slice(0, 8);
+                    for (var ti = 0; ti < shown.length; ti++) {
+                        var tid = shown[ti];
+                        var tp = PMap[tid];
+                        if (!tp) continue;
+                        tgtHTML += '<span class="tg" style="background:' + col + '22;border:1px solid ' + col + '66;color:' + col + '">' +
+                            tp.name + '<span class="tx" data-b="' + b.id + '" data-p="' + tid + '">x</span></span>';
+                    }
+                    if (tgtCount > 8) {
+                        tgtHTML += '<span class="tg" style="background:#eee;border:1px solid #ccc;color:#999">+' + (tgtCount - 8) + '</span>';
+                    }
+                }
+
+                var assignBtnStyle = '';
+                if (assignMode === b.id) {
+                    assignBtnStyle = 'background:' + col + ';color:white;border-color:' + col;
+                }
+                var assignBtnLabel = assignMode === b.id ? 'Assigning' : 'Assign';
+
+                var bodyHTML = '<div class="brow"><span class="blbl">Mode</span>' +
+                    '<div class="seg" data-b="' + b.id + '" data-f="mode">' +
+                    '<button class="' + (b.mode === 'randomize' ? 'on' : '') + '" data-v="randomize">Randomize</button>' +
+                    '<button class="' + (b.mode === 'envelope' ? 'env-on' : '') + '" data-v="envelope">Envelope</button>' +
+                    '</div></div>';
+
+                if (b.mode === 'randomize') {
+                    bodyHTML += renderRndBody(b);
+                } else {
+                    bodyHTML += renderEnvBody(b);
+                }
+
+                bodyHTML += '<div class="brow"><span class="blbl">Targets (' + tgtCount + ')</span>' +
+                    '<div class="tgt-box">' + tgtHTML + '</div></div>';
+
+                if (b.mode === 'randomize') {
+                    bodyHTML += '<button class="fire" data-b="' + b.id + '">FIRE</button>';
+                }
+
+                card.innerHTML = '<div class="lhead" data-id="' + b.id + '">' +
+                    '<div><span class="block-color" style="background:' + col + '"></span>' +
+                    '<span class="ltitle">Block ' + b.id + '</span>' +
+                    '<span class="lsum">' + sumText + ' / ' + tgtCount + ' params</span></div>' +
+                    '<div style="display:flex;gap:4px;align-items:center">' +
+                    '<button class="sm-btn assign-btn" data-id="' + b.id + '" style="' + assignBtnStyle + '">' + assignBtnLabel + '</button>' +
+                    '<button class="lclose" data-id="' + b.id + '">x</button>' +
+                    '</div></div>' +
+                    '<div class="lbody ' + (b.expanded ? '' : 'hide') + '">' + bodyHTML + '</div>';
+
+                c.appendChild(card);
+            }
+            wireBlocks();
+            updateAssignBanner();
+        }
+
+        function renderRndBody(b) {
+            var h = '<div class="brow"><span class="blbl">Trigger</span>' +
+                '<div class="seg" data-b="' + b.id + '" data-f="trigger">' +
+                '<button class="' + (b.trigger === 'manual' ? 'on' : '') + '" data-v="manual">Manual</button>' +
+                '<button class="' + (b.trigger === 'tempo' ? 'on' : '') + '" data-v="tempo">Tempo</button>' +
+                '<button class="' + (b.trigger === 'midi' ? 'on' : '') + '" data-v="midi">MIDI</button>' +
+                '<button class="' + (b.trigger === 'audio' ? 'on' : '') + '" data-v="audio">Audio</button></div>';
+
+            h += '<div class="sub ' + (b.trigger === 'tempo' ? 'vis' : '') + '"><div class="sub-row">' +
+                '<span class="sub-lbl">Division</span>' +
+                '<select class="sub-sel" data-b="' + b.id + '" data-f="beatDiv">';
+            ['1/1', '1/2', '1/4', '1/8', '1/16', '1/32'].forEach(function (d) {
+                h += '<option' + (b.beatDiv === d ? ' selected' : '') + '>' + d + '</option>';
+            });
+            h += '</select></div></div>';
+
+            h += '<div class="sub ' + (b.trigger === 'midi' ? 'vis' : '') + '"><div class="sub-row">' +
+                '<span class="sub-lbl">Mode</span>' +
+                '<select class="sub-sel" data-b="' + b.id + '" data-f="midiMode">' +
+                '<option value="any_note"' + (b.midiMode === 'any_note' ? ' selected' : '') + '>Any Note</option>' +
+                '<option value="specific_note"' + (b.midiMode === 'specific_note' ? ' selected' : '') + '>Note</option>' +
+                '<option value="cc"' + (b.midiMode === 'cc' ? ' selected' : '') + '>CC</option></select>';
+            if (b.midiMode === 'specific_note') {
+                h += '<span class="note-disp">' + midiName(b.midiNote) + '</span>' +
+                    '<input type="range" min="0" max="127" value="' + b.midiNote + '" style="width:50px" data-b="' + b.id + '" data-f="midiNote">';
+            }
+            if (b.midiMode === 'cc') {
+                h += '<span class="sub-lbl" style="min-width:auto">CC#</span>' +
+                    '<input class="sub-input" type="number" min="0" max="127" value="' + b.midiCC + '" data-b="' + b.id + '" data-f="midiCC">';
+            }
+            h += '</div><div class="sub-row"><div class="tgl ' + (b.velScale ? 'on' : '') + '" data-b="' + b.id + '" data-f="velScale"></div>' +
+                '<span class="tgl-lbl">Velocity scales range</span></div></div>';
+
+            h += '<div class="sub ' + (b.trigger === 'audio' ? 'vis' : '') + '"><div class="sl-row">' +
+                '<span class="sl-lbl">Thresh</span>' +
+                '<input type="range" min="-60" max="0" value="' + b.threshold + '" data-b="' + b.id + '" data-f="threshold">' +
+                '<span class="sl-val">' + b.threshold + ' dB</span></div></div></div>';
+
+            h += '<div class="brow"><span class="blbl">Range</span>' +
+                '<div class="sl-row"><span class="sl-lbl">Min</span>' +
+                '<input type="range" min="0" max="100" value="' + b.rMin + '" data-b="' + b.id + '" data-f="rMin">' +
+                '<span class="sl-val">' + b.rMin + '%</span></div>' +
+                '<div class="sl-row"><span class="sl-lbl">Max</span>' +
+                '<input type="range" min="0" max="100" value="' + b.rMax + '" data-b="' + b.id + '" data-f="rMax">' +
+                '<span class="sl-val">' + b.rMax + '%</span></div></div>';
+
+            h += '<div class="brow"><div class="tgl-row">' +
+                '<div class="tgl ' + (b.quantize ? 'on' : '') + '" data-b="' + b.id + '" data-f="quantize"></div>' +
+                '<span class="tgl-lbl">Quantize</span>' +
+                '<input class="sub-input" type="number" value="' + b.qSteps + '" min="2" max="128" data-b="' + b.id + '" data-f="qSteps"' + (b.quantize ? '' : ' disabled') + '>' +
+                '<span class="sub-lbl" style="min-width:auto">steps</span></div></div>';
+
+            h += '<div class="brow"><span class="blbl">Movement</span>' +
+                '<div class="seg" data-b="' + b.id + '" data-f="movement">' +
+                '<button class="' + (b.movement === 'instant' ? 'on' : '') + '" data-v="instant">Instant</button>' +
+                '<button class="' + (b.movement === 'glide' ? 'on' : '') + '" data-v="glide">Smooth</button></div>';
+            if (b.movement === 'glide') {
+                h += '<div class="sl-row" style="margin-top:3px"><span class="sl-lbl">Time</span>' +
+                    '<input type="range" min="1" max="2000" value="' + b.glideMs + '" data-b="' + b.id + '" data-f="glideMs">' +
+                    '<span class="sl-val">' + b.glideMs + 'ms</span></div>';
+            }
+            h += '</div>';
+            return h;
+        }
+
+        function renderEnvBody(b) {
+            return '<div class="brow"><span class="blbl"><span class="env-active-dot"></span>Envelope Follower</span>' +
+                '<div class="env-meter" id="envMeter-' + b.id + '">' +
+                '<div class="env-meter-fill" id="envFill-' + b.id + '" style="height:0%"></div>' +
+                '<span class="env-label" id="envLbl-' + b.id + '">0%</span></div></div>' +
+                '<div class="brow"><span class="blbl">Response</span>' +
+                '<div class="sl-row"><span class="sl-lbl">Attack</span>' +
+                '<input type="range" min="1" max="500" value="' + b.envAtk + '" data-b="' + b.id + '" data-f="envAtk">' +
+                '<span class="sl-val">' + b.envAtk + 'ms</span></div>' +
+                '<div class="sl-row"><span class="sl-lbl">Release</span>' +
+                '<input type="range" min="1" max="2000" value="' + b.envRel + '" data-b="' + b.id + '" data-f="envRel">' +
+                '<span class="sl-val">' + b.envRel + 'ms</span></div></div>' +
+                '<div class="brow"><span class="blbl">Mapping</span>' +
+                '<div class="sl-row"><span class="sl-lbl">Gain</span>' +
+                '<input type="range" min="0" max="100" value="' + b.envSens + '" data-b="' + b.id + '" data-f="envSens">' +
+                '<span class="sl-val">' + b.envSens + '%</span></div>' +
+                '<div class="sl-row"><span class="sl-lbl">Min</span>' +
+                '<input type="range" min="0" max="100" value="' + b.rMin + '" data-b="' + b.id + '" data-f="rMin">' +
+                '<span class="sl-val">' + b.rMin + '%</span></div>' +
+                '<div class="sl-row"><span class="sl-lbl">Max</span>' +
+                '<input type="range" min="0" max="100" value="' + b.rMax + '" data-b="' + b.id + '" data-f="rMax">' +
+                '<span class="sl-val">' + b.rMax + '%</span></div>' +
+                '<div class="tgl-row"><div class="tgl ' + (b.envInvert ? 'on' : '') + '" data-b="' + b.id + '" data-f="envInvert"></div>' +
+                '<span class="tgl-lbl">Invert</span></div></div>';
+        }
+
+        function wireBlocks() {
+            document.querySelectorAll('.lhead').forEach(function (h) {
+                h.onclick = function (e) {
+                    if (e.target.classList.contains('lclose') || e.target.closest('.assign-btn')) return;
+                    var id = parseInt(h.dataset.id);
+                    var b = blocks.find(function (bb) { return bb.id === id; });
+                    if (actId === id) { b.expanded = !b.expanded; }
+                    else { blocks.forEach(function (bb) { bb.expanded = false; }); b.expanded = true; actId = id; }
+                    renderBlocks(); renderPluginBlock();
+                };
+            });
+            document.querySelectorAll('.assign-btn').forEach(function (btn) {
+                btn.onclick = function (e) {
+                    e.stopPropagation();
+                    var id = parseInt(btn.dataset.id);
+                    assignMode = assignMode === id ? null : id;
+                    actId = id;
+                    renderBlocks(); renderPluginBlock();
+                };
+            });
+            document.querySelectorAll('.lclose').forEach(function (btn) {
+                btn.onclick = function (e) {
+                    e.stopPropagation();
+                    var id = parseInt(btn.dataset.id);
+                    blocks = blocks.filter(function (b) { return b.id !== id; });
+                    if (actId === id) actId = blocks.length ? blocks[0].id : null;
+                    if (assignMode === id) assignMode = null;
+                    renderBlocks(); renderPluginBlock(); updCounts();
+                };
+            });
+            document.querySelectorAll('.seg').forEach(function (seg) {
+                seg.querySelectorAll('button').forEach(function (btn) {
+                    btn.onclick = function () {
+                        var b = blocks.find(function (bb) { return bb.id === parseInt(seg.dataset.b); });
+                        if (b) { b[seg.dataset.f] = btn.dataset.v; renderBlocks(); }
+                    };
+                });
+            });
+            document.querySelectorAll('.tgl').forEach(function (t) {
+                t.onclick = function () {
+                    var b = blocks.find(function (bb) { return bb.id === parseInt(t.dataset.b); });
+                    if (b) { b[t.dataset.f] = !b[t.dataset.f]; renderBlocks(); }
+                };
+            });
+            document.querySelectorAll('.sub-sel').forEach(function (s) {
+                s.onchange = function () {
+                    var b = blocks.find(function (bb) { return bb.id === parseInt(s.dataset.b); });
+                    if (b) { b[s.dataset.f] = s.value; renderBlocks(); }
+                };
+            });
+            document.querySelectorAll('.lbody input[type="range"]').forEach(function (sl) {
+                if (!sl.dataset.b) return;
+                sl.oninput = function () {
+                    var b = blocks.find(function (bb) { return bb.id === parseInt(sl.dataset.b); });
+                    if (!b) return;
+                    var f = sl.dataset.f;
+                    var val = parseFloat(sl.value);
+                    b[f] = val;
+                    var row = sl.closest('.sl-row,.sub-row');
+                    if (row) {
+                        var v = row.querySelector('.sl-val,.sub-val');
+                        if (v) {
+                            if (f === 'threshold') v.textContent = val + ' dB';
+                            else if (f === 'glideMs' || f === 'envAtk' || f === 'envRel') v.textContent = val + 'ms';
+                            else if (f === 'midiNote') { v.textContent = val; var nd = row.querySelector('.note-disp'); if (nd) nd.textContent = midiName(val); }
+                            else v.textContent = val + '%';
+                        }
+                    }
+                };
+            });
+            document.querySelectorAll('.sub-input').forEach(function (inp) {
+                if (!inp.dataset.b) return;
+                inp.onchange = function () {
+                    var b = blocks.find(function (bb) { return bb.id === parseInt(inp.dataset.b); });
+                    if (b) b[inp.dataset.f] = Math.max(0, Math.min(128, parseInt(inp.value) || 0));
+                };
+            });
+            document.querySelectorAll('.fire').forEach(function (btn) {
+                btn.onclick = function () {
+                    btn.classList.add('flash');
+                    setTimeout(function () { btn.classList.remove('flash'); }, 250);
+                    randomize(parseInt(btn.dataset.b));
+                    flashDot('midiD');
+                };
+            });
+            document.querySelectorAll('.tx').forEach(function (x) {
+                x.onclick = function (e) {
+                    e.stopPropagation();
+                    var b = blocks.find(function (bb) { return bb.id === parseInt(x.dataset.b); });
+                    if (b) b.targets.delete(x.dataset.p);
+                    renderBlocks(); renderPluginBlock();
+                };
+            });
+        }
+
+        function updateAssignBanner() {
+            var banner = document.getElementById('assignBanner');
+            var label = document.getElementById('assignTarget');
+            if (assignMode) {
+                var b = blocks.find(function (bb) { return bb.id === assignMode; });
+                if (!b) { banner.classList.remove('vis'); return; }
+                banner.classList.add('vis');
+                var col = bColor(blocks.indexOf(b));
+                banner.style.background = col + '22';
+                banner.style.borderColor = col + '66';
+                banner.style.color = col;
+                label.textContent = 'Block ' + b.id + ' (' + b.mode + ')';
+            } else {
+                banner.classList.remove('vis');
+            }
+        }
+
+        function randomize(bId) {
+            var b = blocks.find(function (bb) { return bb.id === bId; });
+            if (!b) return;
+            var mn = b.rMin / 100, mx = b.rMax / 100;
+            b.targets.forEach(function (id) {
+                var p = PMap[id];
+                if (!p || p.lk) return;
+                var val = mn + Math.random() * (mx - mn);
+                if (b.quantize && b.qSteps > 1) { var step = 1 / b.qSteps; val = Math.round(val / step) * step; }
+                p.v = Math.max(0, Math.min(1, val));
+            });
+            renderPluginBlock();
+        }
+
+        var simTime = 0;
+        function simEnvelope() {
+            simTime += 30;
+            var phase = (simTime % 500) / 500;
+            var raw;
+            if (phase < 0.02) raw = 1;
+            else if (phase < 0.15) raw = Math.exp(-(phase - 0.02) * 20);
+            else raw = Math.exp(-(phase - 0.15) * 3) * 0.1;
+
+            blocks.forEach(function (b) {
+                if (b.mode !== 'envelope') return;
+                var ac = Math.exp(-1 / (b.envAtk * 0.03));
+                var rc = Math.exp(-1 / (b.envRel * 0.03));
+                var target = raw * (b.envSens / 50);
+                envValue = target > envValue ? envValue * ac + target * (1 - ac) : envValue * rc + target * (1 - rc);
+                var clamped = Math.max(0, Math.min(1, envValue));
+                var mapped = b.envInvert ? (1 - clamped) : clamped;
+                var fill = document.getElementById('envFill-' + b.id);
+                var lbl = document.getElementById('envLbl-' + b.id);
+                if (fill) fill.style.height = (clamped * 100) + '%';
+                if (lbl) lbl.textContent = (clamped * 100).toFixed(0) + '%';
+                var mn = b.rMin / 100, mx = b.rMax / 100;
+                b.targets.forEach(function (id) {
+                    var p = PMap[id];
+                    if (!p || p.lk) return;
+                    p.v = mn + mapped * (mx - mn);
+                });
+                var dot = document.getElementById('envD');
+                if (dot) dot.className = 'sd' + (clamped > 0.05 ? ' env' : '');
+            });
+
+            var hasActiveEnv = blocks.some(function (b) { return b.mode === 'envelope' && b.targets.size > 0; });
+            if (hasActiveEnv) renderPluginBlock();
+            requestAnimationFrame(function () { setTimeout(simEnvelope, 30); });
+        }
+
+        document.getElementById('bypassBtn').onclick = function () { this.classList.toggle('on'); };
+        document.getElementById('mixSlider').oninput = function () { document.getElementById('mixVal').textContent = this.value + '%'; };
+        document.getElementById('addRnd').onclick = function () { addBlock('randomize'); };
+        document.getElementById('addEnv').onclick = function () { addBlock('envelope'); };
+        document.getElementById('selAllBtn').onclick = function () {
+            if (!assignMode) return;
+            var b = blocks.find(function (bb) { return bb.id === assignMode; });
+            if (!b) return;
+            P.forEach(function (p) { if (!p.lk) b.targets.add(p.id); });
+            renderBlocks(); renderPluginBlock();
+        };
+        document.getElementById('clrSelBtn').onclick = function () {
+            if (!assignMode) return;
+            var b = blocks.find(function (bb) { return bb.id === assignMode; });
+            if (!b) return;
+            b.targets.clear();
+            renderBlocks(); renderPluginBlock();
+        };
+
+        function flashDot(id) {
+            var d = document.getElementById(id);
+            d.classList.add('on');
+            setTimeout(function () { d.classList.remove('on'); }, 150);
+        }
+
+        function updCounts() {
+            document.getElementById('stP').textContent = P.length;
+            document.getElementById('stL').textContent = P.filter(function (p) { return p.lk || p.alk; }).length;
+            document.getElementById('stB').textContent = blocks.length;
+            document.getElementById('blockInfo').textContent = blocks.length + ' blocks';
+            document.getElementById('paramCount').textContent = P.length + ' params / ' + P.filter(function (p) { return p.lk; }).length + ' locked';
+        }
+
+        renderPluginBlock();
+        addBlock('randomize');
+        simEnvelope();
+    </script>
+</body>
+
+</html>

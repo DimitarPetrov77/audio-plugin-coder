@@ -1,0 +1,32 @@
+/* ── OVERRIDES
+   Behavioral fixes that must load after all component CSS.
+   Only contains things that can't live in component files. */
+
+/* Range input: reset appearance so dynamic JS styles work */
+input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 14px;
+    background: transparent;
+    outline: none;
+    cursor: pointer
+}
+
+/* During knob drag: suppress ALL hover effects */
+body.knob-dragging,
+body.knob-dragging * {
+    cursor: ns-resize !important
+}
+
+body.knob-dragging *:not(.lane-ft-knob) {
+    pointer-events: none !important
+}
+
+body.knob-dragging .lane-ft-knob:hover,
+.lane-ft-knob.dragging,
+.lane-ft-knob.dragging:hover {
+    color: var(--text-primary) !important;
+    border-color: var(--accent) !important;
+    background: var(--bg-cell) !important;
+    transition: none !important
+}

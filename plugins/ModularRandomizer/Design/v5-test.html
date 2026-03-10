@@ -1,0 +1,1829 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Modular Randomizer v5</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+        :root {
+            --bg-app: #F0F0F0;
+            --bg-panel: #FAFAFA;
+            --bg-cell: #FFF;
+            --bg-cell-hover: #F5F5F5;
+            --bg-inset: #E8E8E8;
+            --border: #DEDEDE;
+            --border-strong: #C0C0C0;
+            --border-focus: #999;
+            --text-primary: #333;
+            --text-secondary: #777;
+            --text-muted: #AAA;
+            --accent: #FF5500;
+            --accent-hover: #E64D00;
+            --accent-light: #FFF0E6;
+            --accent-border: #FFB380;
+            --locked-bg: #FFF0F0;
+            --locked-border: #FFCCCC;
+            --locked-icon: #CC3333;
+            --auto-lock-bg: #FFF5E6;
+            --auto-lock-border: #FFD699;
+            --midi-dot: #33CC33;
+            --env-color: #22AAFF;
+            --font-sans: 'Inter', system-ui, sans-serif;
+            --font-mono: 'JetBrains Mono', 'Consolas', monospace;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box
+        }
+
+        body {
+            background: var(--bg-app);
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+            font-size: 11px;
+            width: 960px;
+            height: 640px;
+            overflow: hidden;
+            user-select: none
+        }
+
+        .app {
+            display: flex;
+            flex-direction: column;
+            height: 100%
+        }
+
+        /* HEADER */
+        .header {
+            display: flex;
+            align-items: center;
+            height: 38px;
+            padding: 0 12px;
+            background: var(--bg-panel);
+            border-bottom: 1px solid var(--border-strong);
+            gap: 10px;
+            flex-shrink: 0
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 6px
+        }
+
+        .brand-mark {
+            width: 10px;
+            height: 10px;
+            background: var(--accent);
+            border-radius: 2px
+        }
+
+        .brand-name {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 1px
+        }
+
+        .h-div {
+            width: 1px;
+            height: 18px;
+            background: var(--border)
+        }
+
+        .h-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-left: auto
+        }
+
+        .sm-btn {
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            font-family: var(--font-sans);
+            font-size: 9px;
+            padding: 3px 8px;
+            border-radius: 3px;
+            cursor: pointer
+        }
+
+        .sm-btn:hover {
+            border-color: var(--border-focus);
+            color: var(--text-primary)
+        }
+
+        .bypass {
+            width: 24px;
+            height: 22px;
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            color: var(--text-muted);
+            font-size: 11px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center
+        }
+
+        .bypass.on {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white
+        }
+
+        .mix-area {
+            display: flex;
+            align-items: center;
+            gap: 5px
+        }
+
+        .mix-area label {
+            font-size: 9px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: .5px
+        }
+
+        .mix-area .mix-val {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--text-secondary);
+            min-width: 26px
+        }
+
+        .mix-area input[type="range"] {
+            width: 60px
+        }
+
+        /* RACK */
+        .rack {
+            flex: 1;
+            display: flex;
+            min-height: 0;
+            overflow: hidden
+        }
+
+        /* PLUGIN BLOCK (left) */
+        .plugin-block {
+            width: 240px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            background: var(--bg-panel);
+            border-right: 1px solid var(--border-strong)
+        }
+
+        .pb-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 10px;
+            background: var(--bg-cell);
+            border-bottom: 1px solid var(--border-strong)
+        }
+
+        .pb-title {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted)
+        }
+
+        .pb-load {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 10px;
+            border-bottom: 1px solid var(--border)
+        }
+
+        .pb-load select {
+            flex: 1;
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+            font-size: 11px;
+            padding: 3px 20px 3px 6px;
+            border-radius: 3px;
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23999'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 6px center
+        }
+
+        .pb-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-cell)
+        }
+
+        .pb-toolbar .sm-btn {
+            font-size: 8px;
+            padding: 2px 6px
+        }
+
+        .pb-count {
+            font-family: var(--font-mono);
+            font-size: 9px;
+            color: var(--text-muted);
+            margin-left: auto
+        }
+
+        /* Search box */
+        .pb-search {
+            display: flex;
+            padding: 4px 10px;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-cell)
+        }
+
+        .pb-search input {
+            flex: 1;
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            padding: 3px 6px;
+            font-family: var(--font-sans);
+            font-size: 10px;
+            color: var(--text-primary);
+            background: var(--bg-panel);
+            outline: none
+        }
+
+        .pb-search input:focus {
+            border-color: var(--accent)
+        }
+
+        .pb-search input::placeholder {
+            color: var(--text-muted)
+        }
+
+        /* Assign banner */
+        .assign-banner {
+            display: none;
+            padding: 4px 10px;
+            font-size: 10px;
+            font-weight: 500;
+            text-align: center
+        }
+
+        .assign-banner.vis {
+            display: block
+        }
+
+        /* Param scroll - flat list */
+        .param-scroll {
+            flex: 1;
+            overflow-y: auto;
+            padding: 2px 4px
+        }
+
+        .param-scroll::-webkit-scrollbar {
+            width: 4px
+        }
+
+        .param-scroll::-webkit-scrollbar-thumb {
+            background: var(--border-strong);
+            border-radius: 2px
+        }
+
+        /* Plugin scroll - contains plugin cards */
+        .plugin-scroll {
+            flex: 1;
+            overflow-y: auto;
+            padding: 4px
+        }
+
+        .plugin-scroll::-webkit-scrollbar {
+            width: 4px
+        }
+
+        .plugin-scroll::-webkit-scrollbar-thumb {
+            background: var(--border-strong);
+            border-radius: 2px
+        }
+
+        /* Plugin card */
+        .pcard {
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            margin-bottom: 4px;
+            transition: opacity 120ms, transform 80ms
+        }
+
+        .pcard.dragging {
+            opacity: 0.4;
+            transform: scale(0.97)
+        }
+
+        .pcard.drag-over-top {
+            border-top: 2px solid var(--accent);
+            margin-top: -1px
+        }
+
+        .pcard.drag-over-bottom {
+            border-bottom: 2px solid var(--accent);
+            margin-bottom: -1px
+        }
+
+        .pcard-head {
+            display: flex;
+            align-items: center;
+            padding: 4px 6px;
+            cursor: grab;
+            gap: 4px;
+            border-bottom: 1px solid var(--border)
+        }
+
+        .pcard-head:active {
+            cursor: grabbing
+        }
+
+        .pcard-head:hover {
+            background: var(--bg-cell-hover)
+        }
+
+        .pcard-name {
+            font-size: 10px;
+            font-weight: 600;
+            flex: 1
+        }
+
+        .pcard-info {
+            font-size: 9px;
+            color: var(--text-muted);
+            margin-left: 4px
+        }
+
+        .pcard-close {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 11px;
+            cursor: pointer;
+            padding: 1px 3px
+        }
+
+        .pcard-close:hover {
+            color: var(--text-primary)
+        }
+
+        .pcard-body {
+            display: flex;
+            flex-direction: column
+        }
+
+        .pcard-body.hide {
+            display: none
+        }
+
+        .pcard-search {
+            padding: 3px 6px;
+            border-bottom: 1px solid var(--border)
+        }
+
+        .pcard-search input {
+            width: 100%;
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            padding: 2px 5px;
+            font-family: var(--font-sans);
+            font-size: 9px;
+            background: var(--bg-panel);
+            outline: none
+        }
+
+        .pcard-search input:focus {
+            border-color: var(--accent)
+        }
+
+        .pcard-params {
+            max-height: 180px;
+            overflow-y: auto;
+            padding: 2px 3px
+        }
+
+        .pcard-params::-webkit-scrollbar {
+            width: 3px
+        }
+
+        .pcard-params::-webkit-scrollbar-thumb {
+            background: var(--border-strong);
+            border-radius: 2px
+        }
+
+        /* Parameter row */
+        .pr {
+            display: flex;
+            align-items: center;
+            padding: 3px 6px;
+            border-radius: 2px;
+            cursor: pointer;
+            gap: 4px;
+            min-height: 22px;
+            border: 1px solid transparent;
+            transition: all 60ms
+        }
+
+        .pr:hover {
+            background: var(--bg-cell-hover)
+        }
+
+        .pr.locked {
+            background: var(--locked-bg);
+            border-color: var(--locked-border);
+            cursor: default;
+            opacity: .6
+        }
+
+        .pr.locked:hover {
+            background: var(--locked-bg)
+        }
+
+        .pr.assign-highlight {
+            border: 1px dashed var(--border-focus)
+        }
+
+        .pr.assign-highlight:hover {
+            background: var(--accent-light);
+            border-color: var(--accent)
+        }
+
+        .pr-name {
+            font-size: 10px;
+            font-weight: 500;
+            flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis
+        }
+
+        .pr-val {
+            font-family: var(--font-mono);
+            font-size: 9px;
+            color: var(--text-secondary);
+            min-width: 28px;
+            text-align: right
+        }
+
+        .pr-bar {
+            width: 30px;
+            height: 3px;
+            background: var(--bg-inset);
+            border-radius: 1px;
+            overflow: hidden
+        }
+
+        .pr-bar-f {
+            height: 100%;
+            background: var(--border-strong);
+            border-radius: 1px
+        }
+
+        .pr-dots {
+            display: flex;
+            gap: 2px;
+            margin-left: 2px
+        }
+
+        .pr-dot {
+            width: 5px;
+            height: 5px;
+            border-radius: 50%
+        }
+
+        .pr-lock {
+            font-size: 7px
+        }
+
+        /* LOGIC BLOCKS (right) */
+        .logic-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0
+        }
+
+        .lp-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 4px 10px;
+            background: var(--bg-cell);
+            border-bottom: 1px solid var(--border-strong);
+            height: 28px
+        }
+
+        .lp-title {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted)
+        }
+
+        .lp-scroll {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-content: flex-start
+        }
+
+        .lp-scroll::-webkit-scrollbar {
+            width: 4px
+        }
+
+        .lp-scroll::-webkit-scrollbar-thumb {
+            background: var(--border-strong);
+            border-radius: 2px
+        }
+
+        /* Block card */
+        .lcard {
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            width: calc(50% - 4px);
+            min-width: 320px;
+            flex-shrink: 0
+        }
+
+        .lcard.active {
+            border-left: 3px solid var(--accent)
+        }
+
+        .lcard.active.env-active {
+            border-left-color: var(--env-color)
+        }
+
+        .lhead {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 5px 8px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer
+        }
+
+        .lhead:hover {
+            background: var(--bg-cell-hover)
+        }
+
+        .ltitle {
+            font-size: 11px;
+            font-weight: 600
+        }
+
+        .lsum {
+            font-size: 9px;
+            color: var(--text-secondary);
+            margin-left: 6px
+        }
+
+        .lclose {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 13px;
+            cursor: pointer;
+            padding: 2px 4px
+        }
+
+        .lclose:hover {
+            color: var(--text-primary)
+        }
+
+        .lbody {
+            padding: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px
+        }
+
+        .lbody.hide {
+            display: none
+        }
+
+        .block-color {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 2px;
+            margin-right: 4px;
+            flex-shrink: 0
+        }
+
+        /* Shared controls */
+        .blbl {
+            font-size: 9px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: .6px;
+            color: var(--text-muted)
+        }
+
+        .brow {
+            display: flex;
+            flex-direction: column;
+            gap: 3px
+        }
+
+        .seg {
+            display: flex;
+            background: var(--bg-inset);
+            border-radius: 3px;
+            overflow: hidden;
+            border: 1px solid var(--border)
+        }
+
+        .seg button {
+            flex: 1;
+            padding: 4px 2px;
+            background: none;
+            border: none;
+            border-right: 1px solid var(--border);
+            color: var(--text-muted);
+            font-family: var(--font-sans);
+            font-size: 10px;
+            font-weight: 500;
+            cursor: pointer
+        }
+
+        .seg button:last-child {
+            border-right: none
+        }
+
+        .seg button:hover {
+            color: var(--text-secondary);
+            background: var(--bg-cell-hover)
+        }
+
+        .seg button.on {
+            background: var(--accent);
+            color: white
+        }
+
+        .seg button.env-on {
+            background: var(--env-color);
+            color: white
+        }
+
+        .sub {
+            display: none;
+            padding-top: 4px
+        }
+
+        .sub.vis {
+            display: flex;
+            flex-direction: column;
+            gap: 4px
+        }
+
+        .sub-row {
+            display: flex;
+            align-items: center;
+            gap: 6px
+        }
+
+        .sub-lbl {
+            font-size: 9px;
+            color: var(--text-secondary);
+            min-width: 36px
+        }
+
+        .sub-sel {
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 10px;
+            padding: 2px 18px 2px 6px;
+            border-radius: 2px;
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23999'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 4px center
+        }
+
+        .sub-input {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--text-primary);
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            padding: 2px 4px;
+            width: 36px;
+            text-align: center
+        }
+
+        .sub-input:focus {
+            outline: none;
+            border-color: var(--accent)
+        }
+
+        .note-disp {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            font-weight: 500;
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            padding: 2px 6px;
+            min-width: 30px;
+            text-align: center
+        }
+
+        .tgl-row {
+            display: flex;
+            align-items: center;
+            gap: 6px
+        }
+
+        .tgl {
+            width: 26px;
+            height: 13px;
+            background: var(--bg-inset);
+            border: 1px solid var(--border);
+            border-radius: 7px;
+            cursor: pointer;
+            position: relative;
+            flex-shrink: 0
+        }
+
+        .tgl::after {
+            content: '';
+            position: absolute;
+            width: 9px;
+            height: 9px;
+            background: white;
+            border: 1px solid var(--border-strong);
+            border-radius: 50%;
+            top: 1px;
+            left: 1px;
+            transition: all 80ms
+        }
+
+        .tgl.on {
+            background: var(--accent);
+            border-color: var(--accent)
+        }
+
+        .tgl.on::after {
+            left: 14px;
+            border-color: var(--accent)
+        }
+
+        .tgl-lbl {
+            font-size: 9px;
+            color: var(--text-secondary)
+        }
+
+        .sl-row {
+            display: flex;
+            align-items: center;
+            gap: 5px
+        }
+
+        .sl-row input[type="range"] {
+            flex: 1
+        }
+
+        .sl-lbl {
+            font-size: 9px;
+            color: var(--text-secondary);
+            min-width: 30px
+        }
+
+        .sl-val {
+            font-family: var(--font-mono);
+            font-size: 9px;
+            color: var(--text-secondary);
+            min-width: 30px;
+            text-align: right
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            height: 14px;
+            background: transparent;
+            outline: none
+        }
+
+        input[type="range"]::-webkit-slider-runnable-track {
+            height: 3px;
+            background: var(--bg-inset);
+            border-radius: 2px
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 12px;
+            height: 12px;
+            background: white;
+            border: 2px solid var(--border-strong);
+            border-radius: 50%;
+            cursor: pointer;
+            margin-top: -4.5px;
+            transition: border-color 80ms
+        }
+
+        input[type="range"]::-webkit-slider-thumb:hover {
+            border-color: var(--accent)
+        }
+
+        input[type="range"]:active::-webkit-slider-thumb {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-light)
+        }
+
+        /* Targets */
+        .tgt-box {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 2px;
+            min-height: 20px;
+            padding: 3px;
+            background: var(--bg-app);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            max-height: 44px;
+            overflow-y: auto
+        }
+
+        .tgt-box::-webkit-scrollbar {
+            width: 3px
+        }
+
+        .tgt-box::-webkit-scrollbar-thumb {
+            background: var(--border-strong);
+            border-radius: 2px
+        }
+
+        .tg {
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+            font-size: 8px;
+            font-weight: 500;
+            padding: 1px 5px;
+            border-radius: 2px
+        }
+
+        .tg .tx {
+            cursor: pointer;
+            opacity: .5;
+            font-size: 9px
+        }
+
+        .tg .tx:hover {
+            opacity: 1
+        }
+
+        .tg-empty {
+            font-size: 9px;
+            color: var(--text-muted);
+            padding: 1px 4px
+        }
+
+        .fire {
+            width: 100%;
+            height: 26px;
+            background: var(--accent);
+            border: none;
+            border-radius: 3px;
+            color: white;
+            font-family: var(--font-sans);
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            cursor: pointer
+        }
+
+        .fire:hover {
+            background: var(--accent-hover)
+        }
+
+        .fire:active {
+            transform: scale(.98)
+        }
+
+        .fire.flash {
+            animation: fl 250ms ease-out
+        }
+
+        @keyframes fl {
+            0% {
+                box-shadow: 0 0 12px var(--accent)
+            }
+
+            100% {
+                box-shadow: none
+            }
+        }
+
+        /* Envelope */
+        .env-meter {
+            height: 32px;
+            background: var(--bg-inset);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            position: relative;
+            overflow: hidden
+        }
+
+        .env-meter-fill {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(to top, var(--env-color), rgba(34, 170, 255, .3));
+            transition: height 30ms linear
+        }
+
+        .env-label {
+            position: absolute;
+            right: 4px;
+            top: 2px;
+            font-family: var(--font-mono);
+            font-size: 9px;
+            color: var(--text-secondary)
+        }
+
+        .env-active-dot {
+            display: inline-block;
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: var(--env-color);
+            margin-right: 3px;
+            animation: ep 1s ease-in-out infinite
+        }
+
+        @keyframes ep {
+
+            0%,
+            100% {
+                opacity: .4
+            }
+
+            50% {
+                opacity: 1
+            }
+        }
+
+        /* Add buttons */
+        .add-wrap {
+            display: flex;
+            gap: 6px;
+            padding: 8px
+        }
+
+        .add-blk {
+            flex: 1;
+            height: 32px;
+            background: none;
+            border: 1px dashed var(--border);
+            border-radius: 4px;
+            color: var(--text-muted);
+            font-family: var(--font-sans);
+            font-size: 10px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center
+        }
+
+        .add-blk:hover {
+            border-color: var(--border-focus);
+            color: var(--text-secondary)
+        }
+
+        /* Status */
+        .status {
+            display: flex;
+            align-items: center;
+            height: 20px;
+            padding: 0 12px;
+            background: var(--bg-panel);
+            border-top: 1px solid var(--border);
+            font-family: var(--font-mono);
+            font-size: 9px;
+            color: var(--text-muted);
+            gap: 14px;
+            flex-shrink: 0
+        }
+
+        .sd {
+            display: inline-block;
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            margin-right: 2px
+        }
+
+        .sd.on {
+            background: var(--midi-dot)
+        }
+
+        .sd.off {
+            background: var(--border-strong)
+        }
+
+        .sd.env {
+            background: var(--env-color)
+        }
+
+        /* Context menu */
+        .ctx {
+            display: none;
+            position: fixed;
+            background: var(--bg-cell);
+            border: 1px solid var(--border-strong);
+            border-radius: 4px;
+            padding: 4px 0;
+            min-width: 120px;
+            z-index: 100;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, .1)
+        }
+
+        .ctx.vis {
+            display: block
+        }
+
+        .ctx-i {
+            padding: 4px 10px;
+            font-size: 10px;
+            cursor: pointer
+        }
+
+        .ctx-i:hover {
+            background: var(--accent-light)
+        }
+
+        /* Expand chevron in block header */
+        .lchev {
+            font-size: 8px;
+            color: var(--text-muted);
+            margin-left: 4px;
+            transition: transform 120ms
+        }
+
+        .lchev.open {
+            transform: rotate(90deg)
+        }
+
+        /* Plugin Browser Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, .35);
+            z-index: 200;
+            align-items: center;
+            justify-content: center
+        }
+
+        .modal-overlay.vis {
+            display: flex
+        }
+
+        .modal {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-strong);
+            border-radius: 6px;
+            width: 520px;
+            max-height: 480px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, .2)
+        }
+
+        .modal-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--border-strong);
+            background: var(--bg-cell)
+        }
+
+        .modal-title {
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: .5px
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 16px;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 2px 6px
+        }
+
+        .modal-close:hover {
+            color: var(--text-primary)
+        }
+
+        .modal-toolbar {
+            display: flex;
+            gap: 6px;
+            padding: 8px 14px;
+            border-bottom: 1px solid var(--border);
+            align-items: center
+        }
+
+        .modal-search {
+            flex: 1;
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            padding: 5px 8px;
+            font-family: var(--font-sans);
+            font-size: 11px;
+            background: var(--bg-cell);
+            outline: none
+        }
+
+        .modal-search:focus {
+            border-color: var(--accent)
+        }
+
+        .modal-tabs {
+            display: flex;
+            gap: 0;
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            overflow: hidden
+        }
+
+        .modal-tab {
+            padding: 4px 10px;
+            font-family: var(--font-sans);
+            font-size: 10px;
+            font-weight: 500;
+            background: var(--bg-cell);
+            border: none;
+            border-right: 1px solid var(--border);
+            color: var(--text-muted);
+            cursor: pointer
+        }
+
+        .modal-tab:last-child {
+            border-right: none
+        }
+
+        .modal-tab:hover {
+            color: var(--text-secondary);
+            background: var(--bg-cell-hover)
+        }
+
+        .modal-tab.on {
+            background: var(--accent);
+            color: white
+        }
+
+        .modal-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 4px 0;
+            min-height: 200px
+        }
+
+        .modal-body::-webkit-scrollbar {
+            width: 5px
+        }
+
+        .modal-body::-webkit-scrollbar-thumb {
+            background: var(--border-strong);
+            border-radius: 2px
+        }
+
+        .plug-row {
+            display: flex;
+            align-items: center;
+            padding: 6px 14px;
+            cursor: pointer;
+            gap: 8px;
+            border-bottom: 1px solid var(--bg-inset)
+        }
+
+        .plug-row:hover {
+            background: var(--accent-light)
+        }
+
+        .plug-icon {
+            width: 24px;
+            height: 24px;
+            border-radius: 4px;
+            background: var(--bg-inset);
+            border: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: 700;
+            color: var(--text-muted);
+            flex-shrink: 0
+        }
+
+        .plug-info {
+            flex: 1;
+            min-width: 0
+        }
+
+        .plug-name {
+            font-size: 11px;
+            font-weight: 600
+        }
+
+        .plug-meta {
+            font-size: 9px;
+            color: var(--text-muted);
+            margin-top: 1px
+        }
+
+        .plug-type {
+            font-size: 8px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            padding: 1px 5px;
+            border-radius: 2px;
+            background: var(--bg-inset);
+            color: var(--text-muted)
+        }
+
+        .plug-type.synth {
+            background: #E8F0FF;
+            color: #3366CC
+        }
+
+        .plug-type.fx {
+            background: #F0E8FF;
+            color: #7733CC
+        }
+
+        .plug-type.sampler {
+            background: #E8FFE8;
+            color: #339933
+        }
+
+        .plug-type.utility {
+            background: #FFF5E6;
+            color: #CC8800
+        }
+
+        .modal-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 14px;
+            border-top: 1px solid var(--border);
+            background: var(--bg-cell)
+        }
+
+        .modal-footer-info {
+            font-size: 9px;
+            color: var(--text-muted)
+        }
+
+        .scan-btn {
+            font-family: var(--font-sans);
+            font-size: 9px;
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            padding: 3px 8px;
+            border-radius: 3px;
+            cursor: pointer
+        }
+
+        .scan-btn:hover {
+            border-color: var(--border-focus);
+            color: var(--text-primary)
+        }
+
+        .no-results {
+            text-align: center;
+            padding: 30px;
+            color: var(--text-muted);
+            font-size: 11px
+        }
+
+        /* Scan paths modal */
+        .scan-paths {
+            display: none;
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-app)
+        }
+
+        .scan-paths.vis {
+            display: block
+        }
+
+        .scan-paths-title {
+            font-size: 9px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            color: var(--text-muted);
+            margin-bottom: 4px
+        }
+
+        .scan-path-row {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            margin-bottom: 3px
+        }
+
+        .scan-path-row input {
+            flex: 1;
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            padding: 3px 6px;
+            font-family: var(--font-mono);
+            font-size: 9px;
+            background: var(--bg-cell);
+            color: var(--text-secondary);
+            outline: none
+        }
+
+        .scan-path-rm {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 11px;
+            padding: 2px
+        }
+
+        .scan-path-rm:hover {
+            color: var(--text-primary)
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app">
+        <div class="header">
+            <div class="brand">
+                <div class="brand-mark"></div><span class="brand-name">MODULAR RANDOMIZER</span>
+            </div>
+            <div class="h-div"></div>
+            <div class="h-right">
+                <button class="bypass" id="bypassBtn">&#x23FB;</button>
+                <div class="mix-area">
+                    <label>Mix</label>
+                    <input type="range" id="mixSlider" min="0" max="100" value="100">
+                    <span class="mix-val" id="mixVal">100%</span>
+                </div>
+            </div>
+        </div>
+        <div class="rack">
+            <div class="plugin-block">
+                <div class="pb-head">
+                    <span class="pb-title">Plugin Blocks</span>
+                    <button class="sm-btn" id="addPluginBtn">+ Plugin</button>
+                </div>
+                <div class="assign-banner" id="assignBanner">Assigning to <span id="assignTarget"></span></div>
+                <div class="plugin-scroll" id="pluginScroll"></div>
+            </div>
+            <div class="logic-panel">
+                <div class="lp-bar">
+                    <span class="lp-title">Logic Blocks</span>
+                    <span style="font-size:9px;color:var(--text-muted)" id="blockInfo">0 blocks</span>
+                </div>
+                <div class="lp-scroll" id="lpScroll"></div>
+                <div class="add-wrap">
+                    <button class="add-blk" id="addRnd">+ Randomizer</button>
+                    <button class="add-blk" id="addEnv" style="border-color:var(--env-color);color:var(--env-color)">+
+                        Envelope</button>
+                </div>
+            </div>
+        </div>
+        <div class="status">
+            <span><span class="sd on"></span><span id="stPlug">Serum</span></span>
+            <span><span id="stP">32</span> params</span>
+            <span><span id="stL">1</span> locked</span>
+            <span><span id="stB">0</span> blocks</span>
+            <span>120 BPM</span>
+            <span><span class="sd off" id="midiD"></span>MIDI</span>
+            <span><span class="sd off" id="envD"></span>ENV</span>
+        </div>
+    </div>
+    <div class="ctx" id="ctx">
+        <div class="ctx-i" id="cL">Lock</div>
+        <div class="ctx-i" id="cU">Unlock</div>
+    </div>
+    <!-- Plugin Browser Modal -->
+    <div class="modal-overlay" id="pluginModal">
+        <div class="modal">
+            <div class="modal-head">
+                <span class="modal-title">Plugin Browser</span>
+                <button class="modal-close" id="modalClose">&times;</button>
+            </div>
+            <div class="modal-toolbar">
+                <input class="modal-search" id="modalSearch" type="text" placeholder="Search plugins...">
+                <div class="modal-tabs" id="modalTabs">
+                    <button class="modal-tab on" data-cat="all">All</button>
+                    <button class="modal-tab" data-cat="synth">Synths</button>
+                    <button class="modal-tab" data-cat="fx">FX</button>
+                    <button class="modal-tab" data-cat="sampler">Samplers</button>
+                    <button class="modal-tab" data-cat="utility">Utility</button>
+                </div>
+            </div>
+            <div class="scan-paths" id="scanPaths">
+                <div class="scan-paths-title">VST3 Scan Paths</div>
+                <div id="scanPathList"></div>
+                <button class="scan-btn" id="addScanPath" style="margin-top:4px">+ Add Path</button>
+            </div>
+            <div class="modal-body" id="modalBody"></div>
+            <div class="modal-footer">
+                <span class="modal-footer-info" id="modalInfo">0 plugins found</span>
+                <button class="scan-btn" id="scanToggle">&#9881; Scan Paths</button>
+            </div>
+        </div>
+    </div>
+    <script>
+        var BCOLORS = ['#FF5500', '#22AAFF', '#33CC33', '#CC33CC', '#CCAA00', '#CC5533', '#3388CC', '#88AA33'];
+        function bColor(i) { return BCOLORS[i % BCOLORS.length]; }
+        // Plugin library with categories, vendors, and simulated param lists
+        var PLUGIN_LIB = [
+            { name: 'Serum', vendor: 'Xfer Records', cat: 'synth', params: ['Osc A Wave', 'Osc A Semi', 'Osc A Fine', 'Osc A Level', 'Osc B Wave', 'Osc B Semi', 'Osc B Fine', 'Osc B Level', 'Filter Cutoff', 'Filter Resonance', 'Filter Drive', 'Filter Type', 'Amp Attack', 'Amp Decay', 'Amp Sustain', 'Amp Release', 'LFO 1 Rate', 'LFO 1 Shape', 'Reverb Mix', 'Delay Time', 'Unison Voices', 'Unison Detune', 'Macro 1', 'Macro 2', 'Master Volume', 'Master Pan'] },
+            { name: 'Vital', vendor: 'Matt Tytel', cat: 'synth', params: ['Osc 1 Position', 'Osc 1 Level', 'Osc 1 Pan', 'Osc 2 Position', 'Osc 2 Level', 'Osc 2 Pan', 'Filter 1 Cutoff', 'Filter 1 Resonance', 'Filter 1 Blend', 'Filter 2 Cutoff', 'Filter 2 Resonance', 'Env 1 Attack', 'Env 1 Decay', 'Env 1 Sustain', 'Env 1 Release', 'LFO 1 Freq', 'LFO 1 Phase', 'Chorus Amount', 'Delay Mix', 'Reverb Size', 'Reverb Mix', 'Macro 1', 'Macro 2', 'Macro 3', 'Macro 4'] },
+            { name: 'Diva', vendor: 'u-he', cat: 'synth', params: ['VCO 1 Shape', 'VCO 1 PW', 'VCO 2 Shape', 'VCO 2 Tune', 'VCF Cutoff', 'VCF Resonance', 'VCF Env Amount', 'VCA Attack', 'VCA Decay', 'VCA Sustain', 'VCA Release', 'Mod Attack', 'Mod Decay', 'Mod Sustain', 'Mod Release', 'LFO Rate', 'LFO Depth', 'Chorus', 'Delay Mix', 'Plate Size'] },
+            { name: 'Pigments', vendor: 'Arturia', cat: 'synth', params: ['Engine A Type', 'Engine A Position', 'Engine A Morph', 'Engine B Type', 'Engine B Position', 'Filter 1 Cutoff', 'Filter 1 Reso', 'Env 1 Attack', 'Env 1 Decay', 'Env 1 Sustain', 'Env 1 Release', 'LFO 1 Rate', 'FX 1 Mix', 'FX 2 Mix', 'Macro 1', 'Macro 2', 'Macro 3', 'Macro 4', 'Master Volume'] },
+            { name: 'Phase Plant', vendor: 'Kilohearts', cat: 'synth', params: ['Gen 1 Pitch', 'Gen 1 Level', 'Gen 2 Pitch', 'Gen 2 Level', 'Filter Cutoff', 'Filter Resonance', 'Env Attack', 'Env Decay', 'Env Sustain', 'Env Release', 'LFO 1 Rate', 'Macro 1', 'Macro 2', 'Master Volume'] },
+            { name: 'Massive X', vendor: 'Native Instruments', cat: 'synth', params: ['Osc 1 Position', 'Osc 1 Intensity', 'Osc 2 Position', 'Osc 2 Intensity', 'Filter Cutoff', 'Filter Resonance', 'Performer 1', 'Performer 2', 'Macro 1', 'Macro 2', 'Macro 3', 'Macro 4', 'Master Volume'] },
+            { name: 'Zebra2', vendor: 'u-he', cat: 'synth', params: ['Osc 1 Wave', 'Osc 1 Tune', 'Osc 2 Wave', 'Osc 2 Tune', 'Filter 1 Cutoff', 'Filter 1 Reso', 'VCA Env A', 'VCA Env D', 'VCA Env S', 'VCA Env R', 'LFO 1 Rate', 'Master Volume'] },
+            { name: 'Analog Lab', vendor: 'Arturia', cat: 'synth', params: ['Macro 1', 'Macro 2', 'Macro 3', 'Macro 4', 'Filter Cutoff', 'Filter Reso', 'Attack', 'Decay', 'Sustain', 'Release', 'Chorus', 'Delay', 'Reverb', 'Volume'] },
+            { name: 'Valhalla Room', vendor: 'Valhalla DSP', cat: 'fx', params: ['Mix', 'Predelay', 'Decay', 'High Cut', 'Low Cut', 'Early Size', 'Late Size', 'Depth', 'Modulation', 'Master Volume'] },
+            { name: 'FabFilter Pro-Q 3', vendor: 'FabFilter', cat: 'fx', params: ['Band 1 Freq', 'Band 1 Gain', 'Band 1 Q', 'Band 2 Freq', 'Band 2 Gain', 'Band 2 Q', 'Band 3 Freq', 'Band 3 Gain', 'Band 3 Q', 'Output Gain'] },
+            { name: 'Soundtoys Decapitator', vendor: 'Soundtoys', cat: 'fx', params: ['Drive', 'Tone', 'Mix', 'Output', 'Low Cut', 'Style', 'Punish', 'Master Volume'] },
+            { name: 'OTT', vendor: 'Xfer Records', cat: 'fx', params: ['Depth', 'Time', 'In Gain', 'Out Gain', 'Low Band', 'Mid Band', 'High Band'] },
+            { name: 'Valhalla Delay', vendor: 'Valhalla DSP', cat: 'fx', params: ['Mix', 'Delay Time', 'Feedback', 'Age', 'Diffusion', 'Mod Rate', 'Mod Depth', 'Era', 'Width', 'Master Volume'] },
+            { name: 'Replika XT', vendor: 'Native Instruments', cat: 'fx', params: ['Mix', 'Time', 'Feedback', 'Modulation', 'Saturation', 'Filter', 'Diffusion', 'Width', 'Volume'] },
+            { name: 'Trash 2', vendor: 'iZotope', cat: 'fx', params: ['Drive', 'Mix', 'Filter Cutoff', 'Filter Reso', 'Convolver Mix', 'Gate Thresh', 'Compressor', 'Output'] },
+            { name: 'Kontakt 7', vendor: 'Native Instruments', cat: 'sampler', params: ['Volume', 'Pan', 'Tune', 'Attack', 'Decay', 'Sustain', 'Release', 'Filter Cutoff', 'Filter Reso', 'FX 1 Send', 'FX 2 Send', 'Master Volume'] },
+            { name: 'Omnisphere', vendor: 'Spectrasonics', cat: 'sampler', params: ['Layer A Level', 'Layer A Pan', 'Layer B Level', 'Layer B Pan', 'Filter Cutoff', 'Filter Reso', 'Env Attack', 'Env Decay', 'Env Sustain', 'Env Release', 'Aux 1', 'Aux 2', 'Master Volume'] },
+            { name: 'Battery 4', vendor: 'Native Instruments', cat: 'sampler', params: ['Volume', 'Pan', 'Tune', 'Attack', 'Hold', 'Decay', 'Comp Amount', 'Sat Drive', 'Filter Cutoff', 'Filter Reso', 'Send 1', 'Send 2'] },
+            { name: 'SPAN', vendor: 'Voxengo', cat: 'utility', params: ['Range', 'Offset', 'Speed', 'Channel', 'Block Size'] },
+            { name: 'Youlean Loudness Meter', vendor: 'Youlean', cat: 'utility', params: ['Target', 'Range', 'Speed'] },
+            { name: 'MeldaProduction MAnalyzer', vendor: 'MeldaProduction', cat: 'utility', params: ['Smoothing', 'Speed', 'Range', 'Analysis Type', 'Channel'] }
+        ];
+        var scanPaths = [
+            'C:\\Program Files\\Common Files\\VST3',
+            'C:\\Program Files\\VSTPlugins'
+        ];
+        var PMap = {}, pluginBlocks = [], plugBC = 0;
+        var blocks = [], bc = 0, actId = null, assignMode = null, ctxP = null, envValue = 0;
+        var NN = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+        function midiName(n) { return NN[n % 12] + (Math.floor(n / 12) - 1); }
+        function findBlock(id) { for (var i = 0; i < blocks.length; i++) { if (blocks[i].id === id) return blocks[i]; } return null; }
+        function allParams() { var a = []; pluginBlocks.forEach(function (pb) { a = a.concat(pb.params); }); return a; }
+        function paramPluginName(pid) { var pi = parseInt(pid.split(':')[0]); for (var i = 0; i < pluginBlocks.length; i++) { if (pluginBlocks[i].id === pi) return pluginBlocks[i].name; } return '?'; }
+
+        function addPlugin(name) {
+            var id = ++plugBC;
+            var lib = PLUGIN_LIB.filter(function (p) { return p.name === name; })[0];
+            var tpl = lib ? lib.params : ['Param 1', 'Param 2', 'Param 3', 'Param 4', 'Param 5', 'Volume'];
+            var params = tpl.map(function (n, i) {
+                var fid = id + ':' + i;
+                var p = { id: fid, name: n, v: +(Math.random() * 0.8 + 0.1).toFixed(2), lk: false, alk: false };
+                if (n === 'Master Volume' || n === 'Master Pan') { p.lk = true; p.alk = true; }
+                PMap[fid] = p; return p;
+            });
+            pluginBlocks.push({ id: id, name: name, params: params, expanded: true, searchFilter: '' });
+            renderAllPlugins(); updCounts();
+        }
+        function removePlugin(pid) {
+            var pb; for (var i = 0; i < pluginBlocks.length; i++) { if (pluginBlocks[i].id === pid) { pb = pluginBlocks[i]; break; } }
+            if (!pb) return;
+            pb.params.forEach(function (p) { delete PMap[p.id]; blocks.forEach(function (b) { b.targets.delete(p.id); }); });
+            pluginBlocks = pluginBlocks.filter(function (p) { return p.id !== pid; });
+            renderAllPlugins(); renderBlocks(); updCounts();
+        }
+        function renderAllPlugins() {
+            var c = document.getElementById('pluginScroll'); c.innerHTML = '';
+            var isA = assignMode !== null, aBlk = isA ? findBlock(assignMode) : null, aCol = isA && aBlk ? bColor(aBlk.colorIdx) : '';
+            for (var pi = 0; pi < pluginBlocks.length; pi++) {
+                var pb = pluginBlocks[pi], card = document.createElement('div'); card.className = 'pcard';
+                card.setAttribute('draggable', 'true');
+                card.setAttribute('data-plugidx', pi);
+                card.setAttribute('data-plugid', pb.id);
+                card.innerHTML = '<div class="pcard-head" data-plugid="' + pb.id + '"><span class="lchev ' + (pb.expanded ? 'open' : '') + '">&#9654;</span><span class="pcard-name">' + pb.name + '</span><span class="pcard-info">' + pb.params.length + ' params</span><button class="sm-btn" style="font-size:8px;padding:1px 5px" data-pluged="' + pb.id + '">Ed</button><button class="pcard-close" data-plugrm="' + pb.id + '">x</button></div><div class="pcard-body ' + (pb.expanded ? '' : 'hide') + '"><div class="pcard-search"><input type="text" placeholder="Filter..." data-plugsearch="' + pb.id + '" value="' + (pb.searchFilter || '') + '"></div><div class="pcard-params" data-plugparams="' + pb.id + '"></div></div>';
+                c.appendChild(card);
+                var paramC = card.querySelector('[data-plugparams="' + pb.id + '"]');
+                var filter = (pb.searchFilter || '').toLowerCase();
+                for (var i = 0; i < pb.params.length; i++) {
+                    var p = pb.params[i];
+                    if (filter && p.name.toLowerCase().indexOf(filter) === -1) continue;
+                    var isTgt = isA && aBlk && aBlk.targets.has(p.id);
+                    var row = document.createElement('div');
+                    row.className = 'pr' + (p.lk ? ' locked' : '') + (isA && !p.lk ? ' assign-highlight' : '');
+                    row.setAttribute('data-pid', p.id);
+                    if (isTgt) { row.style.background = aCol + '18'; row.style.borderColor = aCol + '66'; }
+                    var dots = ''; for (var bi = 0; bi < blocks.length; bi++) { if (blocks[bi].targets.has(p.id)) dots += '<span class="pr-dot" style="background:' + bColor(blocks[bi].colorIdx) + '"></span>'; }
+                    row.innerHTML = '<span class="pr-name">' + p.name + '</span><div class="pr-dots">' + dots + '</div><span class="pr-val">' + (p.v * 100).toFixed(0) + '%</span><div class="pr-bar"><div class="pr-bar-f" style="width:' + (p.v * 100) + '%"></div></div>' + (p.lk ? '<span class="pr-lock">' + (p.alk ? '&#9888;' : '&#128274;') + '</span>' : '');
+                    paramC.appendChild(row);
+                }
+            }
+            wirePluginCards(); updateAssignBanner();
+        }
+        function wirePluginCards() {
+            document.querySelectorAll('.pcard-head').forEach(function (h) {
+                h.onclick = function (e) {
+                    if (e.target.closest('[data-plugrm]') || e.target.closest('[data-pluged]')) return;
+                    var id = parseInt(h.dataset.plugid);
+                    for (var i = 0; i < pluginBlocks.length; i++) { if (pluginBlocks[i].id === id) { pluginBlocks[i].expanded = !pluginBlocks[i].expanded; break; } }
+                    renderAllPlugins();
+                };
+            });
+            document.querySelectorAll('[data-plugrm]').forEach(function (b) { b.onclick = function (e) { e.stopPropagation(); removePlugin(parseInt(b.dataset.plugrm)); }; });
+            document.querySelectorAll('[data-plugsearch]').forEach(function (inp) {
+                inp.onclick = function (e) { e.stopPropagation(); };
+                inp.oninput = function () {
+                    var id = parseInt(inp.dataset.plugsearch);
+                    for (var i = 0; i < pluginBlocks.length; i++) { if (pluginBlocks[i].id === id) { pluginBlocks[i].searchFilter = inp.value; break; } }
+                    renderAllPlugins();
+                    var ni = document.querySelector('[data-plugsearch="' + id + '"]');
+                    if (ni) { ni.focus(); ni.selectionStart = ni.selectionEnd = ni.value.length; }
+                };
+            });
+            // Drag and drop reordering
+            var dragSrcIdx = null;
+            document.querySelectorAll('.pcard').forEach(function (card) {
+                card.addEventListener('dragstart', function (e) {
+                    dragSrcIdx = parseInt(card.dataset.plugidx);
+                    card.classList.add('dragging');
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', dragSrcIdx);
+                });
+                card.addEventListener('dragend', function () {
+                    card.classList.remove('dragging');
+                    dragSrcIdx = null;
+                    document.querySelectorAll('.pcard').forEach(function (c) {
+                        c.classList.remove('drag-over-top', 'drag-over-bottom');
+                    });
+                });
+                card.addEventListener('dragover', function (e) {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    var rect = card.getBoundingClientRect();
+                    var midY = rect.top + rect.height / 2;
+                    document.querySelectorAll('.pcard').forEach(function (c) {
+                        c.classList.remove('drag-over-top', 'drag-over-bottom');
+                    });
+                    if (e.clientY < midY) card.classList.add('drag-over-top');
+                    else card.classList.add('drag-over-bottom');
+                });
+                card.addEventListener('dragleave', function () {
+                    card.classList.remove('drag-over-top', 'drag-over-bottom');
+                });
+                card.addEventListener('drop', function (e) {
+                    e.preventDefault();
+                    var fromIdx = parseInt(e.dataTransfer.getData('text/plain'));
+                    var toIdx = parseInt(card.dataset.plugidx);
+                    if (isNaN(fromIdx) || isNaN(toIdx) || fromIdx === toIdx) return;
+                    var rect = card.getBoundingClientRect();
+                    var midY = rect.top + rect.height / 2;
+                    if (e.clientY > midY && toIdx < fromIdx) toIdx++;
+                    if (e.clientY < midY && toIdx > fromIdx) toIdx--;
+                    var moved = pluginBlocks.splice(fromIdx, 1)[0];
+                    pluginBlocks.splice(toIdx, 0, moved);
+                    renderAllPlugins();
+                });
+            });
+        }
+        // Param click delegation
+        var pse = document.getElementById('pluginScroll');
+        pse.addEventListener('click', function (e) {
+            var row = e.target.closest('.pr'); if (!row) return;
+            var pid = row.getAttribute('data-pid'); if (!pid) return;
+            var pp = PMap[pid]; if (!pp || pp.lk) return; if (!assignMode) return;
+            var b = findBlock(assignMode);
+            if (b) { if (b.targets.has(pid)) b.targets.delete(pid); else b.targets.add(pid); }
+            renderAllPlugins();
+            clearTimeout(renderAllPlugins._bt);
+            renderAllPlugins._bt = setTimeout(function () { renderBlocks(); }, 80);
+        });
+        pse.addEventListener('contextmenu', function (e) {
+            var row = e.target.closest('.pr'); if (!row) return;
+            var pid = row.getAttribute('data-pid'); if (!pid) return;
+            var pp = PMap[pid]; if (!pp) return; e.preventDefault(); ctxP = pp; showCtx(e.clientX, e.clientY, pp);
+        });
+
+        // Context menu
+        function showCtx(x, y, p) { var m = document.getElementById('ctx'); m.style.left = Math.min(x, 900) + 'px'; m.style.top = Math.min(y, 580) + 'px'; m.classList.add('vis'); document.getElementById('cL').style.display = (p.lk || p.alk) ? 'none' : ''; document.getElementById('cU').style.display = (p.lk && !p.alk) ? '' : 'none'; }
+        document.addEventListener('click', function () { document.getElementById('ctx').classList.remove('vis'); });
+        document.getElementById('cL').onclick = function () { if (ctxP) { ctxP.lk = true; blocks.forEach(function (b) { b.targets.delete(ctxP.id); }); renderAllPlugins(); renderBlocks(); } };
+        document.getElementById('cU').onclick = function () { if (ctxP && !ctxP.alk) { ctxP.lk = false; renderAllPlugins(); } };
+
+        // Logic blocks
+        function addBlock(mode) {
+            if (!mode) mode = 'randomize'; var id = ++bc;
+            blocks.push({ id: id, mode: mode, targets: new Set(), colorIdx: bc - 1, trigger: 'manual', beatDiv: '1/4', midiMode: 'any_note', midiNote: 60, midiCC: 1, velScale: false, threshold: -12, rMin: 0, rMax: 100, rangeMode: 'absolute', quantize: false, qSteps: 12, movement: 'instant', glideMs: 200, envAtk: 10, envRel: 100, envSens: 50, envInvert: false, expanded: true });
+            actId = id; assignMode = null; renderBlocks(); renderAllPlugins(); updCounts();
+        }
+        function renderBlocks() {
+            var c = document.getElementById('lpScroll'); c.innerHTML = '';
+            for (var bi = 0; bi < blocks.length; bi++) {
+                var b = blocks[bi], col = bColor(b.colorIdx), isAct = b.id === actId, isAs = assignMode === b.id;
+                var card = document.createElement('div');
+                card.className = 'lcard' + (isAct ? ' active' : '') + (b.mode === 'envelope' && isAct ? ' env-active' : '');
+                var sum = ''; if (b.mode === 'envelope') sum = 'Atk ' + b.envAtk + 'ms / Rel ' + b.envRel + 'ms';
+                else { sum = ({ manual: 'Manual', tempo: 'Tempo', midi: 'MIDI', audio: 'Audio' }[b.trigger]) + ' / ' + (b.movement === 'instant' ? 'Instant' : 'Smooth'); }
+                var tc = b.targets.size, tH = '';
+                if (tc === 0) tH = '<span class="tg-empty">No params assigned</span>';
+                else { var ta = Array.from(b.targets).slice(0, 6); for (var ti = 0; ti < ta.length; ti++) { var tp = PMap[ta[ti]]; if (!tp) continue; var pn = paramPluginName(ta[ti]); tH += '<span class="tg" style="background:' + col + '22;border:1px solid ' + col + '66;color:' + col + '">' + pn + ': ' + tp.name + '<span class="tx" data-b="' + b.id + '" data-p="' + ta[ti] + '">x</span></span>'; } if (tc > 6) tH += '<span class="tg" style="background:#eee;border:1px solid #ccc;color:#999">+' + (tc - 6) + '</span>'; }
+                var abS = isAs ? 'background:' + col + ';color:white;border-color:' + col : '', abT = isAs ? 'Done' : 'Assign';
+                var bH = ''; bH += '<div class="brow"><span class="blbl">Mode</span><div class="seg" data-b="' + b.id + '" data-f="mode"><button class="' + (b.mode === 'randomize' ? 'on' : '') + '" data-v="randomize">Randomize</button><button class="' + (b.mode === 'envelope' ? 'env-on' : '') + '" data-v="envelope">Envelope</button></div></div>';
+                if (b.mode === 'randomize') bH += renderRndBody(b); else bH += renderEnvBody(b);
+                bH += '<div class="brow"><span class="blbl">Targets (' + tc + ')</span><div class="tgt-box">' + tH + '</div></div>';
+                if (b.mode === 'randomize') bH += '<button class="fire" data-b="' + b.id + '">FIRE</button>';
+                var ch = '<span class="lchev ' + (b.expanded ? 'open' : '') + '">&#9654;</span>';
+                card.innerHTML = '<div class="lhead" data-id="' + b.id + '"><div style="display:flex;align-items:center">' + ch + '<span class="block-color" style="background:' + col + '"></span><span class="ltitle">Block ' + (bi + 1) + '</span><span class="lsum">' + sum + ' / ' + tc + ' params</span></div><div style="display:flex;gap:4px;align-items:center"><button class="sm-btn assign-btn" data-id="' + b.id + '" style="' + abS + '">' + abT + '</button><button class="lclose" data-id="' + b.id + '">x</button></div></div><div class="lbody ' + (b.expanded ? '' : 'hide') + '">' + bH + '</div>';
+                c.appendChild(card);
+            }
+            wireBlocks(); updateAssignBanner();
+        }
+        function renderRndBody(b) {
+            var h = '<div class="brow"><span class="blbl">Trigger</span><div class="seg" data-b="' + b.id + '" data-f="trigger">';
+            ['manual', 'tempo', 'midi', 'audio'].forEach(function (t) { h += '<button class="' + (b.trigger === t ? 'on' : '') + '" data-v="' + t + '">' + { manual: 'Manual', tempo: 'Tempo', midi: 'MIDI', audio: 'Audio' }[t] + '</button>'; });
+            h += '</div><div class="sub ' + (b.trigger === 'tempo' ? 'vis' : '') + '"><div class="sub-row"><span class="sub-lbl">Division</span><select class="sub-sel" data-b="' + b.id + '" data-f="beatDiv">';
+            ['1/1', '1/2', '1/4', '1/8', '1/16', '1/32'].forEach(function (d) { h += '<option' + (b.beatDiv === d ? ' selected' : '') + '>' + d + '</option>'; });
+            h += '</select></div></div><div class="sub ' + (b.trigger === 'midi' ? 'vis' : '') + '"><div class="sub-row"><span class="sub-lbl">Mode</span><select class="sub-sel" data-b="' + b.id + '" data-f="midiMode"><option value="any_note"' + (b.midiMode === 'any_note' ? ' selected' : '') + '>Any Note</option><option value="specific_note"' + (b.midiMode === 'specific_note' ? ' selected' : '') + '>Note</option><option value="cc"' + (b.midiMode === 'cc' ? ' selected' : '') + '>CC</option></select></div></div>';
+            h += '<div class="sub ' + (b.trigger === 'audio' ? 'vis' : '') + '"><div class="sl-row"><span class="sl-lbl">Thresh</span><input type="range" min="-60" max="0" value="' + b.threshold + '" data-b="' + b.id + '" data-f="threshold"><span class="sl-val">' + b.threshold + ' dB</span></div></div></div>';
+            h += '<div class="brow"><span class="blbl">Range</span><div class="seg" data-b="' + b.id + '" data-f="rangeMode"><button class="' + (b.rangeMode === 'absolute' ? 'on' : '') + '" data-v="absolute">Absolute</button><button class="' + (b.rangeMode === 'relative' ? 'on' : '') + '" data-v="relative">Relative</button></div>';
+            if (b.rangeMode === 'absolute') { h += '<div class="sl-row"><span class="sl-lbl">Min</span><input type="range" min="0" max="100" value="' + b.rMin + '" data-b="' + b.id + '" data-f="rMin"><span class="sl-val">' + b.rMin + '%</span></div><div class="sl-row"><span class="sl-lbl">Max</span><input type="range" min="0" max="100" value="' + b.rMax + '" data-b="' + b.id + '" data-f="rMax"><span class="sl-val">' + b.rMax + '%</span></div>'; }
+            else { h += '<div class="sl-row"><span class="sl-lbl">\u00b1</span><input type="range" min="1" max="100" value="' + b.rMax + '" data-b="' + b.id + '" data-f="rMax"><span class="sl-val">' + b.rMax + '%</span></div>'; }
+            h += '</div><div class="brow"><div class="tgl-row"><div class="tgl ' + (b.quantize ? 'on' : '') + '" data-b="' + b.id + '" data-f="quantize"></div><span class="tgl-lbl">Quantize</span><input class="sub-input" type="number" value="' + b.qSteps + '" min="2" max="128" data-b="' + b.id + '" data-f="qSteps"' + (b.quantize ? '' : ' disabled') + '><span class="sub-lbl" style="min-width:auto">steps</span></div></div>';
+            h += '<div class="brow"><span class="blbl">Movement</span><div class="seg" data-b="' + b.id + '" data-f="movement"><button class="' + (b.movement === 'instant' ? 'on' : '') + '" data-v="instant">Instant</button><button class="' + (b.movement === 'glide' ? 'on' : '') + '" data-v="glide">Smooth</button></div>';
+            if (b.movement === 'glide') h += '<div class="sl-row" style="margin-top:3px"><span class="sl-lbl">Time</span><input type="range" min="1" max="2000" value="' + b.glideMs + '" data-b="' + b.id + '" data-f="glideMs"><span class="sl-val">' + b.glideMs + 'ms</span></div>';
+            h += '</div>'; return h;
+        }
+        function renderEnvBody(b) {
+            var h = '<div class="brow"><span class="blbl"><span class="env-active-dot"></span>Envelope Follower</span><div class="env-meter" id="envMeter-' + b.id + '"><div class="env-meter-fill" id="envFill-' + b.id + '" style="height:0%"></div><span class="env-label" id="envLbl-' + b.id + '">0%</span></div></div>';
+            h += '<div class="brow"><span class="blbl">Response</span><div class="sl-row"><span class="sl-lbl">Attack</span><input type="range" min="1" max="500" value="' + b.envAtk + '" data-b="' + b.id + '" data-f="envAtk"><span class="sl-val">' + b.envAtk + 'ms</span></div><div class="sl-row"><span class="sl-lbl">Release</span><input type="range" min="1" max="2000" value="' + b.envRel + '" data-b="' + b.id + '" data-f="envRel"><span class="sl-val">' + b.envRel + 'ms</span></div></div>';
+            h += '<div class="brow"><span class="blbl">Mapping</span><div class="sl-row"><span class="sl-lbl">Gain</span><input type="range" min="0" max="100" value="' + b.envSens + '" data-b="' + b.id + '" data-f="envSens"><span class="sl-val">' + b.envSens + '%</span></div><div class="sl-row"><span class="sl-lbl">Min</span><input type="range" min="0" max="100" value="' + b.rMin + '" data-b="' + b.id + '" data-f="rMin"><span class="sl-val">' + b.rMin + '%</span></div><div class="sl-row"><span class="sl-lbl">Max</span><input type="range" min="0" max="100" value="' + b.rMax + '" data-b="' + b.id + '" data-f="rMax"><span class="sl-val">' + b.rMax + '%</span></div><div class="tgl-row"><div class="tgl ' + (b.envInvert ? 'on' : '') + '" data-b="' + b.id + '" data-f="envInvert"></div><span class="tgl-lbl">Invert</span></div></div>';
+            return h;
+        }
+        function wireBlocks() {
+            document.querySelectorAll('.lbody').forEach(function (b) { b.onclick = function (e) { e.stopPropagation(); }; });
+            document.querySelectorAll('.lhead').forEach(function (h) { h.onclick = function (e) { if (e.target.closest('.assign-btn') || e.target.closest('.lclose')) return; var id = parseInt(h.dataset.id); var b = findBlock(id); if (b) { b.expanded = !b.expanded; renderBlocks(); } }; });
+            document.querySelectorAll('.assign-btn').forEach(function (btn) { btn.onclick = function (e) { e.stopPropagation(); var id = parseInt(btn.dataset.id); if (assignMode === id) assignMode = null; else { assignMode = id; actId = id; var b = findBlock(id); if (b && !b.expanded) b.expanded = true; } renderBlocks(); renderAllPlugins(); }; });
+            document.querySelectorAll('.lclose').forEach(function (btn) { btn.onclick = function (e) { e.stopPropagation(); var id = parseInt(btn.dataset.id); blocks = blocks.filter(function (b) { return b.id !== id; }); if (actId === id) actId = blocks.length ? blocks[0].id : null; if (assignMode === id) assignMode = null; renderBlocks(); renderAllPlugins(); updCounts(); }; });
+            document.querySelectorAll('.seg').forEach(function (seg) { seg.querySelectorAll('button').forEach(function (btn) { btn.onclick = function (e) { e.stopPropagation(); var b = findBlock(parseInt(seg.dataset.b)); if (b) { b[seg.dataset.f] = btn.dataset.v; renderBlocks(); } }; }); });
+            document.querySelectorAll('.tgl').forEach(function (t) { t.onclick = function (e) { e.stopPropagation(); var b = findBlock(parseInt(t.dataset.b)); if (b) { b[t.dataset.f] = !b[t.dataset.f]; renderBlocks(); } }; });
+            document.querySelectorAll('.sub-sel').forEach(function (s) { s.onchange = function () { var b = findBlock(parseInt(s.dataset.b)); if (b) { b[s.dataset.f] = s.value; renderBlocks(); } }; });
+            document.querySelectorAll('.lbody input[type="range"]').forEach(function (sl) { if (!sl.dataset.b) return; sl.oninput = function () { var b = findBlock(parseInt(sl.dataset.b)); if (!b) return; b[sl.dataset.f] = parseFloat(sl.value); var row = sl.closest('.sl-row,.sub-row'); if (row) { var v = row.querySelector('.sl-val'); if (v) { var f = sl.dataset.f; if (f === 'threshold') v.textContent = sl.value + ' dB'; else if (f === 'glideMs' || f === 'envAtk' || f === 'envRel') v.textContent = sl.value + 'ms'; else v.textContent = sl.value + '%'; } } }; });
+            document.querySelectorAll('.sub-input').forEach(function (inp) { if (!inp.dataset.b) return; inp.onchange = function () { var b = findBlock(parseInt(inp.dataset.b)); if (b) b[inp.dataset.f] = Math.max(0, Math.min(128, parseInt(inp.value) || 0)); }; });
+            document.querySelectorAll('.fire').forEach(function (btn) { btn.onclick = function (e) { e.stopPropagation(); btn.classList.add('flash'); setTimeout(function () { btn.classList.remove('flash'); }, 250); randomize(parseInt(btn.dataset.b)); flashDot('midiD'); }; });
+            document.querySelectorAll('.tx').forEach(function (x) { x.onclick = function (e) { e.stopPropagation(); var b = findBlock(parseInt(x.dataset.b)); if (b) b.targets.delete(x.dataset.p); renderBlocks(); renderAllPlugins(); }; });
+        }
+        function updateAssignBanner() {
+            var bn = document.getElementById('assignBanner'), lb = document.getElementById('assignTarget');
+            if (assignMode) { var b = findBlock(assignMode); if (!b) { bn.classList.remove('vis'); return; } bn.classList.add('vis'); var col = bColor(b.colorIdx); bn.style.background = col + '22'; bn.style.borderColor = col + '66'; bn.style.color = col; lb.textContent = 'Block ' + (blocks.indexOf(b) + 1) + ' (' + b.mode + ')'; }
+            else { bn.classList.remove('vis'); }
+        }
+        function randomize(bId) {
+            var b = findBlock(bId); if (!b) return;
+            b.targets.forEach(function (id) {
+                var p = PMap[id]; if (!p || p.lk) return; var val;
+                if (b.rangeMode === 'relative') { val = p.v + (Math.random() * 2 - 1) * (b.rMax / 100); }
+                else { var mn = b.rMin / 100, mx = b.rMax / 100; val = mn + Math.random() * (mx - mn); }
+                if (b.quantize && b.qSteps > 1) { var step = 1 / b.qSteps; val = Math.round(val / step) * step; }
+                p.v = Math.max(0, Math.min(1, val));
+            });
+            renderAllPlugins();
+        }
+        var simTime = 0;
+        function simEnvelope() {
+            simTime += 30; var ph = (simTime % 500) / 500, raw;
+            if (ph < 0.02) raw = 1; else if (ph < 0.15) raw = Math.exp(-(ph - 0.02) * 20); else raw = Math.exp(-(ph - 0.15) * 3) * 0.1;
+            var nu = false;
+            blocks.forEach(function (b) {
+                if (b.mode !== 'envelope') return;
+                var ac = Math.exp(-1 / (b.envAtk * 0.03)), rc = Math.exp(-1 / (b.envRel * 0.03));
+                var tgt = raw * (b.envSens / 50); envValue = tgt > envValue ? envValue * ac + tgt * (1 - ac) : envValue * rc + tgt * (1 - rc);
+                var cl = Math.max(0, Math.min(1, envValue)), mp = b.envInvert ? (1 - cl) : cl;
+                var fl = document.getElementById('envFill-' + b.id), lb = document.getElementById('envLbl-' + b.id);
+                if (fl) fl.style.height = (cl * 100) + '%'; if (lb) lb.textContent = (cl * 100).toFixed(0) + '%';
+                var mn = b.rMin / 100, mx = b.rMax / 100;
+                b.targets.forEach(function (id) { var p = PMap[id]; if (!p || p.lk) return; p.v = mn + mp * (mx - mn); nu = true; });
+                var dot = document.getElementById('envD'); if (dot) dot.className = 'sd' + (cl > 0.05 ? ' env' : '');
+            });
+            if (nu) { document.querySelectorAll('.pcard-params .pr').forEach(function (row) { var pid = row.getAttribute('data-pid'); if (!pid) return; var p = PMap[pid]; if (!p) return; var ve = row.querySelector('.pr-val'), be = row.querySelector('.pr-bar-f'); if (ve) ve.textContent = (p.v * 100).toFixed(0) + '%'; if (be) be.style.width = (p.v * 100) + '%'; }); }
+            requestAnimationFrame(function () { setTimeout(simEnvelope, 30); });
+        }
+        document.getElementById('bypassBtn').onclick = function () { this.classList.toggle('on'); };
+        document.getElementById('mixSlider').oninput = function () { document.getElementById('mixVal').textContent = this.value + '%'; };
+        document.getElementById('addRnd').onclick = function () { addBlock('randomize'); };
+        document.getElementById('addEnv').onclick = function () { addBlock('envelope'); };
+        document.getElementById('addPluginBtn').onclick = function () { openPluginBrowser(); };
+        // Plugin browser modal logic
+        var modalCat = 'all', modalQuery = '';
+        function openPluginBrowser() {
+            modalCat = 'all'; modalQuery = '';
+            document.getElementById('modalSearch').value = '';
+            document.getElementById('scanPaths').classList.remove('vis');
+            renderModalTabs(); renderModalList();
+            document.getElementById('pluginModal').classList.add('vis');
+            document.getElementById('modalSearch').focus();
+        }
+        function closePluginBrowser() { document.getElementById('pluginModal').classList.remove('vis'); }
+        document.getElementById('modalClose').onclick = closePluginBrowser;
+        document.getElementById('pluginModal').onclick = function (e) { if (e.target === this) closePluginBrowser(); };
+        document.getElementById('modalSearch').oninput = function () { modalQuery = this.value; renderModalList(); };
+        document.getElementById('modalTabs').onclick = function (e) {
+            var tab = e.target.closest('.modal-tab'); if (!tab) return;
+            modalCat = tab.dataset.cat; renderModalTabs(); renderModalList();
+        };
+        function renderModalTabs() {
+            document.querySelectorAll('.modal-tab').forEach(function (t) {
+                t.className = 'modal-tab' + (t.dataset.cat === modalCat ? ' on' : '');
+            });
+        }
+        function renderModalList() {
+            var body = document.getElementById('modalBody');
+            var q = modalQuery.toLowerCase();
+            var filtered = PLUGIN_LIB.filter(function (p) {
+                if (modalCat !== 'all' && p.cat !== modalCat) return false;
+                if (q && p.name.toLowerCase().indexOf(q) === -1 && p.vendor.toLowerCase().indexOf(q) === -1) return false;
+                return true;
+            });
+            document.getElementById('modalInfo').textContent = filtered.length + ' plugin' + (filtered.length !== 1 ? 's' : '') + ' found';
+            if (filtered.length === 0) { body.innerHTML = '<div class="no-results">No plugins match your search</div>'; return; }
+            var h = '';
+            filtered.forEach(function (p) {
+                var initials = p.name.split(' ').map(function (w) { return w[0]; }).join('').substring(0, 2);
+                h += '<div class="plug-row" data-pname="' + p.name + '">';
+                h += '<div class="plug-icon">' + initials + '</div>';
+                h += '<div class="plug-info"><div class="plug-name">' + p.name + '</div><div class="plug-meta">' + p.vendor + ' &middot; ' + p.params.length + ' params</div></div>';
+                h += '<span class="plug-type ' + p.cat + '">' + p.cat + '</span>';
+                h += '</div>';
+            });
+            body.innerHTML = h;
+            body.querySelectorAll('.plug-row').forEach(function (row) {
+                row.onclick = function () {
+                    var pname = row.dataset.pname;
+                    var lib = PLUGIN_LIB.filter(function (p) { return p.name === pname; })[0];
+                    if (lib) addPlugin(lib.name);
+                    closePluginBrowser();
+                };
+            });
+        }
+        // Scan paths toggle
+        document.getElementById('scanToggle').onclick = function () {
+            var sp = document.getElementById('scanPaths');
+            sp.classList.toggle('vis'); renderScanPaths();
+        };
+        document.getElementById('addScanPath').onclick = function () {
+            scanPaths.push(''); renderScanPaths();
+        };
+        function renderScanPaths() {
+            var c = document.getElementById('scanPathList'); c.innerHTML = '';
+            scanPaths.forEach(function (p, i) {
+                var row = document.createElement('div'); row.className = 'scan-path-row';
+                row.innerHTML = '<input type="text" value="' + p + '" data-spi="' + i + '"><button class="scan-path-rm" data-sprm="' + i + '">&times;</button>';
+                c.appendChild(row);
+            });
+            c.querySelectorAll('input').forEach(function (inp) {
+                inp.onchange = function () { scanPaths[parseInt(inp.dataset.spi)] = inp.value; };
+            });
+            c.querySelectorAll('[data-sprm]').forEach(function (btn) {
+                btn.onclick = function () { scanPaths.splice(parseInt(btn.dataset.sprm), 1); renderScanPaths(); };
+            });
+        }
+        function flashDot(id) { var d = document.getElementById(id); d.classList.add('on'); setTimeout(function () { d.classList.remove('on'); }, 150); }
+        function updCounts() { var ap = allParams(); document.getElementById('stP').textContent = ap.length; document.getElementById('stL').textContent = ap.filter(function (p) { return p.lk || p.alk; }).length; document.getElementById('stB').textContent = blocks.length; document.getElementById('blockInfo').textContent = blocks.length + ' blocks'; }
+        addPlugin('Serum'); addBlock('randomize'); simEnvelope();
+    </script>
+</body>
+
+</html>

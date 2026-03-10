@@ -1,0 +1,2024 @@
+/* ============================================================
+   WrongEQ — Drawable frequency-band EQ + per-band plugin routing
+   Uses the same design language as lane_module / logic_blocks
+   ============================================================ */
+
+/* ── Floating window layer (non-blocking) ── */
+.weq-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 500;
+    /* No backdrop — main UI stays fully interactive */
+    pointer-events: none;
+}
+
+.weq-overlay.visible {
+    display: block;
+}
+
+/* ── Floating popup container (draggable) ── */
+.weq-popup {
+    pointer-events: auto;
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    background: var(--bg-panel);
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    box-shadow: 0 16px 64px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    width: min(97vw, 1180px);
+    max-height: 94vh;
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    animation: weqSlideIn 0.18s ease-out;
+    resize: both;
+}
+
+/* When being dragged, remove the centering transform */
+.weq-popup.weq-dragged {
+    transform: none;
+}
+
+@keyframes weqSlideIn {
+    from {
+        opacity: 0;
+        transform: translate(-50%, calc(-50% + 12px)) scale(0.97);
+    }
+
+    to {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
+    }
+}
+
+/* ── Open button in main UI ── */
+.weq-open-btn {
+    background: var(--accent) !important;
+    color: var(--fire-text) !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.06em;
+    border-color: var(--accent) !important;
+    animation: weqPulse 2s ease-in-out infinite;
+}
+
+@keyframes weqPulse {
+
+    0%,
+    100% {
+        box-shadow: 0 0 0 0 var(--accent);
+    }
+
+    50% {
+        box-shadow: 0 0 8px 0 var(--accent);
+    }
+}
+
+/* ── Header ── */
+.weq-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: var(--bg-inset);
+    border-bottom: 1px solid var(--border);
+    border-radius: 8px 8px 0 0;
+    cursor: move;
+    user-select: none;
+}
+
+.weq-title {
+    font-family: var(--font-mono);
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: var(--text-primary);
+    text-transform: uppercase;
+}
+
+.weq-subtitle {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-left: 8px;
+}
+
+.weq-header-ctrls {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.weq-hdr-btn {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 3px 8px;
+    cursor: pointer;
+    transition: all .15s;
+}
+
+.weq-hdr-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--accent);
+}
+
+.weq-hdr-btn.on {
+    color: var(--fire-text);
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+/* ── Preset strip ── */
+.weq-preset-strip {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin: 0 6px;
+}
+
+.weq-preset-nav {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-muted);
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 3px 5px;
+    cursor: pointer;
+    transition: all .12s;
+    line-height: 1;
+}
+
+.weq-preset-nav:hover {
+    color: var(--text-primary);
+    border-color: var(--accent);
+}
+
+.weq-preset-name {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent);
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 3px 10px;
+    cursor: pointer;
+    min-width: 80px;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: center;
+    transition: all .12s;
+}
+
+.weq-preset-name:hover {
+    border-color: var(--accent);
+    color: var(--text-primary);
+}
+
+/* ── EQ Preset Dropdown ── */
+.weq-preset-dropdown {
+    position: fixed;
+    z-index: 999;
+    background: color-mix(in srgb, var(--bg-panel) 96%, black);
+    border: 1px solid var(--border-strong);
+    border-radius: 5px;
+    padding: 4px 0;
+    min-width: 200px;
+    max-height: 300px;
+    overflow-y: auto;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, .5);
+    backdrop-filter: blur(8px);
+}
+
+.weq-preset-dropdown::-webkit-scrollbar {
+    width: 4px;
+}
+
+.weq-preset-dropdown::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 2px;
+}
+
+.weq-pd-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 12px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background .1s;
+}
+
+.weq-pd-row:hover {
+    background: var(--accent-light);
+    color: var(--text-primary);
+}
+
+.weq-pd-row.active {
+    color: var(--accent);
+    border-left: 2px solid var(--accent);
+    padding-left: 10px;
+}
+
+.weq-pd-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.weq-pd-del {
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 0 4px;
+    border-radius: 3px;
+    transition: all .1s;
+    line-height: 1;
+}
+
+.weq-pd-del:hover {
+    color: var(--locked-icon);
+    background: rgba(220, 60, 60, 0.15);
+}
+
+.weq-pd-sep {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 8px;
+}
+
+/* ── Toolbar (Tools + Grid) ── */
+.weq-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+    background: var(--bg-panel);
+    flex-wrap: wrap;
+}
+
+.weq-tbtn {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    border-radius: 3px;
+    padding: 3px 8px;
+    cursor: pointer;
+    transition: all .12s;
+    white-space: nowrap;
+}
+
+.weq-tbtn:hover {
+    color: var(--text-primary);
+    border-color: var(--border-strong);
+}
+
+.weq-tbtn.on {
+    color: var(--fire-text);
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.weq-tsep {
+    width: 1px;
+    height: 16px;
+    background: var(--border);
+    margin: 0 2px;
+    flex-shrink: 0;
+}
+
+.weq-tlbl {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-muted);
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+}
+
+/* ── Canvas area ── */
+.weq-canvas-area {
+    display: flex;
+    position: relative;
+}
+
+.weq-db-axis {
+    display: none;
+    /* Labels are now drawn on the canvas itself */
+}
+
+.weq-db-label {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-muted);
+    line-height: 1;
+    user-select: none;
+}
+
+.weq-canvas-wrap {
+    position: relative;
+    flex: 1;
+    min-height: 320px;
+    background: var(--bg-inset);
+    overflow: hidden;
+    cursor: crosshair;
+}
+
+.weq-canvas-wrap canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* Floating tooltip on hover */
+.weq-tip {
+    position: absolute;
+    pointer-events: none;
+    background: rgba(0, 0, 0, 0.85);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: 3px;
+    white-space: nowrap;
+    z-index: 10;
+    transform: translateX(-50%);
+    transition: opacity 0.08s;
+}
+
+.weq-freq-axis {
+    display: none;
+    /* Labels are now drawn on the canvas itself */
+}
+
+.weq-freq-label {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-muted);
+    user-select: none;
+}
+
+/* ── Footer controls ── */
+.weq-footer {
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+    padding: 5px 10px;
+    border-top: 1px solid var(--border);
+    flex-wrap: wrap;
+}
+
+/* Two-column body: main (canvas+bands) + side panel */
+.weq-body-wrap {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.weq-body-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ── Side panel (modulation controls) ── */
+.weq-side-panel {
+    width: 210px;
+    flex-shrink: 0;
+    border-left: 1px solid var(--border);
+    background: color-mix(in srgb, var(--bg-inset) 60%, #000);
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px;
+}
+
+.weq-side-panel::-webkit-scrollbar {
+    width: 4px;
+}
+
+.weq-side-panel::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 2px;
+}
+
+.weq-sp-section {
+    background: var(--bg-cell);
+    border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+    border-radius: 6px;
+    padding: 10px 10px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.weq-sp-title {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    color: rgba(255, 255, 255, 0.3);
+    text-transform: uppercase;
+    user-select: none;
+    margin-bottom: 2px;
+}
+
+.weq-sp-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.weq-sp-knob {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: var(--bg-inset);
+    border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+    border-radius: 4px;
+    padding: 4px 8px;
+    cursor: ns-resize;
+    user-select: none;
+    white-space: nowrap;
+    flex: 1;
+    text-align: center;
+    transition: color .1s, border-color .1s;
+}
+
+.weq-sp-knob:hover {
+    color: var(--text-primary);
+    border-color: var(--accent);
+    background: var(--bg-cell-hover);
+}
+
+.weq-sp-knob.weq-anim-on {
+    color: var(--accent);
+    border-color: var(--accent);
+    animation: weqPulse 1.5s ease-in-out infinite;
+}
+
+.weq-sp-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.4);
+    min-width: 32px;
+    user-select: none;
+}
+
+.weq-sp-sel {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: var(--bg-inset);
+    border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+    border-radius: 4px;
+    padding: 3px 6px;
+    cursor: pointer;
+    outline: none;
+    flex: 1;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: border-color .12s;
+}
+
+.weq-sp-sel:hover,
+.weq-sp-sel:focus {
+    border-color: var(--accent);
+}
+
+.weq-sp-toggle {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 4px 8px;
+    cursor: pointer;
+    transition: all .12s;
+    flex: 1;
+    text-align: center;
+}
+
+.weq-sp-toggle:hover {
+    color: var(--text-primary);
+    border-color: var(--accent);
+}
+
+.weq-sp-toggle.on {
+    color: var(--fire-text);
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.weq-sp-toggle.on.weq-anim-on {
+    animation: weqPulse 1.5s ease-in-out infinite;
+}
+
+.weq-ft-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px 3px 6px;
+    border-left: 2px solid rgba(255, 255, 255, 0.06);
+    position: relative;
+}
+
+.weq-ft-group:first-child {
+    border-left: none;
+    padding-left: 0;
+}
+
+.weq-ft-group-sel {
+    flex: 1;
+    min-width: 0;
+}
+
+.weq-ft-label {
+    font-family: var(--font-mono);
+    font-size: 8px;
+    letter-spacing: 1px;
+    color: rgba(255, 255, 255, 0.2);
+    text-transform: uppercase;
+    user-select: none;
+    white-space: nowrap;
+    margin-right: 2px;
+}
+
+.weq-ft-knob {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-secondary);
+    background: var(--bg-cell);
+    border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+    border-radius: 4px;
+    padding: 3px 7px;
+    cursor: ns-resize;
+    user-select: none;
+    white-space: nowrap;
+    transition: color .1s, border-color .1s;
+}
+
+.weq-ft-knob:hover {
+    color: var(--text-primary);
+    border-color: var(--accent);
+    background: var(--bg-cell-hover);
+}
+
+/* Animated knob indicator — glowing pulse */
+.weq-ft-knob.weq-anim-on {
+    color: var(--accent);
+    border-color: var(--accent);
+    animation: weqPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes weqPulse {
+
+    0%,
+    100% {
+        box-shadow: 0 0 2px rgba(45, 107, 63, 0.3);
+    }
+
+    50% {
+        box-shadow: 0 0 8px rgba(45, 107, 63, 0.6);
+    }
+}
+
+.weq-ft-sep {
+    color: var(--border);
+    font-size: 12px;
+    user-select: none;
+}
+
+.weq-ft-sel {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-secondary);
+    background: var(--bg-cell);
+    border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+    border-radius: 4px;
+    padding: 3px 6px;
+    cursor: pointer;
+    outline: none;
+    transition: border-color .12s;
+}
+
+.weq-ft-sel:hover {
+    border-color: var(--accent);
+}
+
+.weq-ft-sel:focus {
+    border-color: var(--accent);
+}
+
+.weq-ft-btn {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 10px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all .1s;
+}
+
+.weq-ft-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--accent);
+}
+
+.weq-ft-btn.on {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* Split mode button has a distinctive active state */
+#weqSplitBtn.on {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 25%, transparent);
+    animation: weqSplitPulse 3s ease-in-out infinite;
+}
+
+@keyframes weqSplitPulse {
+
+    0%,
+    100% {
+        box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 15%, transparent);
+    }
+
+    50% {
+        box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 30%, transparent);
+    }
+}
+
+.weq-ft-spacer {
+    flex: 1;
+}
+
+/* ── Point info (shows frequency + gain of selected point) ── */
+.weq-point-info {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.weq-point-info strong {
+    color: var(--text-primary);
+}
+
+/* ── Per-segment settings popup ── */
+.weq-seg-popup {
+    position: absolute;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-strong);
+    border-radius: 5px;
+    padding: 8px;
+    z-index: 100;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    display: none;
+    min-width: 150px;
+}
+
+.weq-seg-popup.visible {
+    display: block;
+}
+
+.weq-seg-popup-title {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+}
+
+.weq-seg-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 3px;
+}
+
+.weq-seg-label {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-muted);
+    width: 40px;
+    flex-shrink: 0;
+}
+
+.weq-seg-val {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-secondary);
+    background: var(--bg-cell);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 5px;
+    cursor: ns-resize;
+    user-select: none;
+    flex: 1;
+    text-align: center;
+}
+
+.weq-seg-val:hover {
+    color: var(--text-primary);
+    border-color: var(--accent);
+}
+
+/* ── Band colors in canvas ── */
+.weq-band-legend {
+    display: flex;
+    gap: 12px;
+    padding: 5px 12px;
+    flex-wrap: wrap;
+    align-items: center;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.weq-band-chip {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.weq-band-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.weq-band-label {
+    font-size: 9px;
+    font-weight: 700;
+    opacity: 0.5;
+    letter-spacing: 0.5px;
+}
+
+.weq-band-type {
+    font-size: 8px;
+    font-weight: 600;
+    opacity: 0.4;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+}
+
+.weq-band-fx-dot {
+    font-size: 7px;
+    color: var(--accent);
+    opacity: 0.7;
+    margin-left: -2px;
+}
+
+.weq-band-chip.has-fx {
+    opacity: 1;
+}
+
+.weq-band-chip.has-fx .weq-band-dot {
+    box-shadow: 0 0 4px currentColor;
+}
+
+.weq-band-pass {
+    opacity: 0.4;
+    font-style: italic;
+}
+
+.weq-band-pass .weq-band-range {
+    font-weight: 400;
+    font-size: 10px;
+}
+
+/* ── Tooltip ── */
+.weq-tip {
+    position: absolute;
+    background: color-mix(in srgb, var(--bg-panel) 92%, transparent);
+    border: 1px solid var(--border-strong);
+    border-radius: 5px;
+    padding: 5px 10px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+    pointer-events: none;
+    white-space: nowrap;
+    z-index: 90;
+    transform: translate(-50%, -100%);
+    margin-top: -10px;
+    letter-spacing: 0.3px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+/* ── Grid tabs (reuse lane pattern) ── */
+.weq-grid-tabs {
+    display: flex;
+    gap: 1px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.weq-grid-tab {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    background: var(--bg-cell);
+    color: var(--text-muted);
+    border: none;
+    padding: 4px 10px;
+    cursor: pointer;
+    transition: all .1s;
+}
+
+.weq-grid-tab:hover {
+    color: var(--text-primary);
+}
+
+.weq-grid-tab.on {
+    background: var(--accent);
+    color: var(--fire-text);
+}
+
+/* ── Per-band Solo/Mute buttons ── */
+.weq-band-sm {
+    font-family: var(--font-mono);
+    font-size: 8px;
+    font-weight: 700;
+    width: 16px;
+    height: 14px;
+    line-height: 14px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all .12s;
+    flex-shrink: 0;
+}
+
+.weq-band-sm:hover {
+    border-color: var(--accent);
+    color: var(--text-primary);
+}
+
+.weq-band-sm.on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--fire-text);
+}
+
+/* Solo 'S' gets a gold-ish color when active */
+.weq-band-sm[data-weqsolo].on {
+    background: var(--bus-solo-bg);
+    border-color: var(--bus-solo-bg);
+}
+
+/* Mute 'M' gets a red-ish color when active */
+.weq-band-sm[data-weqmute].on {
+    background: var(--locked-icon);
+    border-color: var(--locked-icon);
+}
+
+/* ── Band chip enhanced ── */
+.weq-band-chip {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.weq-band-plug {
+    font-family: var(--font-mono);
+    font-size: 8px;
+    color: var(--accent);
+    letter-spacing: 0.02em;
+    max-width: 55px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Muted band chip */
+.weq-band-chip.weq-muted {
+    opacity: 0.35;
+}
+
+.weq-band-chip.weq-muted .weq-band-dot {
+    background: var(--text-muted) !important;
+}
+
+/* Soloed band chip */
+.weq-band-chip.weq-soloed {
+    outline: 1px solid var(--bus-solo-bg);
+    border-radius: 3px;
+    padding: 1px 2px;
+}
+
+/* ── Bypass active indicator ── */
+.weq-bypass-on {
+    background: var(--locked-icon) !important;
+    border-color: var(--locked-icon) !important;
+    color: #fff !important;
+}
+
+/* ── Delta mode active — subtle accent on the header button ── */
+#weqDelta.on {
+    background: color-mix(in srgb, var(--accent) 70%, var(--text-primary));
+    border-color: var(--accent);
+}
+
+/* ── Close button ── */
+.weq-close-btn {
+    font-size: 18px !important;
+    width: 28px !important;
+    height: 28px !important;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    padding: 0 !important;
+    border-radius: 4px !important;
+    background: none !important;
+    border: 1px solid var(--border) !important;
+    color: var(--text-muted) !important;
+    transition: all .12s;
+}
+
+.weq-close-btn:hover {
+    background: color-mix(in srgb, var(--locked-icon) 15%, transparent) !important;
+    border-color: color-mix(in srgb, var(--locked-icon) 50%, transparent) !important;
+    color: var(--locked-icon) !important;
+}
+
+/* ── Band Parameter Rows ── */
+.weq-bands-section {
+    border-top: 1px solid var(--border);
+    padding: 4px 0;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.weq-bands-row {
+    display: flex;
+    flex-direction: row;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.weq-bands-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px 6px;
+    flex-wrap: wrap;
+}
+
+.weq-bands-section::-webkit-scrollbar {
+    width: 5px;
+}
+
+.weq-bands-section::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 2px;
+}
+
+.weq-bands-title {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-muted);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+/* ═══════════════════════════════════════════
+   Band Cards — vertical box per band, horizontal scroll
+   ═══════════════════════════════════════════ */
+
+.weq-bands-count {
+    font-size: 10px;
+    font-weight: 400;
+    color: var(--text-muted);
+    margin-left: 2px;
+}
+
+/* Horizontal scroll container */
+.weq-bands-scroll {
+    display: flex;
+    gap: 6px;
+    padding: 0 12px 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+    flex: 1;
+    align-items: stretch;
+}
+
+.weq-bands-scroll::-webkit-scrollbar {
+    height: 5px;
+}
+
+.weq-bands-scroll::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 2px;
+}
+
+.weq-bands-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+/* ── Band Card ── */
+.weq-band-card {
+    display: flex;
+    flex-direction: column;
+    min-width: 160px;
+    max-width: 160px;
+    background: var(--bg-cell);
+    border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+    border-right: none;
+    border-radius: 6px 0 0 6px;
+    overflow: hidden;
+    gap: 0;
+    flex-shrink: 0;
+    transition: background .1s, opacity .12s, border-color .15s;
+    cursor: pointer;
+    position: relative;
+    user-select: none;
+}
+
+.weq-band-card:hover {
+    background: color-mix(in srgb, var(--bg-cell) 92%, white);
+    border-color: color-mix(in srgb, var(--border) 90%, white);
+}
+
+.weq-band-card.muted {
+    opacity: 0.25;
+}
+
+.weq-band-card.dimmed {
+    opacity: 0.4;
+}
+
+.weq-band-card.soloed {
+    background: color-mix(in srgb, var(--bus-solo-bg) 8%, var(--bg-cell));
+    border-color: color-mix(in srgb, var(--bus-solo-bg) 30%, var(--border));
+    opacity: 1;
+}
+
+.weq-band-card.focused {
+    background: color-mix(in srgb, var(--accent) 6%, var(--bg-cell));
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.weq-band-card.seg-sel {
+    background: color-mix(in srgb, var(--accent) 5%, var(--bg-cell));
+    border-color: var(--accent);
+}
+
+/* ── Top accent bar ── */
+.weq-card-accent {
+    height: 3px;
+    width: 100%;
+    flex-shrink: 0;
+}
+
+/* ── Card header ── */
+.weq-card-head {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 8px 3px 10px;
+}
+
+.weq-card-num {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 800;
+    color: var(--band-color, var(--text-primary));
+    min-width: 16px;
+}
+
+.weq-card-head-spacer {
+    flex: 1;
+}
+
+/* ── Segment checkbox ── */
+.weq-card-head .weq-seg-chk {
+    width: 16px;
+    height: 16px;
+    font-size: 9px;
+    border-radius: 2px;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity .1s;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.weq-band-card:hover .weq-seg-chk,
+.weq-seg-chk.on {
+    opacity: 1;
+}
+
+.weq-seg-chk.on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--bg-panel);
+}
+
+/* ── Type selector (inline radio toggles) ── */
+.weq-card-types {
+    display: flex;
+    gap: 1px;
+    margin: 1px 6px 0;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.weq-type-btn {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    flex: 1;
+    height: 22px;
+    line-height: 22px;
+    border: none;
+    background: color-mix(in srgb, var(--bg-cell) 70%, black);
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0;
+    text-align: center;
+    transition: all .08s;
+}
+
+.weq-type-btn:first-child {
+    border-radius: 4px 0 0 4px;
+}
+
+.weq-type-btn:last-child {
+    border-radius: 0 4px 4px 0;
+}
+
+.weq-type-btn:hover {
+    color: var(--text-primary);
+    background: color-mix(in srgb, var(--bg-cell) 50%, white);
+}
+
+.weq-type-btn.active {
+    background: var(--band-color, var(--accent));
+    color: var(--bg-panel);
+    font-weight: 700;
+}
+
+/* ── Slope selector (12/24/48 dB/oct) — smaller, subtler variant ── */
+.weq-card-slope {
+    margin-top: 0;
+}
+
+.weq-card-slope .weq-type-btn {
+    font-size: 8px;
+    height: 18px;
+    line-height: 18px;
+    font-weight: 500;
+    color: var(--text-muted);
+    opacity: 0.7;
+}
+
+.weq-card-slope .weq-type-btn.active {
+    opacity: 1;
+    background: color-mix(in srgb, var(--band-color, var(--accent)) 60%, var(--bg-cell));
+    color: var(--text-primary);
+    font-weight: 700;
+}
+
+.weq-card-slope .weq-type-btn:hover {
+    opacity: 1;
+}
+
+/* ── Frequency — hero value ── */
+.weq-card-freq {
+    font-family: var(--font-mono);
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text-primary);
+    text-align: center;
+    letter-spacing: -0.03em;
+    line-height: 1;
+    padding: 6px 8px 4px;
+}
+
+/* ── Gain + Q — labeled param boxes ── */
+.weq-card-params {
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+    padding: 2px 8px;
+}
+
+.weq-card-param-box {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: color-mix(in srgb, var(--bg-cell) 65%, black);
+    border-radius: 4px;
+    padding: 3px 5px;
+    gap: 1px;
+}
+
+.weq-card-plbl {
+    font-family: var(--font-mono);
+    font-size: 7px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: var(--text-muted);
+    opacity: 0.5;
+    text-transform: uppercase;
+}
+
+.weq-card-pval {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    cursor: ns-resize;
+    white-space: nowrap;
+    transition: color .1s;
+}
+
+.weq-card-pval:hover {
+    color: var(--text-primary);
+}
+
+.weq-card-pval.boost {
+    color: #6fd68c;
+}
+
+.weq-card-pval.cut {
+    color: #e06464;
+}
+
+.weq-card-pval.slope {
+    color: var(--text-muted);
+    cursor: default;
+    font-weight: 400;
+    font-size: 11px;
+}
+
+/* ── Stereo + Mode row ── */
+.weq-card-mode-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 5px 8px;
+}
+
+.weq-card-stereo {
+    display: flex;
+    gap: 1px;
+    flex-shrink: 0;
+}
+
+.weq-ms-btn {
+    font-family: var(--font-mono);
+    font-size: 8px;
+    font-weight: 600;
+    width: 22px;
+    height: 20px;
+    line-height: 20px;
+    border: none;
+    background: color-mix(in srgb, var(--bg-cell) 65%, black);
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0;
+    text-align: center;
+    transition: all .08s;
+}
+
+.weq-ms-btn:first-child {
+    border-radius: 4px 0 0 4px;
+}
+
+.weq-ms-btn:last-child {
+    border-radius: 0 4px 4px 0;
+}
+
+.weq-ms-btn:hover {
+    color: var(--text-primary);
+    background: color-mix(in srgb, var(--bg-cell) 50%, white);
+}
+
+.weq-ms-btn.active {
+    background: #3a8a8a;
+    color: var(--bg-panel);
+    font-weight: 700;
+}
+
+/* ── Mode pill (Post-EQ / Split) ── */
+.weq-card-mode {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    background: none;
+    border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+    border-radius: 3px;
+    padding: 0 6px;
+    height: 20px;
+    line-height: 20px;
+    cursor: pointer;
+    transition: all .1s;
+    flex-shrink: 0;
+}
+
+.weq-card-mode:hover {
+    border-color: var(--accent);
+    color: var(--text-primary);
+}
+
+.weq-card-mode.on {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+/* ═══════════════════════════════════════════
+   Band unit (card + vertical strip) & Routing Panel
+   ═══════════════════════════════════════════ */
+
+/* ── Unit container: card + strip side by side ── */
+.weq-band-unit {
+    display: flex;
+    flex-shrink: 0;
+}
+
+/* ── Vertical strip (right of card, Bitwig-style) ── */
+.weq-card-strip {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    background: color-mix(in srgb, var(--bg-cell) 75%, black);
+    border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+    border-left: none;
+    border-radius: 0 6px 6px 0;
+    cursor: pointer;
+    transition: all .15s;
+    position: relative;
+    gap: 4px;
+}
+
+.weq-card-strip:hover {
+    background: color-mix(in srgb, var(--accent) 12%, var(--bg-cell));
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.weq-card-strip.active {
+    background: color-mix(in srgb, var(--accent) 15%, var(--bg-cell));
+    border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+
+.weq-strip-plus {
+    font-size: 14px;
+    font-weight: 300;
+    color: color-mix(in srgb, var(--accent) 70%, var(--text-muted));
+    line-height: 1;
+    transition: color .12s;
+}
+
+.weq-card-strip:hover .weq-strip-plus {
+    color: var(--accent);
+}
+
+.weq-card-strip.active .weq-strip-plus {
+    color: var(--accent);
+}
+
+.weq-strip-badge {
+    font-family: var(--font-mono);
+    font-size: 8px;
+    font-weight: 700;
+    min-width: 14px;
+    height: 14px;
+    line-height: 14px;
+    border-radius: 7px;
+    background: var(--accent);
+    color: var(--bg-panel);
+    text-align: center;
+    padding: 0 2px;
+}
+
+/* ── Routing panel (inline sibling of unit) ── */
+.weq-routing-panel {
+    display: none;
+    flex-direction: column;
+    min-width: 200px;
+    max-width: 200px;
+    background: #1a1c22;
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, #2a2d36);
+    border-radius: 6px;
+    flex-shrink: 0;
+    overflow: hidden;
+    max-height: 100%;
+}
+
+.weq-routing-panel.open {
+    display: flex;
+}
+
+/* ── Panel header ── */
+.weq-routing-hdr {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    background: #15171c;
+    border-bottom: 1px solid #2a2d36;
+}
+
+.weq-routing-title {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: #888;
+    text-transform: uppercase;
+}
+
+.weq-routing-band {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+/* ── Scrollable plugin list ── */
+.weq-routing-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px;
+    min-height: 30px;
+}
+
+.weq-routing-scroll::-webkit-scrollbar {
+    width: 4px;
+}
+
+.weq-routing-scroll::-webkit-scrollbar-thumb {
+    background: #3a3d46;
+    border-radius: 2px;
+}
+
+.weq-routing-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+/* ── Plugin row ── */
+.weq-routing-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 6px;
+    background: #22252e;
+    border-radius: 4px;
+    margin-bottom: 3px;
+}
+
+.weq-routing-row:last-child {
+    margin-bottom: 0;
+}
+
+.weq-routing-idx {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    color: #555;
+    width: 14px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+/* Reorder arrows */
+.weq-routing-order {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    flex-shrink: 0;
+    min-width: 10px;
+}
+
+.weq-routing-mv {
+    font-size: 7px;
+    line-height: 1;
+    padding: 1px;
+    border: none;
+    background: none;
+    color: #666;
+    cursor: pointer;
+    transition: color .1s;
+}
+
+.weq-routing-mv:hover {
+    color: #ddd;
+}
+
+/* Plugin name */
+.weq-routing-name {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    color: #ccc;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+}
+
+/* UI button */
+.weq-routing-ui {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border: 1px solid color-mix(in srgb, var(--accent) 50%, #333);
+    border-radius: 3px;
+    background: none;
+    color: var(--accent);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all .1s;
+}
+
+.weq-routing-ui:hover {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+    color: #fff;
+}
+
+/* Remove button */
+.weq-routing-rm {
+    font-size: 13px;
+    line-height: 1;
+    padding: 1px 4px;
+    border: none;
+    background: none;
+    color: #555;
+    cursor: pointer;
+    transition: all .1s;
+    flex-shrink: 0;
+    border-radius: 3px;
+}
+
+.weq-routing-rm:hover {
+    color: #e06464;
+    background: rgba(224, 100, 100, 0.15);
+}
+
+/* Empty state */
+.weq-routing-empty {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: #555;
+    text-align: center;
+    padding: 12px 6px;
+}
+
+/* ── Action buttons at bottom ── */
+.weq-routing-actions {
+    display: flex;
+    gap: 4px;
+    padding: 6px;
+    border-top: 1px solid #2a2d36;
+    background: #15171c;
+}
+
+.weq-routing-assign {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    color: #999;
+    background: #22252e;
+    border: 1px solid #333;
+    border-radius: 4px;
+    padding: 5px 0;
+    cursor: pointer;
+    transition: all .12s;
+    text-align: center;
+    flex: 1;
+}
+
+.weq-routing-assign:hover {
+    border-color: #666;
+    color: #ddd;
+    background: #2a2d36;
+}
+
+.weq-routing-load {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, #1a1c22);
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, #333);
+    border-radius: 4px;
+    padding: 5px 0;
+    cursor: pointer;
+    transition: all .12s;
+    text-align: center;
+    flex: 1;
+}
+
+.weq-routing-load:hover {
+    border-color: var(--accent);
+    color: #fff;
+    background: color-mix(in srgb, var(--accent) 15%, #1a1c22);
+}
+
+/* ── S / M / Del buttons (shared, used in card header) ── */
+.weq-s-btn {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    width: 20px;
+    height: 20px;
+    line-height: 20px;
+    border-radius: 4px;
+    border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+    background: color-mix(in srgb, var(--bg-cell) 60%, black);
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0;
+    text-align: center;
+    transition: all .08s;
+}
+
+.weq-s-btn:hover {
+    border-color: var(--text-secondary);
+    color: var(--text-primary);
+    background: color-mix(in srgb, var(--bg-cell) 40%, black);
+}
+
+.weq-s-btn.on.solo {
+    background: var(--bus-solo-bg, #a07a2e);
+    border-color: var(--bus-solo-bg, #a07a2e);
+    color: var(--bg-panel);
+}
+
+.weq-s-btn.on.mute {
+    background: #c44;
+    border-color: #c44;
+    color: var(--bg-panel);
+}
+
+.weq-s-btn.del {
+    opacity: 0;
+    font-size: 14px;
+    color: var(--locked-icon);
+    background: none;
+    border-color: transparent;
+    transition: opacity .1s;
+}
+
+.weq-band-card:hover .weq-s-btn.del {
+    opacity: 0.4;
+}
+
+.weq-s-btn.del:hover {
+    opacity: 1 !important;
+    background: color-mix(in srgb, var(--locked-icon) 15%, transparent);
+    border-color: var(--locked-icon);
+}
+
+
+/* ── Segment toolbar (inline version) ── */
+.weq-seg-toolbar-inline {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    flex-wrap: wrap;
+}
+
+.weq-seg-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 8px 10px;
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-panel));
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    margin-top: 4px;
+    flex-wrap: wrap;
+}
+
+.weq-seg-info {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--accent);
+    font-weight: 600;
+    margin-right: 4px;
+    white-space: nowrap;
+}
+
+.weq-seg-btn {
+    font-family: var(--font-sans);
+    font-size: 10px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--bg-cell);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all .1s;
+    white-space: nowrap;
+}
+
+.weq-seg-btn:hover {
+    border-color: var(--accent);
+    color: var(--text-primary);
+    background: color-mix(in srgb, var(--accent) 12%, var(--bg-cell));
+}
+
+.weq-seg-btn:active {
+    transform: scale(0.96);
+}
+
+.weq-seg-clear {
+    margin-left: auto;
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 3px 6px;
+}
+
+.weq-seg-clear:hover {
+    color: var(--locked-icon);
+    border-color: var(--locked-icon);
+    background: color-mix(in srgb, var(--locked-icon) 8%, transparent);
+}
+
+/* ═══════════════════════════════════════════
+   Routing Sidebar — vertical tab + collapsible panel
+   ═══════════════════════════════════════════ */
+
+.weq-routing-sidebar {
+    display: flex;
+    flex-direction: row;
+    flex-shrink: 0;
+}
+
+.weq-routing-tab {
+    width: 22px;
+    min-width: 22px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    background: var(--bg-inset);
+    border-right: 1px solid var(--border);
+    cursor: pointer;
+    padding: 6px 0;
+    transition: background 0.15s;
+}
+
+.weq-routing-tab:hover {
+    background: color-mix(in srgb, var(--accent) 10%, var(--bg-inset));
+}
+
+.weq-routing-tab-label {
+    writing-mode: vertical-lr;
+    text-orientation: mixed;
+    font-family: var(--font-mono);
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.weq-routing-sidebar.open .weq-routing-tab-label {
+    color: var(--accent);
+}
+
+.weq-routing-tab-badge {
+    font-family: var(--font-mono);
+    font-size: 8px;
+    font-weight: 700;
+    color: var(--bg-main);
+    background: var(--accent);
+    border-radius: 6px;
+    padding: 0 4px;
+    min-width: 14px;
+    text-align: center;
+    line-height: 14px;
+}
+
+.weq-routing-panel-content {
+    flex: 1;
+    min-width: 0;
+    padding: 0;
+    overflow: hidden;
+    max-width: 0;
+    opacity: 0;
+    transition: max-width 0.2s ease, opacity 0.15s ease, padding 0.2s ease;
+}
+
+.weq-routing-sidebar.open .weq-routing-panel-content {
+    max-width: 300px;
+    opacity: 1;
+    padding: 6px 10px;
+}
+
+.weq-global-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.weq-global-title {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-muted);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+/* ── Signal Chain ── */
+.weq-chain-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.weq-chain-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+}
+
+.weq-chain-eq {
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-inset));
+    border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
+}
+
+.weq-chain-eq.bypassed {
+    opacity: 0.4;
+}
+
+.weq-chain-icon {
+    font-size: 9px;
+    color: var(--accent);
+}
+
+.weq-chain-name {
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.weq-chain-info {
+    color: var(--text-muted);
+    font-size: 9px;
+    margin-left: auto;
+}
+
+.weq-chain-arrow {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 10px;
+    line-height: 1;
+    opacity: 0.5;
+    padding: 1px 0;
+}
+
+.weq-chain-section-hdr {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 3px;
+}
+
+.weq-chain-section-label {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--text-muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.weq-global-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.weq-global-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 6px;
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 11px;
+}
+
+.weq-global-row.dimmed {
+    opacity: 0.4;
+}
+
+.weq-global-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+}
+
+.weq-routing-toglobal,
+.weq-routing-assign-band,
+.weq-routing-byp {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    padding: 1px 4px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.weq-routing-toglobal:hover,
+.weq-routing-assign-band:hover,
+.weq-routing-byp:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.weq-routing-byp.on {
+    color: #e8a030;
+    border-color: #e8a030;
+    background: color-mix(in srgb, #e8a030 12%, transparent);
+}
+
+.weq-routing-row.bypassed .weq-routing-name,
+.weq-global-row.bypassed .weq-global-name {
+    opacity: 0.45;
+    text-decoration: line-through;
+}

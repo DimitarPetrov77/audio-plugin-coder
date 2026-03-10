@@ -1,0 +1,1366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Modular Randomizer</title>
+  <style>
+    /* ═══════════════════════════════════════════════════════════
+       MODULAR RANDOMIZER — Ableton-inspired Design v1
+       ═══════════════════════════════════════════════════════════ */
+
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+    :root {
+      /* Core */
+      --bg-deep: #111111;
+      --bg-surface: #1A1A1A;
+      --bg-elevated: #242424;
+      --bg-hover: #2A2A2A;
+      --bg-active: #333333;
+
+      /* Text */
+      --text-primary: #CCCCCC;
+      --text-secondary: #888888;
+      --text-muted: #555555;
+
+      /* Accent */
+      --accent: #FF5500;
+      --accent-hover: #FF6E2B;
+      --accent-muted: rgba(255, 85, 0, 0.15);
+
+      /* Semantic */
+      --locked: #FF3B3B;
+      --locked-bg: rgba(255, 59, 59, 0.08);
+      --connected: #FF5500;
+      --border: #2A2A2A;
+      --border-focus: #444444;
+
+      /* Spacing */
+      --space-xs: 4px;
+      --space-sm: 8px;
+      --space-md: 12px;
+      --space-lg: 16px;
+      --space-xl: 24px;
+
+      /* Type */
+      --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+      --font-mono: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: var(--bg-deep);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      font-size: 11px;
+      width: 900px;
+      height: 600px;
+      overflow: hidden;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    /* ── LAYOUT ── */
+    .app {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+
+    /* ── HEADER ── */
+    .header {
+      display: flex;
+      align-items: center;
+      height: 40px;
+      padding: 0 var(--space-md);
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+      gap: var(--space-md);
+      flex-shrink: 0;
+    }
+
+    .header-brand {
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+    }
+
+    .header-brand .logo {
+      width: 14px;
+      height: 14px;
+      background: var(--accent);
+      border-radius: 2px;
+    }
+
+    .header-brand .title {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      color: var(--text-primary);
+    }
+
+    .header-divider {
+      width: 1px;
+      height: 20px;
+      background: var(--border);
+    }
+
+    .header-plugin {
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+    }
+
+    .header-plugin label {
+      font-size: 10px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .plugin-selector {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      font-size: 11px;
+      padding: 4px 24px 4px 8px;
+      border-radius: 3px;
+      cursor: pointer;
+      appearance: none;
+      -webkit-appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23888'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 8px center;
+      min-width: 140px;
+    }
+
+    .plugin-selector:hover {
+      border-color: var(--border-focus);
+    }
+
+    .header-controls {
+      display: flex;
+      align-items: center;
+      gap: var(--space-md);
+      margin-left: auto;
+    }
+
+    .bypass-btn {
+      width: 28px;
+      height: 24px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      color: var(--text-muted);
+      font-size: 13px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 100ms ease-out;
+    }
+
+    .bypass-btn:hover {
+      border-color: var(--border-focus);
+      color: var(--text-primary);
+    }
+
+    .bypass-btn.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    .header-slider {
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+    }
+
+    .header-slider label {
+      font-size: 10px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .header-slider input[type="range"] {
+      width: 80px;
+      height: 4px;
+      -webkit-appearance: none;
+      appearance: none;
+      background: var(--bg-deep);
+      border-radius: 2px;
+      outline: none;
+    }
+
+    .header-slider input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px;
+      height: 12px;
+      background: var(--text-primary);
+      border-radius: 50%;
+      cursor: pointer;
+    }
+
+    .header-slider .value {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-secondary);
+      min-width: 30px;
+    }
+
+    /* ── MAIN AREA ── */
+    .main {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+    }
+
+    /* ── PARAMETER GRID PANEL ── */
+    .params-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid var(--border);
+      min-width: 0;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--space-sm) var(--space-md);
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .panel-title {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-secondary);
+    }
+
+    .panel-actions {
+      display: flex;
+      gap: var(--space-xs);
+    }
+
+    .panel-action-btn {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      font-size: 9px;
+      font-family: var(--font-sans);
+      padding: 2px 8px;
+      border-radius: 2px;
+      cursor: pointer;
+      transition: all 100ms ease-out;
+    }
+
+    .panel-action-btn:hover {
+      border-color: var(--border-focus);
+      color: var(--text-secondary);
+    }
+
+    .params-grid-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: var(--space-md);
+    }
+
+    .params-grid-container::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    .params-grid-container::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .params-grid-container::-webkit-scrollbar-thumb {
+      background: var(--border-focus);
+      border-radius: 2px;
+    }
+
+    .params-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+      gap: var(--space-xs);
+    }
+
+    .param-cell {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: var(--space-sm);
+      cursor: pointer;
+      transition: all 100ms ease-out;
+      position: relative;
+      min-height: 52px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .param-cell:hover {
+      background: var(--bg-hover);
+      border-color: var(--border-focus);
+    }
+
+    .param-cell.selected {
+      border-color: var(--accent);
+      background: var(--accent-muted);
+    }
+
+    .param-cell.locked {
+      background: repeating-linear-gradient(
+        -45deg,
+        var(--bg-elevated),
+        var(--bg-elevated) 4px,
+        var(--locked-bg) 4px,
+        var(--locked-bg) 8px
+      );
+      opacity: 0.7;
+    }
+
+    .param-cell.locked .param-lock {
+      display: block;
+    }
+
+    .param-cell.auto-locked {
+      background: repeating-linear-gradient(
+        -45deg,
+        var(--bg-elevated),
+        var(--bg-elevated) 4px,
+        rgba(255, 165, 0, 0.06) 4px,
+        rgba(255, 165, 0, 0.06) 8px
+      );
+      opacity: 0.7;
+    }
+
+    .param-cell.auto-locked .param-lock {
+      display: block;
+      color: #FFA500;
+    }
+
+    .param-name {
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .param-value {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-secondary);
+    }
+
+    .param-lock {
+      display: none;
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      font-size: 9px;
+      color: var(--locked);
+    }
+
+    .param-bar {
+      height: 2px;
+      background: var(--bg-deep);
+      border-radius: 1px;
+      margin-top: 4px;
+      overflow: hidden;
+    }
+
+    .param-bar-fill {
+      height: 100%;
+      background: var(--text-muted);
+      border-radius: 1px;
+      transition: width 200ms ease-out;
+    }
+
+    .param-cell.selected .param-bar-fill {
+      background: var(--accent);
+    }
+
+    /* ── LOGIC BLOCKS PANEL ── */
+    .blocks-panel {
+      width: 340px;
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+
+    .blocks-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: var(--space-md);
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-md);
+    }
+
+    .blocks-container::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    .blocks-container::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .blocks-container::-webkit-scrollbar-thumb {
+      background: var(--border-focus);
+      border-radius: 2px;
+    }
+
+    .logic-block {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .block-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--space-sm) var(--space-md);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .block-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .block-close {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 14px;
+      cursor: pointer;
+      padding: 0;
+      line-height: 1;
+      transition: color 100ms ease-out;
+    }
+
+    .block-close:hover {
+      color: var(--text-primary);
+    }
+
+    .block-body {
+      padding: var(--space-md);
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-md);
+    }
+
+    .block-row {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-xs);
+    }
+
+    .block-row-label {
+      font-size: 9px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+    }
+
+    /* Segmented control (3-way toggle) */
+    .seg-control {
+      display: flex;
+      background: var(--bg-deep);
+      border-radius: 3px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    .seg-btn {
+      flex: 1;
+      padding: 5px 0;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-family: var(--font-sans);
+      font-size: 10px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 100ms ease-out;
+      border-right: 1px solid var(--border);
+    }
+
+    .seg-btn:last-child {
+      border-right: none;
+    }
+
+    .seg-btn:hover {
+      color: var(--text-secondary);
+      background: var(--bg-elevated);
+    }
+
+    .seg-btn.active {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    /* Range slider row */
+    .range-row {
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+    }
+
+    .range-slider {
+      flex: 1;
+      height: 4px;
+      -webkit-appearance: none;
+      appearance: none;
+      background: var(--bg-deep);
+      border-radius: 2px;
+      outline: none;
+    }
+
+    .range-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 10px;
+      height: 10px;
+      background: var(--text-primary);
+      border-radius: 50%;
+      cursor: pointer;
+      transition: background 100ms ease-out;
+    }
+
+    .range-slider::-webkit-slider-thumb:hover {
+      background: #fff;
+    }
+
+    .range-value {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-secondary);
+      min-width: 28px;
+      text-align: right;
+    }
+
+    /* Quantize toggle */
+    .quant-row {
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+    }
+
+    .toggle {
+      width: 28px;
+      height: 14px;
+      background: var(--bg-deep);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      cursor: pointer;
+      position: relative;
+      transition: all 100ms ease-out;
+      flex-shrink: 0;
+    }
+
+    .toggle::after {
+      content: '';
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      background: var(--text-muted);
+      border-radius: 50%;
+      top: 1px;
+      left: 1px;
+      transition: all 100ms ease-out;
+    }
+
+    .toggle.on {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .toggle.on::after {
+      left: 15px;
+      background: #fff;
+    }
+
+    .quant-label {
+      font-size: 10px;
+      color: var(--text-secondary);
+    }
+
+    .quant-steps {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      padding: 2px 6px;
+      width: 36px;
+      text-align: center;
+      margin-left: auto;
+    }
+
+    .quant-steps:focus {
+      outline: none;
+      border-color: var(--accent);
+      color: var(--text-primary);
+    }
+
+    /* Glide time */
+    .glide-row {
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+    }
+
+    /* Targets */
+    .targets-area {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-xs);
+      min-height: 24px;
+      padding: var(--space-xs);
+      background: var(--bg-deep);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+    }
+
+    .target-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: var(--accent-muted);
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      font-size: 9px;
+      font-weight: 500;
+      padding: 2px 6px;
+      border-radius: 2px;
+    }
+
+    .target-remove {
+      cursor: pointer;
+      opacity: 0.6;
+      font-size: 10px;
+    }
+
+    .target-remove:hover {
+      opacity: 1;
+    }
+
+    .targets-placeholder {
+      font-size: 9px;
+      color: var(--text-muted);
+      padding: 2px 4px;
+    }
+
+    /* Fire button */
+    .fire-btn {
+      width: 100%;
+      height: 32px;
+      background: var(--accent);
+      border: none;
+      border-radius: 3px;
+      color: #fff;
+      font-family: var(--font-sans);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: all 100ms ease-out;
+    }
+
+    .fire-btn:hover {
+      background: var(--accent-hover);
+    }
+
+    .fire-btn:active {
+      transform: scale(0.98);
+    }
+
+    .fire-btn.flash {
+      animation: fire-flash 300ms ease-out;
+    }
+
+    @keyframes fire-flash {
+      0% { box-shadow: 0 0 20px var(--accent); }
+      100% { box-shadow: none; }
+    }
+
+    /* Tempo controls (shown when Tempo mode active) */
+    .tempo-controls, .audio-controls {
+      display: none;
+      padding-top: var(--space-xs);
+    }
+
+    .tempo-controls.visible, .audio-controls.visible {
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+    }
+
+    .beat-selector {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      padding: 3px 8px;
+      border-radius: 2px;
+      cursor: pointer;
+      appearance: none;
+      -webkit-appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23888'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 6px center;
+      padding-right: 20px;
+    }
+
+    .beat-label {
+      font-size: 10px;
+      color: var(--text-secondary);
+    }
+
+    /* Add block button */
+    .add-block-btn {
+      width: 100%;
+      padding: 10px;
+      background: none;
+      border: 1px dashed var(--border);
+      border-radius: 4px;
+      color: var(--text-muted);
+      font-family: var(--font-sans);
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 100ms ease-out;
+    }
+
+    .add-block-btn:hover {
+      border-color: var(--border-focus);
+      color: var(--text-secondary);
+    }
+
+    /* ── STATUS BAR ── */
+    .status-bar {
+      display: flex;
+      align-items: center;
+      height: 24px;
+      padding: 0 var(--space-md);
+      background: var(--bg-surface);
+      border-top: 1px solid var(--border);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+      gap: var(--space-lg);
+      flex-shrink: 0;
+    }
+
+    .status-dot {
+      display: inline-block;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      margin-right: 4px;
+    }
+
+    .status-dot.active {
+      background: #4CAF50;
+    }
+
+    .status-dot.inactive {
+      background: var(--text-muted);
+    }
+
+    /* ── CONTEXT MENU ── */
+    .context-menu {
+      display: none;
+      position: fixed;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-focus);
+      border-radius: 4px;
+      padding: var(--space-xs) 0;
+      min-width: 140px;
+      z-index: 100;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    }
+
+    .context-menu.visible {
+      display: block;
+    }
+
+    .context-item {
+      padding: 6px var(--space-md);
+      font-size: 11px;
+      color: var(--text-primary);
+      cursor: pointer;
+      transition: background 80ms ease-out;
+    }
+
+    .context-item:hover {
+      background: var(--accent-muted);
+    }
+
+    .context-item.destructive {
+      color: var(--locked);
+    }
+
+    .context-divider {
+      height: 1px;
+      background: var(--border);
+      margin: var(--space-xs) 0;
+    }
+
+    /* ── PLUGIN EDITOR BUTTON ── */
+    .open-editor-btn {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      font-family: var(--font-sans);
+      font-size: 9px;
+      padding: 3px 8px;
+      border-radius: 2px;
+      cursor: pointer;
+      transition: all 100ms ease-out;
+    }
+
+    .open-editor-btn:hover {
+      border-color: var(--border-focus);
+      color: var(--text-secondary);
+    }
+
+    /* ── EMPTY STATE ── */
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      gap: var(--space-md);
+      color: var(--text-muted);
+    }
+
+    .empty-state .empty-icon {
+      font-size: 32px;
+      opacity: 0.3;
+    }
+
+    .empty-state .empty-text {
+      font-size: 12px;
+    }
+
+    .empty-state .empty-hint {
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+
+    <!-- ══ HEADER ══ -->
+    <div class="header">
+      <div class="header-brand">
+        <div class="logo"></div>
+        <span class="title">MODULAR RANDOMIZER</span>
+      </div>
+
+      <div class="header-divider"></div>
+
+      <div class="header-plugin">
+        <label>Plugin</label>
+        <select class="plugin-selector" id="pluginSelector">
+          <option value="">— Select —</option>
+          <option value="serum" selected>Serum</option>
+          <option value="vital">Vital</option>
+          <option value="diva">Diva</option>
+          <option value="repro">Repro-5</option>
+        </select>
+        <button class="open-editor-btn" id="openEditorBtn">Open Editor</button>
+      </div>
+
+      <div class="header-controls">
+        <button class="bypass-btn" id="bypassBtn" title="Bypass">⏻</button>
+        <div class="header-slider">
+          <label>Mix</label>
+          <input type="range" id="globalMix" min="0" max="1" step="0.01" value="1">
+          <span class="value" id="mixValue">100%</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ MAIN AREA ══ -->
+    <div class="main">
+
+      <!-- ── PARAMETER GRID ── -->
+      <div class="params-panel">
+        <div class="panel-header">
+          <span class="panel-title">Parameters</span>
+          <div class="panel-actions">
+            <button class="panel-action-btn" id="selectAllBtn">Select All</button>
+            <button class="panel-action-btn" id="clearSelBtn">Clear</button>
+          </div>
+        </div>
+        <div class="params-grid-container">
+          <div class="params-grid" id="paramsGrid">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+      </div>
+
+      <!-- ── LOGIC BLOCKS ── -->
+      <div class="blocks-panel">
+        <div class="panel-header">
+          <span class="panel-title">Logic Blocks</span>
+        </div>
+        <div class="blocks-container" id="blocksContainer">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ STATUS BAR ══ -->
+    <div class="status-bar">
+      <span><span class="status-dot active"></span> <span id="statusPlugin">Serum</span></span>
+      <span><span id="statusParams">32</span> params</span>
+      <span><span id="statusLocked">3</span> locked</span>
+      <span><span id="statusBlocks">1</span> block</span>
+      <span>120 BPM</span>
+    </div>
+  </div>
+
+  <!-- ══ CONTEXT MENU ══ -->
+  <div class="context-menu" id="contextMenu">
+    <div class="context-item" id="ctxLock">Lock Parameter</div>
+    <div class="context-item" id="ctxUnlock">Unlock Parameter</div>
+    <div class="context-divider"></div>
+    <div class="context-item" id="ctxSelect">Select</div>
+    <div class="context-item" id="ctxDeselect">Deselect</div>
+  </div>
+
+  <script>
+    // ═══════════════════════════════════════════════════════════
+    // MODULAR RANDOMIZER — Preview Logic (v1)
+    // ═══════════════════════════════════════════════════════════
+
+    // Mock parameter data (simulates what a loaded plugin would expose)
+    const MOCK_PARAMS = [
+      { id: 'osc1_wave', name: 'Osc1 Wave', value: 0.25, locked: false },
+      { id: 'osc1_semi', name: 'Osc1 Semi', value: 0.50, locked: false },
+      { id: 'osc1_fine', name: 'Osc1 Fine', value: 0.50, locked: false },
+      { id: 'osc1_level', name: 'Osc1 Level', value: 0.80, locked: false },
+      { id: 'osc2_wave', name: 'Osc2 Wave', value: 0.00, locked: false },
+      { id: 'osc2_semi', name: 'Osc2 Semi', value: 0.50, locked: false },
+      { id: 'osc2_fine', name: 'Osc2 Fine', value: 0.50, locked: false },
+      { id: 'osc2_level', name: 'Osc2 Level', value: 0.60, locked: false },
+      { id: 'filter_cutoff', name: 'Filter Cut', value: 0.65, locked: false },
+      { id: 'filter_reso', name: 'Filter Res', value: 0.30, locked: false },
+      { id: 'filter_drive', name: 'Filter Drive', value: 0.10, locked: false },
+      { id: 'filter_type', name: 'Filter Type', value: 0.00, locked: false },
+      { id: 'env1_attack', name: 'Env1 Atk', value: 0.05, locked: false },
+      { id: 'env1_decay', name: 'Env1 Dec', value: 0.30, locked: false },
+      { id: 'env1_sustain', name: 'Env1 Sus', value: 0.70, locked: false },
+      { id: 'env1_release', name: 'Env1 Rel', value: 0.40, locked: false },
+      { id: 'lfo1_rate', name: 'LFO1 Rate', value: 0.50, locked: false },
+      { id: 'lfo1_shape', name: 'LFO1 Shape', value: 0.00, locked: false },
+      { id: 'fx_reverb', name: 'Reverb Mix', value: 0.20, locked: false },
+      { id: 'fx_delay', name: 'Delay Mix', value: 0.15, locked: false },
+      { id: 'fx_chorus', name: 'Chorus', value: 0.00, locked: false },
+      { id: 'fx_distort', name: 'Distortion', value: 0.00, locked: false },
+      { id: 'unison_voices', name: 'Unison Voices', value: 0.14, locked: false },
+      { id: 'unison_detune', name: 'Unison Det', value: 0.30, locked: false },
+      { id: 'porta_time', name: 'Portamento', value: 0.00, locked: false },
+      { id: 'bend_range', name: 'Bend Range', value: 0.17, locked: false },
+      { id: 'macro1', name: 'Macro 1', value: 0.50, locked: false },
+      { id: 'macro2', name: 'Macro 2', value: 0.50, locked: false },
+      { id: 'macro3', name: 'Macro 3', value: 0.50, locked: false },
+      { id: 'macro4', name: 'Macro 4', value: 0.50, locked: false },
+      { id: 'master_vol', name: 'Master Vol', value: 0.80, locked: true, autoLocked: true },
+      { id: 'master_pan', name: 'Master Pan', value: 0.50, locked: false },
+    ];
+
+    // State
+    let selectedParams = new Set();
+    let logicBlocks = [];
+    let blockIdCounter = 0;
+    let contextTarget = null;
+
+    // ── PARAMETER GRID ──
+    function renderParams() {
+      const grid = document.getElementById('paramsGrid');
+      grid.innerHTML = '';
+
+      MOCK_PARAMS.forEach(param => {
+        const cell = document.createElement('div');
+        cell.className = 'param-cell';
+        if (param.locked && param.autoLocked) cell.classList.add('auto-locked');
+        else if (param.locked) cell.classList.add('locked');
+        if (selectedParams.has(param.id)) cell.classList.add('selected');
+
+        cell.innerHTML = `
+          <span class="param-name">${param.name}</span>
+          <span class="param-value">${param.value.toFixed(2)}</span>
+          <span class="param-lock">${param.autoLocked ? '⚠' : '🔒'}</span>
+          <div class="param-bar"><div class="param-bar-fill" style="width: ${param.value * 100}%"></div></div>
+        `;
+
+        cell.addEventListener('click', (e) => {
+          if (param.locked) return;
+          if (e.shiftKey) {
+            // Range select (simplified: just toggle)
+          }
+          if (selectedParams.has(param.id)) {
+            selectedParams.delete(param.id);
+          } else {
+            selectedParams.add(param.id);
+          }
+          renderParams();
+          updateTargetsOnBlocks();
+        });
+
+        cell.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          contextTarget = param;
+          showContextMenu(e.clientX, e.clientY, param);
+        });
+
+        grid.appendChild(cell);
+      });
+
+      updateStatus();
+    }
+
+    // ── CONTEXT MENU ──
+    function showContextMenu(x, y, param) {
+      const menu = document.getElementById('contextMenu');
+      menu.style.left = x + 'px';
+      menu.style.top = y + 'px';
+      menu.classList.add('visible');
+
+      document.getElementById('ctxLock').style.display = param.locked ? 'none' : 'block';
+      document.getElementById('ctxUnlock').style.display = param.locked ? 'block' : 'none';
+      document.getElementById('ctxSelect').style.display = selectedParams.has(param.id) ? 'none' : 'block';
+      document.getElementById('ctxDeselect').style.display = selectedParams.has(param.id) ? 'block' : 'none';
+    }
+
+    document.addEventListener('click', () => {
+      document.getElementById('contextMenu').classList.remove('visible');
+    });
+
+    document.getElementById('ctxLock').addEventListener('click', () => {
+      if (contextTarget) {
+        contextTarget.locked = true;
+        selectedParams.delete(contextTarget.id);
+        renderParams();
+        updateTargetsOnBlocks();
+      }
+    });
+
+    document.getElementById('ctxUnlock').addEventListener('click', () => {
+      if (contextTarget && !contextTarget.autoLocked) {
+        contextTarget.locked = false;
+        renderParams();
+      }
+    });
+
+    document.getElementById('ctxSelect').addEventListener('click', () => {
+      if (contextTarget && !contextTarget.locked) {
+        selectedParams.add(contextTarget.id);
+        renderParams();
+        updateTargetsOnBlocks();
+      }
+    });
+
+    document.getElementById('ctxDeselect').addEventListener('click', () => {
+      if (contextTarget) {
+        selectedParams.delete(contextTarget.id);
+        renderParams();
+        updateTargetsOnBlocks();
+      }
+    });
+
+    // ── LOGIC BLOCKS ──
+    function createLogicBlock() {
+      const id = ++blockIdCounter;
+      const block = {
+        id,
+        triggerMode: 'manual',
+        rangeMin: 0,
+        rangeMax: 1,
+        quantize: false,
+        quantSteps: 12,
+        movementMode: 'instant',
+        glideTime: 50,
+        beatDivision: '1/4',
+        threshold: -12,
+      };
+      logicBlocks.push(block);
+      renderBlocks();
+      updateStatus();
+    }
+
+    function renderBlocks() {
+      const container = document.getElementById('blocksContainer');
+      container.innerHTML = '';
+
+      logicBlocks.forEach(block => {
+        const el = document.createElement('div');
+        el.className = 'logic-block';
+        el.innerHTML = `
+          <div class="block-header">
+            <span class="block-title">Block ${block.id}</span>
+            <button class="block-close" data-id="${block.id}">×</button>
+          </div>
+          <div class="block-body">
+            <!-- Trigger -->
+            <div class="block-row">
+              <span class="block-row-label">Trigger</span>
+              <div class="seg-control" data-block="${block.id}" data-field="trigger">
+                <button class="seg-btn ${block.triggerMode === 'manual' ? 'active' : ''}" data-val="manual">Manual</button>
+                <button class="seg-btn ${block.triggerMode === 'tempo' ? 'active' : ''}" data-val="tempo">Tempo</button>
+                <button class="seg-btn ${block.triggerMode === 'audio' ? 'active' : ''}" data-val="audio">Audio</button>
+              </div>
+              <div class="tempo-controls ${block.triggerMode === 'tempo' ? 'visible' : ''}" data-block="${block.id}">
+                <span class="beat-label">Division</span>
+                <select class="beat-selector" data-block="${block.id}">
+                  <option ${block.beatDivision === '1/1' ? 'selected' : ''}>1/1</option>
+                  <option ${block.beatDivision === '1/2' ? 'selected' : ''}>1/2</option>
+                  <option ${block.beatDivision === '1/4' ? 'selected' : ''}>1/4</option>
+                  <option ${block.beatDivision === '1/8' ? 'selected' : ''}>1/8</option>
+                  <option ${block.beatDivision === '1/16' ? 'selected' : ''}>1/16</option>
+                  <option ${block.beatDivision === '1/32' ? 'selected' : ''}>1/32</option>
+                </select>
+              </div>
+              <div class="audio-controls ${block.triggerMode === 'audio' ? 'visible' : ''}" data-block="${block.id}">
+                <span class="beat-label">Threshold</span>
+                <input type="range" class="range-slider" min="-60" max="0" value="${block.threshold}" style="width: 100px;">
+                <span class="range-value">${block.threshold}dB</span>
+              </div>
+            </div>
+
+            <!-- Range -->
+            <div class="block-row">
+              <span class="block-row-label">Range</span>
+              <div class="range-row">
+                <span class="range-value">${block.rangeMin.toFixed(0)}%</span>
+                <input type="range" class="range-slider" min="0" max="100" value="${block.rangeMin * 100}" data-block="${block.id}" data-field="rangeMin">
+                <input type="range" class="range-slider" min="0" max="100" value="${block.rangeMax * 100}" data-block="${block.id}" data-field="rangeMax">
+                <span class="range-value">${(block.rangeMax * 100).toFixed(0)}%</span>
+              </div>
+            </div>
+
+            <!-- Quantize -->
+            <div class="block-row">
+              <div class="quant-row">
+                <div class="toggle ${block.quantize ? 'on' : ''}" data-block="${block.id}" data-field="quantize"></div>
+                <span class="quant-label">Quantize</span>
+                <input class="quant-steps" type="number" value="${block.quantSteps}" min="2" max="128" data-block="${block.id}" ${!block.quantize ? 'disabled' : ''}>
+              </div>
+            </div>
+
+            <!-- Movement -->
+            <div class="block-row">
+              <span class="block-row-label">Movement</span>
+              <div class="seg-control" data-block="${block.id}" data-field="movement">
+                <button class="seg-btn ${block.movementMode === 'instant' ? 'active' : ''}" data-val="instant">Instant</button>
+                <button class="seg-btn ${block.movementMode === 'glide' ? 'active' : ''}" data-val="glide">Glide</button>
+              </div>
+              <div class="glide-row" style="display: ${block.movementMode === 'glide' ? 'flex' : 'none'}; margin-top: 4px;">
+                <span class="beat-label">Time</span>
+                <input type="range" class="range-slider" min="1" max="2000" value="${block.glideTime}" style="flex:1" data-block="${block.id}" data-field="glideTime">
+                <span class="range-value">${block.glideTime}ms</span>
+              </div>
+            </div>
+
+            <!-- Targets -->
+            <div class="block-row">
+              <span class="block-row-label">Targets</span>
+              <div class="targets-area" id="targets-${block.id}">
+                ${getTargetsHTML()}
+              </div>
+            </div>
+
+            <!-- Fire -->
+            <button class="fire-btn" data-block="${block.id}">FIRE</button>
+          </div>
+        `;
+        container.appendChild(el);
+      });
+
+      // Add block button
+      const addBtn = document.createElement('button');
+      addBtn.className = 'add-block-btn';
+      addBtn.textContent = '+ Add Logic Block';
+      addBtn.addEventListener('click', createLogicBlock);
+      container.appendChild(addBtn);
+
+      // Wire up events
+      wireBlockEvents();
+    }
+
+    function getTargetsHTML() {
+      if (selectedParams.size === 0) {
+        return '<span class="targets-placeholder">Click parameters to assign</span>';
+      }
+      return [...selectedParams].map(id => {
+        const param = MOCK_PARAMS.find(p => p.id === id);
+        return `<span class="target-tag">${param.name}<span class="target-remove" data-param="${id}">×</span></span>`;
+      }).join('');
+    }
+
+    function updateTargetsOnBlocks() {
+      logicBlocks.forEach(block => {
+        const area = document.getElementById(`targets-${block.id}`);
+        if (area) area.innerHTML = getTargetsHTML();
+      });
+
+      // Wire remove buttons
+      document.querySelectorAll('.target-remove').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const paramId = btn.dataset.param;
+          selectedParams.delete(paramId);
+          renderParams();
+          updateTargetsOnBlocks();
+        });
+      });
+    }
+
+    function wireBlockEvents() {
+      // Close buttons
+      document.querySelectorAll('.block-close').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = parseInt(btn.dataset.id);
+          logicBlocks = logicBlocks.filter(b => b.id !== id);
+          renderBlocks();
+          updateStatus();
+        });
+      });
+
+      // Segmented controls
+      document.querySelectorAll('.seg-control').forEach(control => {
+        control.querySelectorAll('.seg-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const blockId = parseInt(control.dataset.block);
+            const field = control.dataset.field;
+            const val = btn.dataset.val;
+            const block = logicBlocks.find(b => b.id === blockId);
+
+            if (field === 'trigger') {
+              block.triggerMode = val;
+            } else if (field === 'movement') {
+              block.movementMode = val;
+            }
+            renderBlocks();
+          });
+        });
+      });
+
+      // Toggles
+      document.querySelectorAll('.toggle').forEach(toggle => {
+        toggle.addEventListener('click', () => {
+          const blockId = parseInt(toggle.dataset.block);
+          const block = logicBlocks.find(b => b.id === blockId);
+          block.quantize = !block.quantize;
+          renderBlocks();
+        });
+      });
+
+      // Fire buttons
+      document.querySelectorAll('.fire-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          btn.classList.add('flash');
+          setTimeout(() => btn.classList.remove('flash'), 300);
+          randomizeSelected();
+        });
+      });
+
+      // Target remove buttons
+      document.querySelectorAll('.target-remove').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const paramId = btn.dataset.param;
+          selectedParams.delete(paramId);
+          renderParams();
+          updateTargetsOnBlocks();
+        });
+      });
+    }
+
+    // ── RANDOMIZATION ──
+    function randomizeSelected() {
+      if (logicBlocks.length === 0) return;
+      const block = logicBlocks[0]; // Use first block for now
+
+      selectedParams.forEach(id => {
+        const param = MOCK_PARAMS.find(p => p.id === id);
+        if (param && !param.locked) {
+          const range = block.rangeMax - block.rangeMin;
+          let newVal = block.rangeMin + Math.random() * range;
+
+          if (block.quantize) {
+            const step = 1 / block.quantSteps;
+            newVal = Math.round(newVal / step) * step;
+          }
+
+          param.value = Math.max(0, Math.min(1, newVal));
+        }
+      });
+
+      renderParams();
+    }
+
+    // ── HEADER CONTROLS ──
+    document.getElementById('bypassBtn').addEventListener('click', function() {
+      this.classList.toggle('active');
+    });
+
+    document.getElementById('globalMix').addEventListener('input', function() {
+      document.getElementById('mixValue').textContent = Math.round(this.value * 100) + '%';
+    });
+
+    document.getElementById('selectAllBtn').addEventListener('click', () => {
+      MOCK_PARAMS.forEach(p => {
+        if (!p.locked) selectedParams.add(p.id);
+      });
+      renderParams();
+      updateTargetsOnBlocks();
+    });
+
+    document.getElementById('clearSelBtn').addEventListener('click', () => {
+      selectedParams.clear();
+      renderParams();
+      updateTargetsOnBlocks();
+    });
+
+    // ── STATUS ──
+    function updateStatus() {
+      document.getElementById('statusParams').textContent = MOCK_PARAMS.length;
+      document.getElementById('statusLocked').textContent = MOCK_PARAMS.filter(p => p.locked).length;
+      document.getElementById('statusBlocks').textContent = logicBlocks.length;
+    }
+
+    // ── INIT ──
+    renderParams();
+    createLogicBlock();
+  </script>
+</body>
+</html>

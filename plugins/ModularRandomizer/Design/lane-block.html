@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lane Block</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap');
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg-app:        #0A0A0D;
+    --bg-panel:      #1C1C20;
+    --bg-cell:       #272730;
+    --bg-inset:      #0C0C0E;
+    --border:        #3A3A44;
+    --border-strong: #5A5A68;
+    --border-focus:  #C0C0CC;
+    --text-primary:  #F4F4F0;
+    --text-secondary:#A0A0AA;
+    --text-muted:    #555560;
+    --accent:        #E8E8F4;
+    --accent-text:   #111114;
+  }
+
+  body {
+    background: var(--bg-app);
+    font-family: 'DM Mono', monospace;
+    display: flex; align-items: flex-start; justify-content: center;
+    padding: 32px 20px 80px;
+    min-height: 100vh;
+  }
+
+  /* ─── PANEL ─── */
+  .panel {
+    width: 620px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 12px 56px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.03) inset;
+  }
+
+  /* ─── HEADER ─── */
+  .header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 13px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-inset);
+  }
+  .block-icon {
+    width: 18px; height: 18px; border-radius: 3px; flex-shrink: 0;
+    background: #6060A0;
+  }
+  .block-title { font-family:'Syne',sans-serif; font-size:12px; font-weight:700; color:var(--text-primary); }
+  .block-meta  { font-size:9px; color:var(--text-muted); letter-spacing:0.05em; margin-top:1px; }
+  .hdr-right   { margin-left:auto; display:flex; align-items:center; gap:7px; }
+  .status-dot  { width:6px; height:6px; background:#5ED45E; border-radius:50%; box-shadow:0 0 5px rgba(94,212,94,0.5); flex-shrink:0; }
+
+  /* small buttons */
+  .sbtn {
+    font-family:'DM Mono',monospace; font-size:9px; letter-spacing:0.08em; text-transform:uppercase;
+    color:var(--text-secondary); background:var(--bg-cell); border:1px solid var(--border);
+    border-radius:3px; padding:3px 8px; cursor:pointer; transition:border-color .12s,color .12s;
+    white-space:nowrap; line-height:1.4;
+  }
+  .sbtn:hover { border-color:var(--border-strong); color:var(--text-primary); }
+  .sbtn.on    { background:var(--accent); color:var(--accent-text); border-color:var(--accent); }
+  .sbtn-icon  { background:none; border:none; font-size:13px; color:var(--text-muted); cursor:pointer; padding:0 2px; line-height:1; }
+  .sbtn-icon:hover { color:var(--text-primary); }
+
+  /* ─── TOOLBAR ─── */
+  .toolbar {
+    display: flex; align-items: center; gap: 5px;
+    padding: 6px 13px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-panel);
+    flex-wrap: nowrap;
+  }
+  .tsep { width:1px; height:14px; background:var(--border); margin:0 3px; flex-shrink:0; }
+
+  .tbtn {
+    font-family:'DM Mono',monospace; font-size:9px; letter-spacing:0.06em;
+    color:var(--text-muted); background:none; border:1px solid transparent;
+    border-radius:3px; padding:3px 7px; cursor:pointer; transition:all .1s;
+    display:flex; align-items:center; gap:4px; white-space:nowrap; line-height:1.4;
+  }
+  .tbtn:hover { color:var(--text-secondary); border-color:var(--border); }
+  .tbtn.on    { color:var(--text-primary); background:var(--bg-cell); border-color:var(--border-strong); }
+
+  /* itabs */
+  .itabs { display:flex; background:var(--bg-inset); border:1px solid var(--border); border-radius:3px; padding:1px; gap:1px; flex-shrink:0; }
+  .itab  {
+    font-size:9px; letter-spacing:0.04em; color:var(--text-muted); background:none; border:none;
+    border-radius:2px; padding:3px 6px; cursor:pointer; transition:background .1s,color .1s; white-space:nowrap; line-height:1.4;
+  }
+  .itab.on   { background:var(--bg-cell); color:var(--text-primary); }
+  .itab:hover { color:var(--text-secondary); }
+
+  /* bpm input */
+  .bpm-input {
+    width:36px; background:var(--bg-inset); border:1px solid var(--border);
+    border-radius:3px; color:var(--text-primary); font-family:'DM Mono',monospace;
+    font-size:9px; padding:3px 4px; text-align:center; outline:none; line-height:1.4;
+  }
+  .bpm-input:focus { border-color:var(--border-focus); }
+
+  .toolbar-label { font-size:8px; letter-spacing:0.12em; text-transform:uppercase; color:var(--text-muted); white-space:nowrap; }
+
+  /* ─── LANES ─── */
+  .lanes { display:flex; flex-direction:column; }
+
+  /* ─── LANE ─── */
+  .lane { border-bottom:1px solid var(--border); }
+  .lane:last-child { border-bottom:none; }
+
+  /* lane header */
+  .lane-hdr {
+    display: flex; align-items: stretch;
+    height: 26px;
+    border-bottom: 1px solid var(--border);
+    user-select: none;
+  }
+  .lane-hdr.is-collapsed { border-bottom:none; }
+
+  .lh-arrow {
+    width:24px; flex-shrink:0;
+    display:flex; align-items:center; justify-content:center;
+    border-right:1px solid var(--border);
+    cursor:pointer; color:var(--text-muted); font-size:8px;
+    transition:color .1s;
+  }
+  .lh-arrow:hover { color:var(--text-primary); }
+
+  .lh-color {
+    width:3px; flex-shrink:0;
+  }
+
+  .lh-name {
+    flex:1; display:flex; align-items:center;
+    padding:0 10px;
+    font-size:10px; color:var(--text-secondary);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    border-right:1px solid var(--border); gap:5px;
+    min-width:0;
+  }
+  .lh-name .param { color:var(--text-muted); font-size:9px; }
+
+  /* right controls in header — each cell separated by border */
+  .lh-ctrl { display:flex; align-items:stretch; flex-shrink:0; }
+  .lhc {
+    display:flex; align-items:center; justify-content:center;
+    padding:0 9px; border-left:1px solid var(--border);
+    font-size:9px; color:var(--text-muted); cursor:pointer;
+    transition:color .1s; white-space:nowrap; gap:3px;
+  }
+  .lhc:hover { color:var(--text-secondary); }
+  .lhc.lit   { color:var(--text-secondary); }
+  .lhc select {
+    font-family:'DM Mono',monospace; font-size:9px; color:var(--text-secondary);
+    background:none; border:none; outline:none; cursor:pointer;
+    padding:0; max-width:36px;
+  }
+  .lhc select option { background:var(--bg-cell); color:var(--text-primary); }
+
+  /* mute */
+  .lh-mute {
+    width:26px; flex-shrink:0; border-left:1px solid var(--border);
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer; font-size:9px; color:var(--text-muted); transition:color .1s;
+  }
+  .lh-mute:hover { color:var(--text-primary); }
+  .lh-mute.lit   { color:#5ED45E; }
+
+  /* lane body */
+  .lane-body {
+    display:flex; align-items:stretch;
+    overflow:hidden;
+    transition:height .18s ease;
+  }
+
+  /* left sidebar */
+  .lb-left {
+    width:48px; flex-shrink:0; border-right:1px solid var(--border);
+    display:flex; flex-direction:column; align-items:center;
+    justify-content:space-evenly; padding:6px 0;
+    gap:4px;
+  }
+  .mk { display:flex; flex-direction:column; align-items:center; gap:2px; cursor:pointer; }
+  .mk svg { width:26px; height:26px; display:block; }
+  .mk-val   { font-size:9px; color:var(--text-secondary); line-height:1; }
+  .mk-label { font-size:7px; color:var(--text-muted); letter-spacing:0.1em; text-transform:uppercase; line-height:1; }
+
+  /* interp mini toggle vertical in left bar */
+  .interp-stack { display:flex; flex-direction:column; gap:2px; width:40px; }
+  .ibtn {
+    font-size:7px; letter-spacing:0.05em; color:var(--text-muted);
+    background:none; border:1px solid var(--border); border-radius:2px;
+    padding:2px 0; cursor:pointer; text-align:center; transition:all .1s; line-height:1.4;
+  }
+  .ibtn:hover { color:var(--text-secondary); border-color:var(--border-strong); }
+  .ibtn.on    { color:var(--text-primary); background:var(--bg-cell); border-color:var(--border-strong); }
+
+  /* canvas area */
+  .lb-canvas {
+    flex:1; position:relative; background:var(--bg-inset);
+    min-width:0; overflow:hidden;
+  }
+  .lb-canvas canvas {
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    display:block;
+  }
+  .playhead {
+    position:absolute; top:0; bottom:0; width:1px;
+    background:rgba(255,255,255,0.45);
+    pointer-events:none; z-index:2;
+    box-shadow:0 0 3px rgba(255,255,255,0.25);
+  }
+
+  /* right sidebar */
+  .lb-right {
+    width:44px; flex-shrink:0; border-left:1px solid var(--border);
+    display:flex; flex-direction:column; align-items:center;
+    justify-content:space-evenly; padding:6px 4px; gap:4px;
+  }
+  .rb-label { font-size:7px; color:var(--text-muted); letter-spacing:0.1em; text-transform:uppercase; line-height:1; text-align:center; }
+  .sync-pill {
+    font-size:8px; color:var(--text-muted); background:none; border:1px solid var(--border);
+    border-radius:2px; padding:2px 4px; cursor:pointer; width:100%; text-align:center;
+    transition:all .1s; letter-spacing:0.04em; line-height:1.4;
+  }
+  .sync-pill.on { color:#5ED45E; border-color:rgba(94,212,94,0.35); background:rgba(94,212,94,0.06); }
+
+  /* add lane */
+  .add-lane {
+    display:flex; align-items:center; justify-content:center; gap:6px;
+    padding:9px; cursor:pointer; border-top:1px solid var(--border);
+    color:var(--text-muted); font-size:9px; letter-spacing:0.1em; text-transform:uppercase;
+    transition:color .12s, background .12s;
+  }
+  .add-lane:hover { color:var(--text-secondary); background:rgba(255,255,255,0.02); }
+</style>
+</head>
+<body>
+<div class="panel">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="block-icon"></div>
+    <div>
+      <div class="block-title">Block 1</div>
+      <div class="block-meta" id="metaText">Lane / 120 bpm / 3 params</div>
+    </div>
+    <div class="hdr-right">
+      <div class="status-dot"></div>
+      <button class="sbtn on" id="playBtn" onclick="togglePlay()">▶ Play</button>
+      <button class="sbtn">Assign</button>
+      <button class="sbtn-icon" title="Close">×</button>
+    </div>
+  </div>
+
+  <!-- TOOLBAR -->
+  <div class="toolbar">
+    <!-- tools -->
+    <button class="tbtn on" id="toolDraw"   onclick="setTool('draw')">  ✏ Draw   </button>
+    <button class="tbtn"    id="toolSelect" onclick="setTool('select')">↖ Select </button>
+    <button class="tbtn"    id="toolErase"  onclick="setTool('erase')"> ⌫ Erase  </button>
+
+    <div class="tsep"></div>
+
+    <!-- grid -->
+    <span class="toolbar-label">Grid</span>
+    <div class="itabs" id="gridTabs">
+      <button class="itab"    onclick="setGrid(this,'free')">Free</button>
+      <button class="itab on" onclick="setGrid(this,'1/8')">1/8</button>
+      <button class="itab"    onclick="setGrid(this,'1/4')">1/4</button>
+      <button class="itab"    onclick="setGrid(this,'1/2')">1/2</button>
+      <button class="itab"    onclick="setGrid(this,'1/1')">1/1</button>
+    </div>
+
+    <div class="tsep"></div>
+    <button class="tbtn" onclick="clearActive()">⊘ Clear</button>
+
+    <!-- right side: bpm + sync -->
+    <div style="margin-left:auto; display:flex; align-items:center; gap:5px;">
+      <span class="toolbar-label">BPM</span>
+      <input class="bpm-input" type="number" id="bpmIn" value="120" min="20" max="300" oninput="setBpm(this.value)">
+      <div class="itabs">
+        <button class="itab on" id="syncHost" onclick="setSyncMode('host',this)">Host</button>
+        <button class="itab"    id="syncInt"  onclick="setSyncMode('int',this)">Int</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- LANES -->
+  <div class="lanes" id="lanesEl"></div>
+
+  <!-- ADD -->
+  <div class="add-lane" onclick="addLane()">+ Add parameter lane</div>
+
+</div>
+
+<script>
+// ════════════════════════════════
+// STATE
+// ════════════════════════════════
+const COLORS = ['#8888CC','#CC8868','#68CC98','#CC6888','#88BBCC','#CCBA68','#A888CC','#68CCBA'];
+const LOOP_OPTS = ['1/16','1/8','1/4','1/2','1/1','2/1','4/1','free'];
+const LANE_H = 110; // default expanded height px
+
+let tool = 'draw';
+let grid = '1/8';
+let bpm  = 120;
+let playing = true;
+let lanes = [];
+let activeLaneId = null;
+
+function mkLane(plugin, param, ci) {
+  return {
+    id: String(Date.now() + Math.random()),
+    plugin, param,
+    color: COLORS[ci % COLORS.length],
+    pts: [],           // [{x,y}] 0-1
+    loopLen: '1/1',
+    phase: 0,          // degrees 0-270
+    depth: 100,        // %
+    interp: 'smooth',  // smooth|step|linear
+    synced: true,
+    muted: false,
+    collapsed: false,
+    ph: 0,             // playhead 0-1
+  };
+}
+
+// ════════════════════════════════
+// INITIAL LANES
+// ════════════════════════════════
+const INIT = [
+  ['OldSkoolVerb', 'PreDly'],
+  ['OldSkoolVerb', 'Space'],
+  ['Delay', 'Feedback'],
+];
+INIT.forEach(([p,q],i) => {
+  const l = mkLane(p,q,i);
+  if (i===0) {
+    l.pts=[{x:0,y:.8},{x:.12,y:.3},{x:.25,y:.55},{x:.38,y:.1},{x:.5,y:.65},{x:.63,y:.35},{x:.78,y:.8},{x:.9,y:.45},{x:1,y:.6}];
+  } else if (i===1) {
+    l.pts=[{x:0,y:.5},{x:.25,y:.1},{x:.5,y:.85},{x:.75,y:.2},{x:1,y:.55}];
+    l.interp='step'; l.loopLen='1/2';
+  } else {
+    l.collapsed=true; l.loopLen='2/1';
+  }
+  lanes.push(l);
+});
+
+// ════════════════════════════════
+// RENDER
+// ════════════════════════════════
+function render() {
+  const el = document.getElementById('lanesEl');
+  el.innerHTML = '';
+  lanes.forEach(l => el.appendChild(buildLane(l)));
+  lanes.forEach(l => {
+    const c = document.getElementById('c-'+l.id);
+    if (c) { sizeCanvas(c, l); setupDraw(c, l); redraw(l); }
+  });
+  updateMeta();
+}
+
+function buildLane(l) {
+  const wrap = document.createElement('div');
+  wrap.className = 'lane';
+  wrap.id = 'lane-'+l.id;
+
+  // ── header ──
+  const hdr = document.createElement('div');
+  hdr.className = 'lane-hdr' + (l.collapsed ? ' is-collapsed' : '');
+  hdr.innerHTML = `
+    <div class="lh-arrow" onclick="toggleCollapse('${l.id}')">${l.collapsed ? '▶' : '▼'}</div>
+    <div class="lh-color" style="background:${l.color}"></div>
+    <div class="lh-name">
+      <span>${l.plugin}</span><span class="param">/ ${l.param}</span>
+    </div>
+    <div class="lh-ctrl">
+      <div class="lhc lit" title="Loop length">
+        <select onchange="laneSet('${l.id}','loopLen',this.value)">
+          ${LOOP_OPTS.map(o=>`<option ${o===l.loopLen?'selected':''}>${o}</option>`).join('')}
+        </select>
+      </div>
+      <div class="lhc" title="Phase — click to shift +90°" onclick="lanePhase('${l.id}')">⌀ ${l.phase}°</div>
+      <div class="lhc lit" title="Depth — click to cycle" onclick="laneDepth('${l.id}')">▲ ${l.depth}%</div>
+    </div>
+    <div class="lh-mute ${l.muted?'':'lit'}" onclick="laneMute('${l.id}')" title="Mute">${l.muted?'○':'●'}</div>
+  `;
+
+  // ── body ──
+  const body = document.createElement('div');
+  body.className = 'lane-body';
+  body.id = 'body-'+l.id;
+  body.style.height = l.collapsed ? '0px' : LANE_H+'px';
+
+  if (!l.collapsed) {
+    body.innerHTML = `
+      <div class="lb-left">
+        <div class="mk" onclick="laneDepth('${l.id}')" title="Depth">
+          ${mkKnob(l.color, l.depth/100)}
+          <div class="mk-val">${l.depth}%</div>
+          <div class="mk-label">Depth</div>
+        </div>
+        <div class="mk" onclick="lanePhase('${l.id}')" title="Phase">
+          ${mkKnob(l.color, l.phase/270, 0.6)}
+          <div class="mk-val">${l.phase}°</div>
+          <div class="mk-label">Phase</div>
+        </div>
+      </div>
+      <div class="lb-canvas" id="wrap-${l.id}">
+        <canvas id="c-${l.id}"></canvas>
+        <div class="playhead" id="ph-${l.id}" style="left:${l.ph*100}%"></div>
+      </div>
+      <div class="lb-right">
+        <div class="rb-label">Interp</div>
+        <div class="interp-stack">
+          <button class="ibtn ${l.interp==='smooth'?'on':''}" onclick="laneInterp('${l.id}','smooth')">Smooth</button>
+          <button class="ibtn ${l.interp==='step'?'on':''}"   onclick="laneInterp('${l.id}','step')">Step</button>
+          <button class="ibtn ${l.interp==='linear'?'on':''}" onclick="laneInterp('${l.id}','linear')">Linear</button>
+        </div>
+        <div class="rb-label" style="margin-top:4px">Sync</div>
+        <button class="sync-pill ${l.synced?'on':''}" onclick="laneSync('${l.id}')">
+          ${l.synced?'Host':'Int'}
+        </button>
+      </div>
+    `;
+  }
+
+  wrap.appendChild(hdr);
+  wrap.appendChild(body);
+  return wrap;
+}
+
+function mkKnob(color, pct, alpha=0.9) {
+  const total = 47, gap = 16;
+  const val = Math.max(0, Math.min(1, pct)) * total;
+  return `<svg viewBox="0 0 28 28">
+    <circle cx="14" cy="14" r="10" fill="none" stroke="#333340" stroke-width="2.5"
+      stroke-dasharray="${total} ${gap}" stroke-dashoffset="-8" stroke-linecap="round"/>
+    <circle cx="14" cy="14" r="10" fill="none" stroke="${color}" stroke-width="2.5"
+      stroke-dasharray="${val} ${total-val+gap}" stroke-dashoffset="-8" stroke-linecap="round" opacity="${alpha}"/>
+  </svg>`;
+}
+
+// ════════════════════════════════
+// CANVAS SETUP & DRAWING
+// ════════════════════════════════
+function sizeCanvas(c, l) {
+  const wrap = document.getElementById('wrap-'+l.id);
+  if (!wrap) return;
+  c.width  = wrap.clientWidth  || wrap.offsetWidth  || 300;
+  c.height = wrap.clientHeight || wrap.offsetHeight || LANE_H;
+}
+
+function setupDraw(canvas, lane) {
+  let down = false;
+  let lastX = -1;
+
+  const pos = e => {
+    const r = canvas.getBoundingClientRect();
+    let x = (e.clientX - r.left) / r.width;
+    let y = (e.clientY - r.top)  / r.height;
+    if (grid !== 'free') {
+      const parts = grid.split('/');
+      const step = parts.length===2 ? Number(parts[0])/Number(parts[1]) : 1;
+      x = Math.round(x / step) * step;
+    }
+    return { x: Math.max(0,Math.min(1,x)), y: Math.max(0,Math.min(1,y)) };
+  };
+
+  canvas.onmousedown = e => {
+    down = true; lastX = -1;
+    activeLaneId = lane.id;
+    if (tool === 'erase') { eraseNear(lane, pos(e)); redraw(lane); return; }
+    if (tool === 'draw') { const p = pos(e); putPt(lane, p); redraw(lane); lastX = p.x; }
+  };
+  canvas.onmousemove = e => {
+    if (!down || tool !== 'draw') return;
+    const p = pos(e);
+    if (Math.abs(p.x - lastX) >= (grid==='free' ? 0.004 : 0.001)) {
+      putPt(lane, p); redraw(lane); lastX = p.x;
+    }
+  };
+  const up = () => { down = false; };
+  canvas.onmouseup   = up;
+  canvas.onmouseleave = up;
+}
+
+function putPt(lane, {x,y}) {
+  lane.pts = lane.pts.filter(p => Math.abs(p.x-x) > 0.007);
+  lane.pts.push({x,y});
+  lane.pts.sort((a,b)=>a.x-b.x);
+}
+
+function eraseNear(lane, {x}) {
+  lane.pts = lane.pts.filter(p => Math.abs(p.x-x) > 0.06);
+}
+
+function redraw(lane) {
+  const c = document.getElementById('c-'+lane.id);
+  if (!c) return;
+  const ctx = c.getContext('2d');
+  const W = c.width, H = c.height;
+  ctx.clearRect(0,0,W,H);
+
+  drawGrid(ctx, W, H);
+
+  const pts = lane.pts;
+  if (!pts.length) {
+    ctx.fillStyle = '#3A3A48';
+    ctx.font = '10px DM Mono, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('drag to draw automation', W/2, H/2);
+    return;
+  }
+
+  const rgb = hexRgb(lane.color);
+
+  // filled shape
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x*W, H);
+  tracePath(ctx, pts, W, H, lane.interp);
+  ctx.lineTo(pts[pts.length-1].x*W, H);
+  ctx.closePath();
+  const grd = ctx.createLinearGradient(0,0,0,H);
+  grd.addColorStop(0, `rgba(${rgb},.22)`);
+  grd.addColorStop(1, `rgba(${rgb},.03)`);
+  ctx.fillStyle = grd;
+  ctx.fill();
+
+  // stroke
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x*W, pts[0].y*H);
+  traceStroke(ctx, pts, W, H, lane.interp);
+  ctx.strokeStyle = lane.color;
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+
+  // dots
+  pts.forEach(p => {
+    ctx.beginPath();
+    ctx.arc(p.x*W, p.y*H, 3.5, 0, Math.PI*2);
+    ctx.fillStyle = lane.color;
+    ctx.fill();
+    ctx.strokeStyle = '#0C0C0E';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  });
+}
+
+function tracePath(ctx, pts, W, H, interp) {
+  if (interp==='smooth') {
+    ctx.lineTo(pts[0].x*W, pts[0].y*H);
+    for (let i=0;i<pts.length-1;i++) {
+      const cx = (pts[i].x*W + pts[i+1].x*W)/2;
+      ctx.bezierCurveTo(cx, pts[i].y*H, cx, pts[i+1].y*H, pts[i+1].x*W, pts[i+1].y*H);
+    }
+  } else if (interp==='step') {
+    ctx.lineTo(pts[0].x*W, pts[0].y*H);
+    for (let i=1;i<pts.length;i++) {
+      ctx.lineTo(pts[i].x*W, pts[i-1].y*H);
+      ctx.lineTo(pts[i].x*W, pts[i].y*H);
+    }
+  } else {
+    pts.forEach(p => ctx.lineTo(p.x*W, p.y*H));
+  }
+}
+
+function traceStroke(ctx, pts, W, H, interp) {
+  if (interp==='smooth') {
+    for (let i=0;i<pts.length-1;i++) {
+      const cx = (pts[i].x*W + pts[i+1].x*W)/2;
+      ctx.bezierCurveTo(cx, pts[i].y*H, cx, pts[i+1].y*H, pts[i+1].x*W, pts[i+1].y*H);
+    }
+  } else if (interp==='step') {
+    for (let i=1;i<pts.length;i++) {
+      ctx.lineTo(pts[i].x*W, pts[i-1].y*H);
+      ctx.lineTo(pts[i].x*W, pts[i].y*H);
+    }
+  } else {
+    pts.slice(1).forEach(p => ctx.lineTo(p.x*W, p.y*H));
+  }
+}
+
+function drawGrid(ctx, W, H) {
+  // horizontals at 0 25 50 75 100%
+  [0,.25,.5,.75,1].forEach(y => {
+    ctx.beginPath();
+    ctx.moveTo(0,y*H); ctx.lineTo(W,y*H);
+    ctx.strokeStyle = y===.5 ? '#252530' : '#1A1A22';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  });
+  // verticals per grid
+  const divMap = {'free':16,'1/16':16,'1/8':8,'1/4':4,'1/2':2,'1/1':1,'2/1':1,'4/1':1};
+  const divs = divMap[grid] || 8;
+  for (let i=0;i<=divs;i++) {
+    const x = (i/divs)*W;
+    ctx.beginPath();
+    ctx.moveTo(x,0); ctx.lineTo(x,H);
+    ctx.strokeStyle = (i===0||i===divs) ? '#252530' : '#181820';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+}
+
+function hexRgb(h) {
+  return [1,3,5].map(i=>parseInt(h.slice(i,i+2),16)).join(',');
+}
+
+// ════════════════════════════════
+// PLAYHEAD ANIMATION
+// ════════════════════════════════
+let lastTs = null;
+function tick(ts) {
+  if (playing) {
+    if (!lastTs) lastTs = ts;
+    const dt = (ts - lastTs) / 1000;
+    lastTs = ts;
+    const barsPerSec = bpm / 240;
+    lanes.forEach(l => {
+      if (l.muted || l.collapsed) return;
+      const bars = loopBars(l.loopLen);
+      l.ph = (l.ph + barsPerSec * dt / bars) % 1;
+      const el = document.getElementById('ph-'+l.id);
+      if (el) el.style.left = (l.ph*100) + '%';
+    });
+  } else {
+    lastTs = null;
+  }
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+
+function loopBars(s) {
+  if (s==='free') return 2;
+  const [n,d] = s.split('/').map(Number);
+  return n/d;
+}
+
+// ════════════════════════════════
+// CONTROLS
+// ════════════════════════════════
+function setTool(t) {
+  tool = t;
+  ['draw','select','erase'].forEach(id => {
+    const el = document.getElementById('tool'+id[0].toUpperCase()+id.slice(1));
+    if (el) el.classList.toggle('on', id===t);
+  });
+}
+
+function setGrid(el, v) {
+  grid = v;
+  document.getElementById('gridTabs').querySelectorAll('.itab').forEach(e=>e.classList.remove('on'));
+  el.classList.add('on');
+  // redraw all to update grid lines
+  lanes.forEach(l => redraw(l));
+}
+
+function setBpm(v) {
+  bpm = Math.max(20, Math.min(300, parseInt(v)||120));
+  updateMeta();
+}
+
+function setSyncMode(mode, el) {
+  document.getElementById('syncHost').classList.toggle('on', mode==='host');
+  document.getElementById('syncInt').classList.toggle('on', mode==='int');
+}
+
+function togglePlay() {
+  playing = !playing;
+  lastTs = null;
+  const b = document.getElementById('playBtn');
+  b.textContent = playing ? '⏸ Pause' : '▶ Play';
+  b.classList.toggle('on', playing);
+}
+
+function clearActive() {
+  lanes.forEach(l => { l.pts=[]; redraw(l); });
+}
+
+function addLane() {
+  const demos = [['Reverb','Room'],['Filter','Cutoff'],['Chorus','Depth'],['EQ','Gain'],['Comp','Ratio']];
+  const [p,q] = demos[lanes.length % demos.length];
+  lanes.push(mkLane(p, q, lanes.length));
+  render();
+}
+
+function updateMeta() {
+  document.getElementById('metaText').textContent =
+    `Lane / ${bpm} bpm / ${lanes.length} param${lanes.length!==1?'s':''}`;
+}
+
+// ── per-lane ──
+function laneSet(id, key, val) {
+  const l = lanes.find(l=>l.id===id);
+  if (!l) return;
+  l[key] = val;
+  if (key==='loopLen') l.ph = 0;
+}
+
+function laneDepth(id) {
+  const l = lanes.find(l=>l.id===id);
+  if (!l) return;
+  l.depth = l.depth >= 100 ? 25 : l.depth + 25;
+  render();
+}
+
+function lanePhase(id) {
+  const l = lanes.find(l=>l.id===id);
+  if (!l) return;
+  l.phase = (l.phase + 90) % 360;
+  render();
+}
+
+function laneMute(id) {
+  const l = lanes.find(l=>l.id===id);
+  if (!l) return;
+  l.muted = !l.muted;
+  const laneEl = document.getElementById('lane-'+id);
+  if (laneEl) laneEl.style.opacity = l.muted ? '0.38' : '1';
+  const btn = laneEl?.querySelector('.lh-mute');
+  if (btn) { btn.classList.toggle('lit', !l.muted); btn.textContent = l.muted?'○':'●'; }
+}
+
+function laneInterp(id, v) {
+  const l = lanes.find(l=>l.id===id);
+  if (!l) return;
+  l.interp = v;
+  // update buttons without full render
+  const body = document.getElementById('body-'+id);
+  body?.querySelectorAll('.ibtn').forEach(b => {
+    b.classList.toggle('on', b.textContent.trim().toLowerCase()===v);
+  });
+  redraw(l);
+}
+
+function laneSync(id) {
+  const l = lanes.find(l=>l.id===id);
+  if (!l) return;
+  l.synced = !l.synced;
+  const btn = document.querySelector(`#lane-${id} .sync-pill`);
+  if (btn) { btn.classList.toggle('on', l.synced); btn.textContent = l.synced?'Host':'Int'; }
+}
+
+function toggleCollapse(id) {
+  const l = lanes.find(l=>l.id===id);
+  if (!l) return;
+  l.collapsed = !l.collapsed;
+  // animate height
+  const body = document.getElementById('body-'+id);
+  const hdr  = document.querySelector(`#lane-${id} .lane-hdr`);
+  if (l.collapsed) {
+    body.style.height = '0px';
+    hdr.classList.add('is-collapsed');
+  } else {
+    body.style.height = LANE_H+'px';
+    hdr.classList.remove('is-collapsed');
+    // rebuild body content then size canvas
+    setTimeout(() => {
+      if (!body.querySelector('.lb-canvas')) {
+        // need full rebuild for this lane
+        render();
+      } else {
+        const c = document.getElementById('c-'+id);
+        if (c) { sizeCanvas(c, l); setupDraw(c, l); redraw(l); }
+      }
+    }, 20);
+  }
+  const arrow = document.querySelector(`#lane-${id} .lh-arrow`);
+  if (arrow) arrow.textContent = l.collapsed ? '▶' : '▼';
+  const hdrEl = document.querySelector(`#lane-${id} .lane-hdr`);
+  if (hdrEl) hdrEl.classList.toggle('is-collapsed', l.collapsed);
+}
+
+// ════════════════════════════════
+// RESIZE
+// ════════════════════════════════
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    lanes.forEach(l => {
+      const c = document.getElementById('c-'+l.id);
+      if (!c) return;
+      sizeCanvas(c, l);
+      redraw(l);
+    });
+  }, 60);
+});
+
+// ════════════════════════════════
+// INIT
+// ════════════════════════════════
+render();
+</script>
+</body>
+</html>

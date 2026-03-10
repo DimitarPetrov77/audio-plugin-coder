@@ -1,0 +1,1448 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Modular Randomizer</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+        :root {
+            --bg-app: #F0F0F0;
+            --bg-panel: #FAFAFA;
+            --bg-cell: #FFFFFF;
+            --bg-cell-hover: #F5F5F5;
+            --bg-cell-active: #EDEDED;
+            --bg-inset: #E8E8E8;
+
+            --border: #DEDEDE;
+            --border-strong: #C0C0C0;
+            --border-focus: #999999;
+
+            --text-primary: #333333;
+            --text-secondary: #777777;
+            --text-muted: #AAAAAA;
+            --text-inverse: #FFFFFF;
+
+            --accent: #FF5500;
+            --accent-hover: #E64D00;
+            --accent-light: #FFF0E6;
+            --accent-border: #FFB380;
+
+            --locked-bg: #FFF0F0;
+            --locked-border: #FFCCCC;
+            --locked-icon: #CC3333;
+            --auto-lock-bg: #FFF5E6;
+            --auto-lock-border: #FFD699;
+            --midi-dot: #33CC33;
+
+            --space-xs: 4px;
+            --space-sm: 8px;
+            --space-md: 12px;
+            --space-lg: 16px;
+            --space-xl: 24px;
+
+            --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+            --font-mono: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--bg-app);
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+            font-size: 11px;
+            width: 900px;
+            height: 600px;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .app {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        /* ═════════════════════ HEADER ═════════════════════ */
+        .header {
+            display: flex;
+            align-items: center;
+            height: 40px;
+            padding: 0 var(--space-md);
+            background: var(--bg-panel);
+            border-bottom: 1px solid var(--border-strong);
+            gap: var(--space-md);
+            flex-shrink: 0;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: var(--space-sm);
+        }
+
+        .brand-mark {
+            width: 12px;
+            height: 12px;
+            background: var(--accent);
+            border-radius: 2px;
+        }
+
+        .brand-name {
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.8px;
+            color: var(--text-primary);
+        }
+
+        .h-divider {
+            width: 1px;
+            height: 20px;
+            background: var(--border);
+        }
+
+        .plugin-area {
+            display: flex;
+            align-items: center;
+            gap: var(--space-sm);
+        }
+
+        .plugin-area label {
+            font-size: 9px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .sel {
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+            font-size: 11px;
+            padding: 4px 22px 4px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23999'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 6px center;
+            min-width: 120px;
+        }
+
+        .sel:hover {
+            border-color: var(--border-focus);
+        }
+
+        .sel:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .small-btn {
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            font-family: var(--font-sans);
+            font-size: 9px;
+            padding: 3px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            transition: all 80ms ease-out;
+        }
+
+        .small-btn:hover {
+            border-color: var(--border-focus);
+            color: var(--text-primary);
+        }
+
+        .h-controls {
+            display: flex;
+            align-items: center;
+            gap: var(--space-md);
+            margin-left: auto;
+        }
+
+        .bypass-btn {
+            width: 26px;
+            height: 24px;
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            color: var(--text-muted);
+            font-size: 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 80ms ease-out;
+        }
+
+        .bypass-btn:hover {
+            border-color: var(--border-focus);
+            color: var(--text-primary);
+        }
+
+        .bypass-btn.active {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: var(--text-inverse);
+        }
+
+        .h-slider {
+            display: flex;
+            align-items: center;
+            gap: var(--space-xs);
+        }
+
+        .h-slider label {
+            font-size: 9px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            height: 4px;
+            background: var(--bg-inset);
+            border-radius: 2px;
+            outline: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 12px;
+            height: 12px;
+            background: var(--bg-cell);
+            border: 1px solid var(--border-strong);
+            border-radius: 50%;
+            cursor: pointer;
+        }
+
+        input[type="range"]::-webkit-slider-thumb:hover {
+            border-color: var(--accent);
+        }
+
+        .h-slider input[type="range"] {
+            width: 70px;
+        }
+
+        .h-value {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--text-secondary);
+            min-width: 28px;
+        }
+
+        /* ═════════════════════ PARAM GRID ═════════════════════ */
+        .params-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .section-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: var(--space-xs) var(--space-md);
+            background: var(--bg-panel);
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+            height: 28px;
+        }
+
+        .section-title {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+        }
+
+        .section-actions {
+            display: flex;
+            gap: var(--space-xs);
+        }
+
+        .grid-scroll {
+            flex: 1;
+            overflow-y: auto;
+            padding: var(--space-md);
+        }
+
+        .grid-scroll::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .grid-scroll::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .grid-scroll::-webkit-scrollbar-thumb {
+            background: var(--border-strong);
+            border-radius: 3px;
+        }
+
+        .params-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+            gap: var(--space-xs);
+        }
+
+        .p-cell {
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            padding: var(--space-sm);
+            cursor: pointer;
+            transition: all 80ms ease-out;
+            position: relative;
+            min-height: 52px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .p-cell:hover {
+            background: var(--bg-cell-hover);
+            border-color: var(--border-focus);
+        }
+
+        .p-cell.selected {
+            background: var(--accent-light);
+            border-color: var(--accent-border);
+        }
+
+        .p-cell.selected .p-bar-fill {
+            background: var(--accent);
+        }
+
+        .p-cell.locked {
+            background: var(--locked-bg);
+            border-color: var(--locked-border);
+            cursor: default;
+        }
+
+        .p-cell.locked .p-lock {
+            display: block;
+        }
+
+        .p-cell.locked:hover {
+            background: var(--locked-bg);
+            border-color: var(--locked-border);
+        }
+
+        .p-cell.auto-locked {
+            background: var(--auto-lock-bg);
+            border-color: var(--auto-lock-border);
+            cursor: default;
+        }
+
+        .p-cell.auto-locked .p-lock {
+            display: block;
+            color: #CC8800;
+        }
+
+        .p-cell.auto-locked:hover {
+            background: var(--auto-lock-bg);
+            border-color: var(--auto-lock-border);
+        }
+
+        .p-name {
+            font-size: 10px;
+            font-weight: 500;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .p-val {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--text-secondary);
+        }
+
+        .p-lock {
+            display: none;
+            position: absolute;
+            top: 4px;
+            right: 5px;
+            font-size: 8px;
+            color: var(--locked-icon);
+        }
+
+        .p-bar {
+            height: 2px;
+            background: var(--bg-inset);
+            border-radius: 1px;
+            margin-top: 4px;
+            overflow: hidden;
+        }
+
+        .p-bar-fill {
+            height: 100%;
+            background: var(--border-strong);
+            border-radius: 1px;
+            transition: width 200ms ease-out;
+        }
+
+        /* ═════════════════════ BLOCKS STRIP ═════════════════════ */
+        .blocks-section {
+            flex-shrink: 0;
+            border-top: 1px solid var(--border-strong);
+            background: var(--bg-panel);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .blocks-scroll {
+            overflow-x: auto;
+            overflow-y: hidden;
+            padding: var(--space-md);
+            display: flex;
+            gap: var(--space-md);
+            align-items: flex-start;
+        }
+
+        .blocks-scroll::-webkit-scrollbar {
+            height: 4px;
+        }
+
+        .blocks-scroll::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .blocks-scroll::-webkit-scrollbar-thumb {
+            background: var(--border-strong);
+            border-radius: 2px;
+        }
+
+        .block-card {
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            min-width: 260px;
+            max-width: 280px;
+            flex-shrink: 0;
+            transition: border-color 120ms ease-out;
+        }
+
+        .block-card.active {
+            border-left: 3px solid var(--accent);
+        }
+
+        .block-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: var(--space-sm) var(--space-md);
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+        }
+
+        .block-head:hover {
+            background: var(--bg-cell-hover);
+        }
+
+        .block-title {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .block-summary {
+            font-size: 10px;
+            color: var(--text-secondary);
+            margin-left: var(--space-sm);
+        }
+
+        .block-close {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 14px;
+            cursor: pointer;
+            padding: 0;
+            line-height: 1;
+        }
+
+        .block-close:hover {
+            color: var(--text-primary);
+        }
+
+        .block-body {
+            padding: var(--space-md);
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-sm);
+        }
+
+        .block-body.collapsed {
+            display: none;
+        }
+
+        .b-row {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .b-label {
+            font-size: 9px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--text-muted);
+        }
+
+        /* Segmented control */
+        .seg {
+            display: flex;
+            background: var(--bg-inset);
+            border-radius: 3px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+
+        .seg-btn {
+            flex: 1;
+            padding: 4px 0;
+            background: none;
+            border: none;
+            border-right: 1px solid var(--border);
+            color: var(--text-muted);
+            font-family: var(--font-sans);
+            font-size: 10px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 80ms ease-out;
+        }
+
+        .seg-btn:last-child {
+            border-right: none;
+        }
+
+        .seg-btn:hover {
+            color: var(--text-secondary);
+            background: var(--bg-cell-hover);
+        }
+
+        .seg-btn.active {
+            background: var(--accent);
+            color: var(--text-inverse);
+        }
+
+        /* Sub-controls for each trigger mode */
+        .trigger-sub {
+            display: none;
+            padding-top: 4px;
+        }
+
+        .trigger-sub.visible {
+            display: flex;
+            align-items: center;
+            gap: var(--space-sm);
+            flex-wrap: wrap;
+        }
+
+        .sub-label {
+            font-size: 9px;
+            color: var(--text-secondary);
+        }
+
+        .sub-sel {
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 10px;
+            padding: 2px 20px 2px 6px;
+            border-radius: 2px;
+            cursor: pointer;
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23999'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 4px center;
+        }
+
+        /* Toggle */
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            gap: var(--space-sm);
+        }
+
+        .toggle {
+            width: 28px;
+            height: 14px;
+            background: var(--bg-inset);
+            border: 1px solid var(--border);
+            border-radius: 7px;
+            cursor: pointer;
+            position: relative;
+            transition: all 80ms ease-out;
+            flex-shrink: 0;
+        }
+
+        .toggle::after {
+            content: '';
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            background: var(--bg-cell);
+            border: 1px solid var(--border-strong);
+            border-radius: 50%;
+            top: 1px;
+            left: 1px;
+            transition: all 80ms ease-out;
+        }
+
+        .toggle.on {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+
+        .toggle.on::after {
+            left: 15px;
+            background: white;
+            border-color: var(--accent);
+        }
+
+        .toggle-label {
+            font-size: 10px;
+            color: var(--text-secondary);
+        }
+
+        /* Range row */
+        .range-row {
+            display: flex;
+            align-items: center;
+            gap: var(--space-xs);
+        }
+
+        .range-row input[type="range"] {
+            flex: 1;
+        }
+
+        .r-val {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--text-secondary);
+            min-width: 26px;
+            text-align: center;
+        }
+
+        /* Quantize */
+        .q-input {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--text-primary);
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            padding: 2px 4px;
+            width: 36px;
+            text-align: center;
+            margin-left: auto;
+        }
+
+        .q-input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .q-input:disabled {
+            color: var(--text-muted);
+            background: var(--bg-inset);
+        }
+
+        /* Targets */
+        .targets-box {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 3px;
+            min-height: 22px;
+            padding: var(--space-xs);
+            background: var(--bg-app);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+        }
+
+        .t-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            background: var(--accent-light);
+            border: 1px solid var(--accent-border);
+            color: var(--accent);
+            font-size: 9px;
+            font-weight: 500;
+            padding: 1px 6px;
+            border-radius: 2px;
+        }
+
+        .t-tag .t-x {
+            cursor: pointer;
+            opacity: 0.6;
+            font-size: 10px;
+        }
+
+        .t-tag .t-x:hover {
+            opacity: 1;
+        }
+
+        .t-placeholder {
+            font-size: 9px;
+            color: var(--text-muted);
+            padding: 1px 4px;
+        }
+
+        /* Fire button */
+        .fire-btn {
+            width: 100%;
+            height: 28px;
+            background: var(--accent);
+            border: none;
+            border-radius: 3px;
+            color: var(--text-inverse);
+            font-family: var(--font-sans);
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 80ms ease-out;
+        }
+
+        .fire-btn:hover {
+            background: var(--accent-hover);
+        }
+
+        .fire-btn:active {
+            transform: scale(0.98);
+        }
+
+        .fire-btn.flash {
+            animation: flash 250ms ease-out;
+        }
+
+        @keyframes flash {
+            0% {
+                box-shadow: 0 0 12px var(--accent);
+            }
+
+            100% {
+                box-shadow: none;
+            }
+        }
+
+        /* Add block */
+        .add-block {
+            min-width: 120px;
+            height: 100%;
+            min-height: 60px;
+            background: none;
+            border: 1px dashed var(--border);
+            border-radius: 4px;
+            color: var(--text-muted);
+            font-family: var(--font-sans);
+            font-size: 11px;
+            cursor: pointer;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 80ms ease-out;
+        }
+
+        .add-block:hover {
+            border-color: var(--border-focus);
+            color: var(--text-secondary);
+        }
+
+        /* ═════════════════════ STATUS BAR ═════════════════════ */
+        .status-bar {
+            display: flex;
+            align-items: center;
+            height: 22px;
+            padding: 0 var(--space-md);
+            background: var(--bg-panel);
+            border-top: 1px solid var(--border);
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--text-muted);
+            gap: var(--space-lg);
+            flex-shrink: 0;
+        }
+
+        .s-dot {
+            display: inline-block;
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            margin-right: 3px;
+        }
+
+        .s-dot.on {
+            background: var(--midi-dot);
+        }
+
+        .s-dot.off {
+            background: var(--border-strong);
+        }
+
+        /* ═════════════════════ CONTEXT MENU ═════════════════════ */
+        .ctx {
+            display: none;
+            position: fixed;
+            background: var(--bg-cell);
+            border: 1px solid var(--border-strong);
+            border-radius: 4px;
+            padding: var(--space-xs) 0;
+            min-width: 130px;
+            z-index: 100;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .ctx.visible {
+            display: block;
+        }
+
+        .ctx-item {
+            padding: 5px var(--space-md);
+            font-size: 11px;
+            color: var(--text-primary);
+            cursor: pointer;
+        }
+
+        .ctx-item:hover {
+            background: var(--accent-light);
+        }
+
+        .ctx-item.red {
+            color: var(--locked-icon);
+        }
+
+        .ctx-sep {
+            height: 1px;
+            background: var(--border);
+            margin: var(--space-xs) 0;
+        }
+
+        /* MIDI note name helper */
+        .note-display {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            font-weight: 500;
+            color: var(--text-primary);
+            background: var(--bg-cell);
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            padding: 2px 6px;
+            min-width: 32px;
+            text-align: center;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app">
+
+        <!-- ═══ HEADER ═══ -->
+        <div class="header">
+            <div class="brand">
+                <div class="brand-mark"></div>
+                <span class="brand-name">MODULAR RANDOMIZER</span>
+            </div>
+            <div class="h-divider"></div>
+            <div class="plugin-area">
+                <label>Plugin</label>
+                <select class="sel" id="pluginSel">
+                    <option value="">— Select —</option>
+                    <option value="serum" selected>Serum</option>
+                    <option value="vital">Vital</option>
+                    <option value="diva">Diva</option>
+                    <option value="repro">Repro-5</option>
+                </select>
+                <button class="small-btn" id="openEditorBtn">Open Editor</button>
+            </div>
+            <div class="h-controls">
+                <button class="bypass-btn" id="bypassBtn" title="Bypass">⏻</button>
+                <div class="h-slider">
+                    <label>Mix</label>
+                    <input type="range" id="globalMix" min="0" max="1" step="0.01" value="1">
+                    <span class="h-value" id="mixVal">100%</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ PARAMETER GRID ═══ -->
+        <div class="params-section">
+            <div class="section-bar">
+                <span class="section-title">Parameters</span>
+                <div class="section-actions">
+                    <button class="small-btn" id="selAllBtn">Select All</button>
+                    <button class="small-btn" id="clearSelBtn">Clear</button>
+                </div>
+            </div>
+            <div class="grid-scroll">
+                <div class="params-grid" id="grid"></div>
+            </div>
+        </div>
+
+        <!-- ═══ LOGIC BLOCKS STRIP ═══ -->
+        <div class="blocks-section">
+            <div class="section-bar">
+                <span class="section-title">Logic Blocks</span>
+            </div>
+            <div class="blocks-scroll" id="blocksScroll"></div>
+        </div>
+
+        <!-- ═══ STATUS BAR ═══ -->
+        <div class="status-bar">
+            <span><span class="s-dot on"></span><span id="stPlugin">Serum</span></span>
+            <span><span id="stParams">32</span> params</span>
+            <span><span id="stLocked">1</span> locked</span>
+            <span><span id="stBlocks">1</span> blocks</span>
+            <span>120 BPM</span>
+            <span><span class="s-dot off" id="midiDot"></span>MIDI</span>
+        </div>
+    </div>
+
+    <!-- ═══ CONTEXT MENU ═══ -->
+    <div class="ctx" id="ctx">
+        <div class="ctx-item" id="ctxLock">🔒 Lock</div>
+        <div class="ctx-item" id="ctxUnlock">🔓 Unlock</div>
+        <div class="ctx-sep"></div>
+        <div class="ctx-item" id="ctxSel">Select</div>
+        <div class="ctx-item" id="ctxDesel">Deselect</div>
+    </div>
+
+    <script>
+        // ═══════════════════════════════════════
+        // DATA
+        // ═══════════════════════════════════════
+
+        const PARAMS = [
+            { id: 'osc1_wave', name: 'Osc1 Wave', value: 0.25 },
+            { id: 'osc1_semi', name: 'Osc1 Semi', value: 0.50 },
+            { id: 'osc1_fine', name: 'Osc1 Fine', value: 0.50 },
+            { id: 'osc1_level', name: 'Osc1 Level', value: 0.80 },
+            { id: 'osc2_wave', name: 'Osc2 Wave', value: 0.00 },
+            { id: 'osc2_semi', name: 'Osc2 Semi', value: 0.50 },
+            { id: 'osc2_fine', name: 'Osc2 Fine', value: 0.50 },
+            { id: 'osc2_level', name: 'Osc2 Level', value: 0.60 },
+            { id: 'filter_cut', name: 'Filter Cut', value: 0.65 },
+            { id: 'filter_res', name: 'Filter Res', value: 0.30 },
+            { id: 'filter_drive', name: 'Filter Drive', value: 0.10 },
+            { id: 'filter_type', name: 'Filter Type', value: 0.00 },
+            { id: 'env1_atk', name: 'Env1 Atk', value: 0.05 },
+            { id: 'env1_dec', name: 'Env1 Dec', value: 0.30 },
+            { id: 'env1_sus', name: 'Env1 Sus', value: 0.70 },
+            { id: 'env1_rel', name: 'Env1 Rel', value: 0.40 },
+            { id: 'env2_atk', name: 'Env2 Atk', value: 0.10 },
+            { id: 'env2_dec', name: 'Env2 Dec', value: 0.50 },
+            { id: 'env2_sus', name: 'Env2 Sus', value: 0.60 },
+            { id: 'env2_rel', name: 'Env2 Rel', value: 0.35 },
+            { id: 'lfo1_rate', name: 'LFO1 Rate', value: 0.50 },
+            { id: 'lfo1_shape', name: 'LFO1 Shape', value: 0.00 },
+            { id: 'fx_reverb', name: 'Reverb Mix', value: 0.20 },
+            { id: 'fx_delay', name: 'Delay Mix', value: 0.15 },
+            { id: 'fx_chorus', name: 'Chorus', value: 0.00 },
+            { id: 'fx_distort', name: 'Distortion', value: 0.00 },
+            { id: 'unison_v', name: 'Unison Voices', value: 0.14 },
+            { id: 'unison_d', name: 'Unison Det', value: 0.30 },
+            { id: 'macro1', name: 'Macro 1', value: 0.50 },
+            { id: 'macro2', name: 'Macro 2', value: 0.50 },
+            { id: 'master_vol', name: 'Master Vol', value: 0.80, locked: true, autoLocked: true },
+            { id: 'master_pan', name: 'Master Pan', value: 0.50 },
+        ];
+
+        // Initialize lock flags
+        PARAMS.forEach(p => {
+            if (p.locked === undefined) p.locked = false;
+            if (p.autoLocked === undefined) p.autoLocked = false;
+        });
+
+        let selected = new Set();
+        let blocks = [];
+        let activeBlockId = null;
+        let blockCounter = 0;
+        let ctxTarget = null;
+
+        const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+        function midiNoteName(n) { return NOTE_NAMES[n % 12] + (Math.floor(n / 12) - 1); }
+
+        // ═══════════════════════════════════════
+        // PARAM GRID
+        // ═══════════════════════════════════════
+
+        function renderGrid() {
+            const g = document.getElementById('grid');
+            g.innerHTML = '';
+            PARAMS.forEach(p => {
+                const c = document.createElement('div');
+                c.className = 'p-cell';
+                if (p.autoLocked) c.classList.add('auto-locked');
+                else if (p.locked) c.classList.add('locked');
+                if (selected.has(p.id)) c.classList.add('selected');
+
+                c.innerHTML = `
+          <span class="p-name">${p.name}</span>
+          <span class="p-val">${(p.value * 100).toFixed(0)}%</span>
+          <span class="p-lock">${p.autoLocked ? '⚠' : '🔒'}</span>
+          <div class="p-bar"><div class="p-bar-fill" style="width:${p.value * 100}%"></div></div>
+        `;
+
+                c.addEventListener('click', () => {
+                    if (p.locked || p.autoLocked) return;
+                    selected.has(p.id) ? selected.delete(p.id) : selected.add(p.id);
+                    renderGrid();
+                    updateAllTargets();
+                });
+
+                c.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    ctxTarget = p;
+                    showCtx(e.clientX, e.clientY, p);
+                });
+
+                g.appendChild(c);
+            });
+            updateStatus();
+        }
+
+        // ═══════════════════════════════════════
+        // CONTEXT MENU
+        // ═══════════════════════════════════════
+
+        function showCtx(x, y, p) {
+            const m = document.getElementById('ctx');
+            m.style.left = Math.min(x, 900 - 140) + 'px';
+            m.style.top = Math.min(y, 600 - 100) + 'px';
+            m.classList.add('visible');
+            document.getElementById('ctxLock').style.display = (p.locked || p.autoLocked) ? 'none' : '';
+            document.getElementById('ctxUnlock').style.display = (p.locked && !p.autoLocked) ? '' : 'none';
+            document.getElementById('ctxSel').style.display = (!p.locked && !selected.has(p.id)) ? '' : 'none';
+            document.getElementById('ctxDesel').style.display = selected.has(p.id) ? '' : 'none';
+        }
+
+        document.addEventListener('click', () => document.getElementById('ctx').classList.remove('visible'));
+
+        document.getElementById('ctxLock').onclick = () => {
+            if (ctxTarget) { ctxTarget.locked = true; selected.delete(ctxTarget.id); renderGrid(); updateAllTargets(); }
+        };
+        document.getElementById('ctxUnlock').onclick = () => {
+            if (ctxTarget && !ctxTarget.autoLocked) { ctxTarget.locked = false; renderGrid(); }
+        };
+        document.getElementById('ctxSel').onclick = () => {
+            if (ctxTarget && !ctxTarget.locked) { selected.add(ctxTarget.id); renderGrid(); updateAllTargets(); }
+        };
+        document.getElementById('ctxDesel').onclick = () => {
+            if (ctxTarget) { selected.delete(ctxTarget.id); renderGrid(); updateAllTargets(); }
+        };
+
+        // ═══════════════════════════════════════
+        // LOGIC BLOCKS
+        // ═══════════════════════════════════════
+
+        function addBlock() {
+            const id = ++blockCounter;
+            blocks.push({
+                id,
+                trigger: 'manual',
+                beatDiv: '1/4',
+                midiMode: 'any_note',
+                midiNote: 60,
+                midiCC: 1,
+                velScale: false,
+                threshold: -12,
+                retrigger: 100,
+                rangeMin: 0,
+                rangeMax: 100,
+                quantize: false,
+                quantSteps: 12,
+                movement: 'instant',
+                glideTime: 200,
+                expanded: true,
+            });
+            if (activeBlockId === null) activeBlockId = id;
+            renderBlocks();
+            updateStatus();
+        }
+
+        function renderBlocks() {
+            const c = document.getElementById('blocksScroll');
+            c.innerHTML = '';
+
+            blocks.forEach(b => {
+                const card = document.createElement('div');
+                card.className = 'block-card' + (b.id === activeBlockId ? ' active' : '');
+
+                const trigLabel = { manual: 'Manual', tempo: 'Tempo', midi: 'MIDI', audio: 'Audio' }[b.trigger];
+                const moveLabel = b.movement === 'instant' ? 'Instant' : `Smooth ${b.glideTime}ms`;
+                const summary = `${trigLabel} · ${moveLabel} · ${selected.size} targets`;
+
+                card.innerHTML = `
+          <div class="block-head" data-id="${b.id}">
+            <div>
+              <span class="block-title">Block ${b.id}</span>
+              <span class="block-summary">${summary}</span>
+            </div>
+            <button class="block-close" data-id="${b.id}">×</button>
+          </div>
+          <div class="block-body ${b.expanded ? '' : 'collapsed'}">
+
+            <!-- TRIGGER -->
+            <div class="b-row">
+              <span class="b-label">Trigger</span>
+              <div class="seg" data-block="${b.id}" data-field="trigger">
+                <button class="seg-btn ${b.trigger === 'manual' ? 'active' : ''}" data-v="manual">Manual</button>
+                <button class="seg-btn ${b.trigger === 'tempo' ? 'active' : ''}" data-v="tempo">Tempo</button>
+                <button class="seg-btn ${b.trigger === 'midi' ? 'active' : ''}" data-v="midi">MIDI</button>
+                <button class="seg-btn ${b.trigger === 'audio' ? 'active' : ''}" data-v="audio">Audio</button>
+              </div>
+              <!-- Tempo sub -->
+              <div class="trigger-sub ${b.trigger === 'tempo' ? 'visible' : ''}" data-sub="tempo">
+                <span class="sub-label">Division</span>
+                <select class="sub-sel" data-block="${b.id}" data-field="beatDiv">
+                  ${['1/1', '1/2', '1/4', '1/8', '1/16', '1/32'].map(d =>
+                    `<option ${b.beatDiv === d ? 'selected' : ''}>${d}</option>`
+                ).join('')}
+                </select>
+              </div>
+              <!-- MIDI sub -->
+              <div class="trigger-sub ${b.trigger === 'midi' ? 'visible' : ''}" data-sub="midi">
+                <span class="sub-label">Mode</span>
+                <select class="sub-sel" data-block="${b.id}" data-field="midiMode">
+                  <option value="any_note" ${b.midiMode === 'any_note' ? 'selected' : ''}>Any Note</option>
+                  <option value="specific_note" ${b.midiMode === 'specific_note' ? 'selected' : ''}>Note</option>
+                  <option value="cc" ${b.midiMode === 'cc' ? 'selected' : ''}>CC</option>
+                </select>
+                ${b.midiMode === 'specific_note' ? `
+                  <span class="note-display">${midiNoteName(b.midiNote)}</span>
+                  <input type="range" min="0" max="127" value="${b.midiNote}" style="width:60px"
+                    data-block="${b.id}" data-field="midiNote">
+                ` : ''}
+                ${b.midiMode === 'cc' ? `
+                  <span class="sub-label">CC#</span>
+                  <input class="q-input" type="number" min="0" max="127" value="${b.midiCC}"
+                    data-block="${b.id}" data-field="midiCC" style="width:40px">
+                ` : ''}
+                <div class="toggle-row" style="margin-left: 4px;">
+                  <div class="toggle ${b.velScale ? 'on' : ''}" data-block="${b.id}" data-field="velScale"></div>
+                  <span class="toggle-label">Vel</span>
+                </div>
+              </div>
+              <!-- Audio sub -->
+              <div class="trigger-sub ${b.trigger === 'audio' ? 'visible' : ''}" data-sub="audio">
+                <span class="sub-label">Threshold</span>
+                <input type="range" min="-60" max="0" value="${b.threshold}" style="width:80px"
+                  data-block="${b.id}" data-field="threshold">
+                <span class="r-val">${b.threshold}dB</span>
+              </div>
+            </div>
+
+            <!-- RANGE -->
+            <div class="b-row">
+              <span class="b-label">Range</span>
+              <div class="range-row">
+                <span class="r-val">${b.rangeMin}%</span>
+                <input type="range" min="0" max="100" value="${b.rangeMin}" data-block="${b.id}" data-field="rangeMin">
+                <input type="range" min="0" max="100" value="${b.rangeMax}" data-block="${b.id}" data-field="rangeMax">
+                <span class="r-val">${b.rangeMax}%</span>
+              </div>
+            </div>
+
+            <!-- QUANTIZE -->
+            <div class="b-row">
+              <div class="toggle-row">
+                <div class="toggle ${b.quantize ? 'on' : ''}" data-block="${b.id}" data-field="quantize"></div>
+                <span class="toggle-label">Quantize</span>
+                <input class="q-input" type="number" value="${b.quantSteps}" min="2" max="128"
+                  data-block="${b.id}" data-field="quantSteps" ${b.quantize ? '' : 'disabled'}>
+                <span class="sub-label">steps</span>
+              </div>
+            </div>
+
+            <!-- MOVEMENT -->
+            <div class="b-row">
+              <span class="b-label">Movement</span>
+              <div class="seg" data-block="${b.id}" data-field="movement">
+                <button class="seg-btn ${b.movement === 'instant' ? 'active' : ''}" data-v="instant">Instant</button>
+                <button class="seg-btn ${b.movement === 'glide' ? 'active' : ''}" data-v="glide">Smooth</button>
+              </div>
+              ${b.movement === 'glide' ? `
+              <div class="range-row" style="margin-top:4px;">
+                <span class="sub-label">Time</span>
+                <input type="range" min="1" max="2000" value="${b.glideTime}" style="flex:1"
+                  data-block="${b.id}" data-field="glideTime">
+                <span class="r-val">${b.glideTime}ms</span>
+              </div>
+              ` : ''}
+            </div>
+
+            <!-- TARGETS -->
+            <div class="b-row">
+              <span class="b-label">Targets</span>
+              <div class="targets-box" id="tgt-${b.id}">
+                ${getTargetsHTML()}
+              </div>
+            </div>
+
+            <!-- FIRE -->
+            <button class="fire-btn" data-block="${b.id}">FIRE</button>
+          </div>
+        `;
+
+                c.appendChild(card);
+            });
+
+            // Add button
+            const addBtn = document.createElement('button');
+            addBtn.className = 'add-block';
+            addBtn.textContent = '+ Block';
+            addBtn.addEventListener('click', addBlock);
+            c.appendChild(addBtn);
+
+            wireBlockEvents();
+        }
+
+        function getTargetsHTML() {
+            if (selected.size === 0) return '<span class="t-placeholder">Click parameters above to assign</span>';
+            return [...selected].map(id => {
+                const p = PARAMS.find(pp => pp.id === id);
+                return `<span class="t-tag">${p.name}<span class="t-x" data-p="${id}">×</span></span>`;
+            }).join('');
+        }
+
+        function updateAllTargets() {
+            blocks.forEach(b => {
+                const box = document.getElementById(`tgt-${b.id}`);
+                if (box) box.innerHTML = getTargetsHTML();
+            });
+            wireTargetRemove();
+        }
+
+        function wireTargetRemove() {
+            document.querySelectorAll('.t-x').forEach(x => {
+                x.onclick = e => {
+                    e.stopPropagation();
+                    selected.delete(x.dataset.p);
+                    renderGrid();
+                    updateAllTargets();
+                };
+            });
+        }
+
+        function wireBlockEvents() {
+            // Head click → activate & toggle expand
+            document.querySelectorAll('.block-head').forEach(h => {
+                h.addEventListener('click', e => {
+                    if (e.target.classList.contains('block-close')) return;
+                    const id = parseInt(h.dataset.id);
+                    const b = blocks.find(bb => bb.id === id);
+                    if (activeBlockId === id) {
+                        b.expanded = !b.expanded;
+                    } else {
+                        // Collapse old, expand new
+                        blocks.forEach(bb => bb.expanded = false);
+                        b.expanded = true;
+                        activeBlockId = id;
+                    }
+                    renderBlocks();
+                });
+            });
+
+            // Close
+            document.querySelectorAll('.block-close').forEach(btn => {
+                btn.onclick = e => {
+                    e.stopPropagation();
+                    const id = parseInt(btn.dataset.id);
+                    blocks = blocks.filter(b => b.id !== id);
+                    if (activeBlockId === id) activeBlockId = blocks.length ? blocks[0].id : null;
+                    renderBlocks();
+                    updateStatus();
+                };
+            });
+
+            // Seg controls
+            document.querySelectorAll('.seg').forEach(seg => {
+                seg.querySelectorAll('.seg-btn').forEach(btn => {
+                    btn.onclick = () => {
+                        const bId = parseInt(seg.dataset.block);
+                        const field = seg.dataset.field;
+                        const val = btn.dataset.v;
+                        const b = blocks.find(bb => bb.id === bId);
+                        b[field] = val;
+                        renderBlocks();
+                    };
+                });
+            });
+
+            // Toggles
+            document.querySelectorAll('.toggle').forEach(t => {
+                t.onclick = () => {
+                    const bId = parseInt(t.dataset.block);
+                    const field = t.dataset.field;
+                    const b = blocks.find(bb => bb.id === bId);
+                    b[field] = !b[field];
+                    renderBlocks();
+                };
+            });
+
+            // Selects (beat div, midi mode)
+            document.querySelectorAll('.sub-sel').forEach(sel => {
+                sel.onchange = () => {
+                    const bId = parseInt(sel.dataset.block);
+                    const field = sel.dataset.field;
+                    const b = blocks.find(bb => bb.id === bId);
+                    b[field] = sel.value;
+                    renderBlocks();
+                };
+            });
+
+            // Range sliders inside blocks
+            document.querySelectorAll('.block-body input[type="range"]').forEach(slider => {
+                if (!slider.dataset.block) return;
+                slider.oninput = () => {
+                    const bId = parseInt(slider.dataset.block);
+                    const field = slider.dataset.field;
+                    const b = blocks.find(bb => bb.id === bId);
+                    b[field] = parseInt(slider.value);
+                    // Update display without full re-render (smoother sliding)
+                    const row = slider.closest('.range-row, .trigger-sub, .b-row');
+                    if (row) {
+                        const vals = row.querySelectorAll('.r-val');
+                        if (field === 'rangeMin' && vals[0]) vals[0].textContent = slider.value + '%';
+                        if (field === 'rangeMax' && vals[vals.length - 1]) vals[vals.length - 1].textContent = slider.value + '%';
+                        if (field === 'threshold') {
+                            const v = row.querySelector('.r-val');
+                            if (v) v.textContent = slider.value + 'dB';
+                        }
+                        if (field === 'glideTime') {
+                            const v = row.querySelector('.r-val');
+                            if (v) v.textContent = slider.value + 'ms';
+                        }
+                        if (field === 'midiNote') {
+                            const nd = row.querySelector('.note-display');
+                            if (nd) nd.textContent = midiNoteName(parseInt(slider.value));
+                            b.midiNote = parseInt(slider.value);
+                        }
+                    }
+                };
+            });
+
+            // Number inputs
+            document.querySelectorAll('.q-input').forEach(inp => {
+                if (!inp.dataset.block) return;
+                inp.onchange = () => {
+                    const bId = parseInt(inp.dataset.block);
+                    const field = inp.dataset.field;
+                    const b = blocks.find(bb => bb.id === bId);
+                    b[field] = Math.max(0, Math.min(128, parseInt(inp.value) || 0));
+                };
+            });
+
+            // Fire buttons
+            document.querySelectorAll('.fire-btn').forEach(btn => {
+                btn.onclick = () => {
+                    btn.classList.add('flash');
+                    setTimeout(() => btn.classList.remove('flash'), 250);
+                    const bId = parseInt(btn.dataset.block);
+                    randomize(bId);
+
+                    // MIDI dot flash
+                    const dot = document.getElementById('midiDot');
+                    dot.classList.add('on');
+                    setTimeout(() => dot.classList.remove('on'), 150);
+                };
+            });
+
+            wireTargetRemove();
+        }
+
+        // ═══════════════════════════════════════
+        // RANDOMIZATION ENGINE
+        // ═══════════════════════════════════════
+
+        function randomize(blockId) {
+            const b = blocks.find(bb => bb.id === blockId);
+            if (!b) return;
+
+            const min = b.rangeMin / 100;
+            const max = b.rangeMax / 100;
+
+            selected.forEach(id => {
+                const p = PARAMS.find(pp => pp.id === id);
+                if (!p || p.locked || p.autoLocked) return;
+
+                let val = min + Math.random() * (max - min);
+
+                if (b.quantize && b.quantSteps > 1) {
+                    const step = 1 / b.quantSteps;
+                    val = Math.round(val / step) * step;
+                }
+
+                if (b.movement === 'instant') {
+                    p.value = Math.max(0, Math.min(1, val));
+                } else {
+                    // Simulate smooth transition with CSS
+                    p.value = Math.max(0, Math.min(1, val));
+                }
+            });
+
+            renderGrid();
+        }
+
+        // ═══════════════════════════════════════
+        // HEADER CONTROLS
+        // ═══════════════════════════════════════
+
+        document.getElementById('bypassBtn').onclick = function () { this.classList.toggle('active'); };
+        document.getElementById('globalMix').oninput = function () {
+            document.getElementById('mixVal').textContent = Math.round(this.value * 100) + '%';
+        };
+        document.getElementById('selAllBtn').onclick = () => {
+            PARAMS.forEach(p => { if (!p.locked && !p.autoLocked) selected.add(p.id); });
+            renderGrid(); updateAllTargets();
+        };
+        document.getElementById('clearSelBtn').onclick = () => {
+            selected.clear(); renderGrid(); updateAllTargets();
+        };
+
+        // ═══════════════════════════════════════
+        // STATUS
+        // ═══════════════════════════════════════
+
+        function updateStatus() {
+            document.getElementById('stParams').textContent = PARAMS.length;
+            document.getElementById('stLocked').textContent = PARAMS.filter(p => p.locked || p.autoLocked).length;
+            document.getElementById('stBlocks').textContent = blocks.length;
+        }
+
+        // ═══════════════════════════════════════
+        // INIT
+        // ═══════════════════════════════════════
+
+        renderGrid();
+        addBlock();
+    </script>
+</body>
+
+</html>

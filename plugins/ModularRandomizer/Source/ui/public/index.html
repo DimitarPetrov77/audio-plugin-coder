@@ -1,0 +1,333 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Modular Randomizer v5</title>
+    <link rel="stylesheet" href="css/variables.css">
+    <link rel="stylesheet" href="css/base.css">
+    <link rel="stylesheet" href="css/header.css">
+    <link rel="stylesheet" href="css/plugin_rack.css">
+    <link rel="stylesheet" href="css/logic_blocks.css">
+    <link rel="stylesheet" href="css/wrongeq.css">
+    <link rel="stylesheet" href="css/dialogs.css">
+    <link rel="stylesheet" href="css/themes.css">
+    <link rel="stylesheet" href="css/overrides.css">
+</head>
+
+<body>
+    <div class="app">
+        <div class="header">
+            <div class="brand">
+                <div class="brand-mark"></div><span class="brand-name">MODULAR RANDOMIZER</span>
+            </div>
+            <div class="h-div"></div>
+            <div class="gp-area">
+                <span class="gp-label">Preset</span>
+                <button class="gp-nav" id="gpPrev" title="Previous preset">◀</button>
+                <span class="gp-name" id="gpName">—</span>
+                <span class="gp-dirty" id="gpDirty" title="Unsaved changes"></span>
+                <button class="gp-nav" id="gpNext" title="Next preset">▶</button>
+                <button class="gp-btn" id="gpBrowse">▼ Browse</button>
+                <button class="gp-btn" id="gpSave">Save</button>
+            </div>
+            <div class="h-div"></div>
+            <button class="settings-btn" id="exposeBtn" title="Expose params to DAW">&#8599; <span
+                    class="settings-btn-label">Expose</span></button>
+            <div class="h-div"></div>
+            <div class="h-right">
+                <button class="bypass" id="bypassBtn">&#x23FB;</button>
+                <div class="mix-area">
+                    <label>Mix</label>
+                    <input type="range" id="mixSlider" min="0" max="100" value="100">
+                    <span class="mix-val" id="mixVal">100%</span>
+                </div>
+                <div class="h-div"></div>
+                <div class="settings-wrap">
+                    <button class="settings-btn" id="settingsBtn">&#9881; <span
+                            class="settings-btn-label">Settings</span></button>
+                    <div class="settings-drop" id="settingsDrop">
+                        <div class="settings-section">
+                            <div class="settings-label"
+                                style="display:flex;align-items:center;justify-content:space-between">
+                                <span>UI Theme</span>
+                                <button id="themeDefaultBtn" class="scan-btn"
+                                    style="font-size:9px;padding:1px 5px;white-space:nowrap"
+                                    title="New instances will use this theme">★ Default</button>
+                            </div>
+                            <div class="theme-grid" id="themeGrid"></div>
+                        </div>
+                        <div class="settings-section">
+                            <div class="settings-label">UI Scale</div>
+                            <div class="settings-row">
+                                <label>Zoom</label>
+                                <select id="scaleSelect">
+                                    <option value="0.5">50%</option>
+                                    <option value="0.75">75%</option>
+                                    <option value="1" selected>100%</option>
+                                    <option value="1.25">125%</option>
+                                    <option value="1.5">150%</option>
+                                    <option value="1.75">175%</option>
+                                    <option value="2">200%</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="settings-section">
+                            <div class="settings-label">Param Tracking</div>
+                            <div class="settings-row">
+                                <label for="autoLocateChk" style="min-width:auto;cursor:pointer">Auto-Locate</label>
+                                <input type="checkbox" id="autoLocateChk" checked
+                                    style="cursor:pointer;accent-color:var(--accent)">
+                            </div>
+                        </div>
+                        <div class="settings-section">
+                            <div class="settings-label">Internal Tempo</div>
+                            <div class="settings-row">
+                                <label style="min-width:auto">BPM</label>
+                                <input type="number" id="internalBpmInput" min="20" max="300" value="120" step="1"
+                                    style="width:56px;padding:2px 4px;border:1px solid var(--border);border-radius:3px;background:var(--bg-inset);color:var(--text-primary);font-size:11px;text-align:center">
+                            </div>
+                        </div>
+                        <div class="settings-section">
+                            <div class="settings-label">Plugin Routing</div>
+                            <div class="settings-row">
+                                <button class="routing-btn on" id="routeSeq" data-rmode="0">Sequential</button>
+                                <button class="routing-btn" id="routePar" data-rmode="1">Parallel</button>
+                                <button class="routing-btn" id="routeWeq" data-rmode="2">WrongEQ</button>
+                            </div>
+                        </div>
+                        <div class="settings-section">
+                            <div class="settings-label">VST3 Scan Paths</div>
+                            <div id="settingsScanPathList" style="max-height:100px;overflow-y:auto;margin-bottom:4px">
+                            </div>
+                            <div class="settings-row" style="gap:4px">
+                                <button class="scan-btn" id="settingsAddPath" style="font-size:10px;padding:2px 6px">+
+                                    Add Path</button>
+                                <button class="scan-btn" id="settingsRescan" style="font-size:10px;padding:2px 6px">↻
+                                    Rescan</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <button class="help-btn" id="helpBtn" title="Keyboard Shortcuts (?)">?</button>
+            </div>
+        </div>
+        <div class="rack">
+            <div class="plugin-block">
+                <div class="pb-head">
+                    <span class="pb-title">Plugin Blocks</span>
+                    <button class="sm-btn weq-open-btn" id="weqOpenBtn" title="Open WrongEQ"
+                        style="display:none">WrongEQ</button>
+                    <button class="sm-btn" id="collapseAllBtn" title="Collapse all plugins">▲</button>
+                    <button class="sm-btn" id="expandAllBtn" title="Expand all plugins">▼</button>
+                    <button class="sm-btn" id="addPluginBtn">+ Plugin</button>
+                </div>
+                <div class="assign-banner" id="assignBanner">Assigning to <span id="assignTarget"></span></div>
+                <div class="plugin-scroll" id="pluginScroll"></div>
+            </div>
+            <div class="logic-panel">
+                <div class="lp-bar">
+                    <span class="lp-title">Logic Blocks</span>
+                    <span style="font-size:10px;color:var(--text-muted)" id="blockInfo">0 blocks</span>
+                </div>
+                <div class="lp-scroll" id="lpScroll"></div>
+                <div class="add-wrap">
+                    <button class="add-blk" id="addRnd" style="border-left:3px solid var(--rand-color)">+
+                        Randomizer</button>
+                    <button class="add-blk" id="addEnv" style="border-left:3px solid var(--env-color)">+
+                        Envelope</button>
+                    <button class="add-blk" id="addSmp" style="border-left:3px solid var(--sample-color)">+
+                        Sample</button>
+                    <button class="add-blk" id="addMorph" style="border-left:3px solid var(--morph-color)">+ Morph
+                        Pad</button>
+                    <button class="add-blk" id="addShapes" style="border-left:3px solid var(--shapes-color, #a07be0)">+
+                        Shapes</button>
+                    <button class="add-blk" id="addShapesRange"
+                        style="border-left:3px solid var(--shapes-color, #a07be0)">+
+                        Shapes Range</button>
+                    <button class="add-blk" id="addLane" style="border-left:3px solid var(--lane-color, #3A9CA0)">+
+                        Lane</button>
+                </div>
+            </div>
+        </div>
+        <div class="status">
+            <span><span class="sd on"></span><span id="stPlug">—</span></span>
+            <span><span id="stP">0</span> params</span>
+            <span><span id="stL">0</span> locked</span>
+            <span><span id="stB">0</span> blocks</span>
+            <span id="bpmDisplay">— BPM</span>
+            <span><span class="sd off" id="midiD"></span>MIDI</span>
+            <span><span class="sd off" id="envD"></span>ENV</span>
+            <button class="undo-btn" id="undoBtn" disabled title="Undo (Ctrl+Z)">&#8630; Undo <span class="undo-badge"
+                    id="undoCount">0</span></button>
+            <button class="undo-btn" id="redoBtn" disabled title="Redo (Ctrl+Shift+Z)">&#8631; Redo <span
+                    class="undo-badge" id="redoCount">0</span></button>
+        </div>
+    </div>
+    <div class="ctx" id="ctx">
+        <div class="ctx-i" id="cL">Lock</div>
+        <div class="ctx-i" id="cU">Unlock</div>
+        <div class="ctx-sep" id="ctxUnassignSep"></div>
+        <div class="ctx-sub ctx-i" id="ctxUnassignSub">Unassign from Block
+            <div class="ctx-submenu" id="ctxUnassignMenu"></div>
+        </div>
+        <div class="ctx-sep" id="ctxAssignSep"></div>
+        <div class="ctx-sub ctx-i" id="ctxAssignSub">Assign to Block
+            <div class="ctx-submenu" id="ctxAssignMenu"></div>
+        </div>
+        <div class="ctx-sep" id="ctxLaneSep"></div>
+        <div class="ctx-sub ctx-i" id="ctxLaneSub">Assign to Lane
+            <div class="ctx-submenu" id="ctxLaneMenu"></div>
+        </div>
+    </div>
+    <div class="ctx" id="plugCtx">
+        <div class="ctx-i" id="pcLockAll">Lock All</div>
+        <div class="ctx-i" id="pcUnlockAll">Unlock All</div>
+        <div class="ctx-sep"></div>
+        <div class="ctx-i" id="pcDuplicate">Duplicate Plugin</div>
+        <div class="ctx-sep"></div>
+        <div class="ctx-i" id="pcBypass">Bypass Plugin</div>
+        <div class="ctx-sep"></div>
+        <div class="ctx-i" id="pcRandomize">Randomize All</div>
+        <div class="ctx-sep" id="pcSnapSep"></div>
+        <div class="ctx-sub ctx-i" id="pcSnapSub">Add Snapshot to
+            <div class="ctx-submenu" id="pcSnapMenu"></div>
+        </div>
+        <div class="ctx-sep"></div>
+        <div class="ctx-sub ctx-i" id="pcSaveSub">Save State
+            <div class="ctx-submenu" id="pcSaveMenu">
+                <div class="ctx-i" id="pcSavePreset">Save as Preset</div>
+                <div class="ctx-i" id="pcSaveSnapshot">Save as Snapshot</div>
+            </div>
+        </div>
+        <div class="ctx-i" id="pcLoadState">Browse Library...</div>
+    </div>
+    <div class="modal-overlay" id="presetModal">
+        <div class="modal" style="width:440px;max-height:520px">
+            <div class="modal-head">
+                <span class="modal-title" id="presetModalTitle">Presets</span>
+                <button class="modal-close" id="presetModalClose">&times;</button>
+            </div>
+            <div class="preset-save-row">
+                <input type="text" id="presetNameInput" placeholder="Name...">
+                <div class="preset-type-toggle">
+                    <button class="preset-type-btn on" id="presetTypePreset" data-savetype="preset">Preset</button>
+                    <button class="preset-type-btn" id="presetTypeSnap" data-savetype="snapshot">Snapshot</button>
+                </div>
+                <button class="preset-save-btn" id="presetSaveBtn">Save</button>
+            </div>
+            <div class="preset-toolbar">
+                <input type="text" class="modal-search" id="presetSearch" placeholder="Search presets...">
+            </div>
+            <div class="preset-filter-row">
+                <button class="preset-filter on" data-filter="all">All</button>
+                <button class="preset-filter" data-filter="factory">Factory</button>
+                <button class="preset-filter" data-filter="preset">Presets</button>
+                <button class="preset-filter" data-filter="snapshot">Snapshots</button>
+            </div>
+            <div class="modal-body" id="presetBody"></div>
+            <div class="modal-footer">
+                <span class="modal-footer-info" id="presetInfo">0 presets</span>
+            </div>
+        </div>
+    </div>
+    <!-- Snapshot Library Modal (for morph pad) -->
+    <div class="modal-overlay" id="snapLibModal">
+        <div class="modal" style="width:480px;max-height:520px">
+            <div class="modal-head">
+                <span class="modal-title">Snapshot Library</span>
+                <button class="modal-close" id="snapLibClose">&times;</button>
+            </div>
+            <div class="modal-toolbar">
+                <input class="modal-search" id="snapLibSearch" type="text"
+                    placeholder="Search by name, plugin, or vendor...">
+                <div class="preset-filter-row" style="margin:0;padding:4px 0 0">
+                    <button class="preset-filter on" data-slfilter="all">All</button>
+                    <button class="preset-filter" data-slfilter="factory">Factory</button>
+                    <button class="preset-filter" data-slfilter="preset">Presets</button>
+                    <button class="preset-filter" data-slfilter="snapshot">Snapshots</button>
+                </div>
+            </div>
+            <div class="modal-body" id="snapLibBody"></div>
+            <div class="modal-footer">
+                <span class="modal-footer-info" id="snapLibInfo">0 items</span>
+            </div>
+        </div>
+    </div>
+    <!-- Global Preset Browser Modal -->
+    <div class="modal-overlay" id="globalPresetModal">
+        <div class="modal" style="width:440px;max-height:480px">
+            <div class="modal-head">
+                <span class="modal-title">Global Presets</span>
+                <button class="modal-close" id="gpModalClose">&times;</button>
+            </div>
+            <div class="preset-save-row">
+                <input type="text" id="gpNameInput" placeholder="Global preset name...">
+                <button class="preset-save-btn" id="gpSaveBtn">Save</button>
+            </div>
+            <div class="preset-toolbar">
+                <input type="text" class="modal-search" id="gpSearch" placeholder="Search global presets...">
+            </div>
+            <div class="modal-body" id="gpBody"></div>
+            <div class="modal-footer">
+                <span class="modal-footer-info" id="gpInfo">0 presets</span>
+                <button class="scan-btn" id="gpOpenFolder" title="Open presets folder in file explorer">&#9776; Open
+                    Folder</button>
+            </div>
+        </div>
+    </div>
+    <!-- Plugin Browser Modal -->
+    <div class="modal-overlay" id="pluginModal">
+        <div class="modal">
+            <div class="modal-head">
+                <span class="modal-title">Plugin Browser</span>
+                <button class="modal-close" id="modalClose">&times;</button>
+            </div>
+            <div class="modal-toolbar">
+                <input class="modal-search" id="modalSearch" type="text" placeholder="Search plugins...">
+                <div class="modal-tabs" id="modalTabs">
+                    <button class="modal-tab on" data-cat="all">All</button>
+                    <button class="modal-tab" data-cat="synth">Synths</button>
+                    <button class="modal-tab" data-cat="fx">FX</button>
+                    <button class="modal-tab" data-cat="sampler">Samplers</button>
+                    <button class="modal-tab" data-cat="utility">Utility</button>
+                </div>
+            </div>
+            <div class="scan-paths" id="scanPaths">
+                <div class="scan-paths-title">VST3 Scan Paths</div>
+                <div id="scanPathList"></div>
+                <button class="scan-btn" id="addScanPath" style="margin-top:4px">+ Add Path</button>
+            </div>
+            <div class="modal-body" id="modalBody"></div>
+            <div class="modal-footer">
+                <span class="modal-footer-info" id="modalInfo">0 plugins found</span>
+                <button class="scan-btn" id="scanToggle">&#9881; Scan Paths</button>
+            </div>
+        </div>
+    </div>
+    <!-- Keyboard Shortcuts Modal -->
+    <div class="modal-overlay" id="shortcutsModal"></div>
+    <!-- WrongEQ Popup Overlay -->
+    <div class="weq-overlay" id="weqOverlay">
+        <div class="weq-popup" id="weqPanel"></div>
+    </div>
+    <!-- Load order: bridge → state → UI modules → integration (last, calls restoreFromHost) -->
+    <script src="js/juce_bridge.js"></script>
+    <script src="js/state.js"></script>
+    <script src="js/theme_system.js"></script>
+    <script src="js/help_panel.js"></script>
+    <script src="js/undo_system.js"></script>
+    <script src="js/plugin_rack.js"></script>
+    <script src="js/context_menus.js"></script>
+    <script src="js/preset_system.js"></script>
+    <script src="js/logic_blocks.js"></script>
+    <script src="js/lane_module.js"></script>
+    <script src="js/wrongeq_canvas.js"></script>
+    <script src="js/realtime.js"></script>
+    <script src="js/expose_system.js"></script>
+    <script src="js/controls.js"></script>
+    <script src="js/persistence.js"></script>
+    <script src="js/juce_integration.js"></script>
+</body>
+
+</html>

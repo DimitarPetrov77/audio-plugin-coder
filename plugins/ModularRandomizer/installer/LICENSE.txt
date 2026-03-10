@@ -1,0 +1,50 @@
+================================================================================
+                MODULAR RANDOMIZER — END USER LICENSE AGREEMENT
+================================================================================
+
+IMPORTANT: PLEASE READ THIS LICENSE CAREFULLY BEFORE USING THIS SOFTWARE.
+
+By installing, copying, or otherwise using ModularRandomizer ("the Software"),
+you agree to be bound by the terms of this agreement.
+
+1. GRANT OF LICENSE
+   Noizefield grants you a non-exclusive, non-transferable license to install
+   and use the Software on any number of computers you personally own or control.
+
+2. PERMITTED USE
+   - You may install and use the Software on multiple computers
+   - You may use the Software for commercial and non-commercial audio production
+   - You may create and distribute audio content produced using the Software
+   - You may make backup copies for archival purposes
+
+3. RESTRICTIONS
+   - You may not reverse engineer, decompile, or disassemble the Software
+   - You may not redistribute, resell, sublicense, or share the Software
+   - You may not remove or alter any copyright notices or branding
+
+4. INTELLECTUAL PROPERTY
+   The Software is protected by copyright laws and international treaties.
+   All rights not expressly granted are reserved by Noizefield.
+
+5. DISCLAIMER OF WARRANTY
+   THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS
+   OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+
+6. LIMITATION OF LIABILITY
+   IN NO EVENT SHALL NOIZEFIELD BE LIABLE FOR ANY DIRECT, INDIRECT,
+   INCIDENTAL, SPECIAL, OR CONSEQUENTIAL DAMAGES ARISING FROM THE USE
+   OR INABILITY TO USE THE SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY
+   OF SUCH DAMAGES.
+
+7. TERMINATION
+   This license is effective until terminated. It will terminate automatically
+   if you fail to comply with any term of this agreement. Upon termination,
+   you must destroy all copies of the Software.
+
+================================================================================
+By installing this Software, you acknowledge that you have read, understood,
+and agree to be bound by these terms.
+
+Copyright (c) 2026 Noizefield — https://noizefield.com
+================================================================================
