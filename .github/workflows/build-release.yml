@@ -122,6 +122,7 @@ jobs:
               Copy-Item "plugins/$plugin/installer/LICENSE.txt" "$stagingDir\"
             }
             Compress-Archive -Path "$stagingDir\*" -DestinationPath "$distDir\${plugin}-${version}-Windows.zip"
+            Remove-Item -Path $stagingDir -Recurse -Force
           }
 
       - name: Create portable ZIP
@@ -170,6 +171,7 @@ jobs:
           "@ | Out-File -FilePath "$zipDir/README.txt" -Encoding utf8
           
           Compress-Archive -Path "$zipDir/*" -DestinationPath "$distDir/${plugin}-${version}-Windows-Portable.zip"
+          Remove-Item -Path $zipDir -Recurse -Force
           Write-Host "Portable ZIP created" -ForegroundColor Green
 
       - name: Upload Windows Artifacts
@@ -290,6 +292,7 @@ jobs:
             "$DIST_DIR/${PLUGIN}-${VERSION}-macOS.pkg"
           
           echo "macOS installer created: $DIST_DIR/${PLUGIN}-${VERSION}-macOS.pkg"
+          rm -rf "$STAGING"
           ls -la "$DIST_DIR/"
 
       - name: Create portable ZIP
@@ -345,6 +348,7 @@ jobs:
           # Create ZIP
           cd "$DIST_DIR"
           zip -r "${PLUGIN}-${VERSION}-macOS-Portable.zip" "${PLUGIN}-${VERSION}-macOS-Portable/"
+          rm -rf "${PLUGIN}-${VERSION}-macOS-Portable"
           echo "macOS portable ZIP created"
 
       - name: Upload macOS Artifacts
@@ -429,6 +433,7 @@ jobs:
           # Create tar.gz
           cd "$DIST_DIR"
           tar -czf "${PLUGIN}-${VERSION}-Linux.tar.gz" "${PLUGIN}-${VERSION}-Linux/"
+          rm -rf "${PLUGIN}-${VERSION}-Linux"
           
           echo "Linux package created"
           ls -la

@@ -13,7 +13,7 @@ Push the latest ModularRandomizer code to the CI repo and trigger a cross-platfo
 // turbo
 2. Stage all ModularRandomizer changes in the parent repo:
 ```powershell
-git -C "c:\Users\dpetr\Desktop\Juce project\noizefield\audio-plugin-coder" add plugins/ModularRandomizer
+git -C "c:\Users\dpetr\Desktop\Juce project\noizefield\audio-plugin-coder" add plugins/ModularRandomizer .github .agent
 ```
 
 3. Commit with the user's description:
@@ -23,13 +23,13 @@ git -C "c:\Users\dpetr\Desktop\Juce project\noizefield\audio-plugin-coder" commi
 
 4. Push to the fork:
 ```powershell
-git -C "c:\Users\dpetr\Desktop\Juce project\noizefield\audio-plugin-coder" push fork main
+git -C "c:\Users\dpetr\Desktop\Juce project\noizefield\audio-plugin-coder" push origin main
 ```
 
 5. Tag the release and push the tag (this auto-triggers the CI build):
 ```powershell
 git -C "c:\Users\dpetr\Desktop\Juce project\noizefield\audio-plugin-coder" tag v{VERSION}
-git -C "c:\Users\dpetr\Desktop\Juce project\noizefield\audio-plugin-coder" push fork v{VERSION}
+git -C "c:\Users\dpetr\Desktop\Juce project\noizefield\audio-plugin-coder" push origin v{VERSION}
 ```
 
 6. Report success and provide the link:
