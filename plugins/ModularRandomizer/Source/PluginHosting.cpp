@@ -99,6 +99,37 @@ bool sehDestroyInstance (juce::AudioPluginInstance* rawInstance)
         return false;
     }
 }
+#else
+// Non-Windows: no SEH, use regular try/catch fallbacks
+static bool sehSetState (juce::AudioPluginInstance* instance, const void* data, int size)
+{
+    try {
+        instance->setStateInformation (data, size);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool sehReleaseResources (juce::AudioPluginInstance* instance)
+{
+    try {
+        instance->releaseResources();
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool sehDestroyInstance (juce::AudioPluginInstance* rawInstance)
+{
+    try {
+        delete rawInstance;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
 #endif
 
 std::vector<ScannedPlugin> ModularRandomizerAudioProcessor::scanForPlugins (
@@ -996,7 +1027,17 @@ void ModularRandomizerAudioProcessor::buildPresetIndex()
 
     // Scan inside installed VST3 bundles
     juce::Array<juce::File> vst3Dirs;
+#if JUCE_WINDOWS
     vst3Dirs.add (commonFiles.getChildFile ("VST3"));
+#elif JUCE_MAC
+    vst3Dirs.add (juce::File ("/Library/Audio/Plug-Ins/VST3"));
+    vst3Dirs.add (juce::File::getSpecialLocation (juce::File::userHomeDirectory)
+                     .getChildFile ("Library/Audio/Plug-Ins/VST3"));
+#elif JUCE_LINUX
+    vst3Dirs.add (juce::File::getSpecialLocation (juce::File::userHomeDirectory)
+                     .getChildFile (".vst3"));
+    vst3Dirs.add (juce::File ("/usr/lib/vst3"));
+#endif
     for (const auto& vst3Dir : vst3Dirs)
     {
         if (! vst3Dir.isDirectory()) continue;
