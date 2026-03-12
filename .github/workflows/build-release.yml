@@ -9,7 +9,7 @@ on:
       plugin_name:
         description: 'Plugin name to build'
         required: true
-        default: 'ModularRandomizer'
+        default: 'Hostesa'
         type: string
       platforms:
         description: 'Platforms to build'
@@ -63,15 +63,15 @@ jobs:
         run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 
       - name: Build VST3
-        run: cmake --build build --config Release --target "${{ inputs.plugin_name || 'ModularRandomizer' }}_VST3"
+        run: cmake --build build --config Release --target "${{ inputs.plugin_name || 'Hostesa' }}_VST3"
 
       - name: Build Standalone
-        run: cmake --build build --config Release --target "${{ inputs.plugin_name || 'ModularRandomizer' }}_Standalone"
+        run: cmake --build build --config Release --target "${{ inputs.plugin_name || 'Hostesa' }}_Standalone"
 
       - name: Verify build artifacts
         shell: pwsh
         run: |
-          $plugin = "${{ inputs.plugin_name || 'ModularRandomizer' }}"
+          $plugin = "${{ inputs.plugin_name || 'Hostesa' }}"
           $vst3 = Get-ChildItem -Path build -Recurse -Filter "*.vst3" -Directory | Select-Object -First 1
           $exe = Get-ChildItem -Path build -Recurse -Filter "${plugin}.exe" | Select-Object -First 1
           
@@ -90,7 +90,7 @@ jobs:
       - name: Build Windows Installer
         shell: pwsh
         run: |
-          $plugin = "${{ inputs.plugin_name || 'ModularRandomizer' }}"
+          $plugin = "${{ inputs.plugin_name || 'Hostesa' }}"
           $version = "${{ inputs.version || '1.0.0' }}"
           $issPath = "plugins/$plugin/installer/windows.iss"
           $distDir = "plugins/$plugin/dist"
@@ -128,7 +128,7 @@ jobs:
       - name: Create portable ZIP
         shell: pwsh
         run: |
-          $plugin = "${{ inputs.plugin_name || 'ModularRandomizer' }}"
+          $plugin = "${{ inputs.plugin_name || 'Hostesa' }}"
           $version = "${{ inputs.version || '1.0.0' }}"
           $distDir = "plugins/$plugin/dist"
           $zipDir = "$distDir/${plugin}-${version}-Windows-Portable"
@@ -177,9 +177,9 @@ jobs:
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v5
         with:
-          name: windows-${{ inputs.plugin_name || 'ModularRandomizer' }}
+          name: windows-${{ inputs.plugin_name || 'Hostesa' }}
           path: |
-            plugins/${{ inputs.plugin_name || 'ModularRandomizer' }}/dist/*
+            plugins/${{ inputs.plugin_name || 'Hostesa' }}/dist/*
           retention-days: 30
 
   # ============================================
@@ -205,17 +205,17 @@ jobs:
             -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13
 
       - name: Build VST3
-        run: cmake --build build --config Release --target "${{ inputs.plugin_name || 'ModularRandomizer' }}_VST3"
+        run: cmake --build build --config Release --target "${{ inputs.plugin_name || 'Hostesa' }}_VST3"
 
       - name: Build AU
-        run: cmake --build build --config Release --target "${{ inputs.plugin_name || 'ModularRandomizer' }}_AU"
+        run: cmake --build build --config Release --target "${{ inputs.plugin_name || 'Hostesa' }}_AU"
 
       - name: Build Standalone
-        run: cmake --build build --config Release --target "${{ inputs.plugin_name || 'ModularRandomizer' }}_Standalone"
+        run: cmake --build build --config Release --target "${{ inputs.plugin_name || 'Hostesa' }}_Standalone"
 
       - name: Create macOS Installer Package
         run: |
-          PLUGIN="${{ inputs.plugin_name || 'ModularRandomizer' }}"
+          PLUGIN="${{ inputs.plugin_name || 'Hostesa' }}"
           VERSION="${{ inputs.version || '1.0.0' }}"
           DIST_DIR="plugins/$PLUGIN/dist"
           STAGING="$DIST_DIR/staging"
@@ -297,7 +297,7 @@ jobs:
 
       - name: Create portable ZIP
         run: |
-          PLUGIN="${{ inputs.plugin_name || 'ModularRandomizer' }}"
+          PLUGIN="${{ inputs.plugin_name || 'Hostesa' }}"
           VERSION="${{ inputs.version || '1.0.0' }}"
           DIST_DIR="plugins/$PLUGIN/dist"
           ZIP_DIR="$DIST_DIR/${PLUGIN}-${VERSION}-macOS-Portable"
@@ -354,9 +354,9 @@ jobs:
       - name: Upload macOS Artifacts
         uses: actions/upload-artifact@v5
         with:
-          name: macos-${{ inputs.plugin_name || 'ModularRandomizer' }}
+          name: macos-${{ inputs.plugin_name || 'Hostesa' }}
           path: |
-            plugins/${{ inputs.plugin_name || 'ModularRandomizer' }}/dist/*
+            plugins/${{ inputs.plugin_name || 'Hostesa' }}/dist/*
           retention-days: 30
 
   # ============================================
@@ -398,14 +398,14 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build VST3
-        run: cmake --build build --target "${{ inputs.plugin_name || 'ModularRandomizer' }}_VST3"
+        run: cmake --build build --target "${{ inputs.plugin_name || 'Hostesa' }}_VST3"
 
       - name: Build Standalone
-        run: xvfb-run cmake --build build --target "${{ inputs.plugin_name || 'ModularRandomizer' }}_Standalone"
+        run: xvfb-run cmake --build build --target "${{ inputs.plugin_name || 'Hostesa' }}_Standalone"
 
       - name: Package Linux binaries
         run: |
-          PLUGIN="${{ inputs.plugin_name || 'ModularRandomizer' }}"
+          PLUGIN="${{ inputs.plugin_name || 'Hostesa' }}"
           VERSION="${{ inputs.version || '1.0.0' }}"
           DIST_DIR="plugins/$PLUGIN/dist"
           STAGING="$DIST_DIR/${PLUGIN}-${VERSION}-Linux"
@@ -441,9 +441,9 @@ jobs:
       - name: Upload Linux Artifacts
         uses: actions/upload-artifact@v5
         with:
-          name: linux-${{ inputs.plugin_name || 'ModularRandomizer' }}
+          name: linux-${{ inputs.plugin_name || 'Hostesa' }}
           path: |
-            plugins/${{ inputs.plugin_name || 'ModularRandomizer' }}/dist/*.tar.gz
+            plugins/${{ inputs.plugin_name || 'Hostesa' }}/dist/*.tar.gz
           retention-days: 30
 
   # ============================================
@@ -483,7 +483,7 @@ jobs:
           files: release-artifacts/**/*
           generate_release_notes: true
           body: |
-            ## ${{ inputs.plugin_name || 'ModularRandomizer' }} ${{ github.ref_name }}
+            ## ${{ inputs.plugin_name || 'Hostesa' }} ${{ github.ref_name }}
             
             ### Downloads
             - **Windows**: Run the Setup installer, or use the Portable ZIP (extract and copy VST3 folder to `C:\Program Files\Common Files\VST3\`)

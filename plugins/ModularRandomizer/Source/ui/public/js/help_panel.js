@@ -314,7 +314,10 @@
             '<span class="sc-key">HShf</span><span>High shelf \u2014 boosts/cuts everything above. Same slope behavior as LShf</span>' +
             '</div>' +
             para('<b>Note</b>: LP, HP, and Notch are <b>unity-gain</b> filters \u2014 the gain knob and depth control have no effect on them. ' +
-                'They always cut at the set frequency regardless of depth setting.')
+                'They always cut at the set frequency regardless of depth setting.') +
+            para('<b>Slope</b> (12 / 24 / 48 dB/oct): controls how many biquad stages are cascaded per band. ' +
+                '12 dB/oct = gentle single-stage rolloff. 48 dB/oct = steep 4-stage brick-wall. ' +
+                'The slope is visible on the canvas next to each point and the curve reflects the actual steepness.')
         ) +
 
         section('Per-Band Plugin Routing',
@@ -335,6 +338,7 @@
             '<span class="sc-key">Depth</span><span>Scales all band gains 0\u2013200%. At 0% all boosts/cuts are flat. LP/HP/Notch are unaffected</span>' +
             '<span class="sc-key">Warp</span><span>S-curve contrast. Positive = compress toward center, negative = expand extremes</span>' +
             '<span class="sc-key">Steps</span><span>Quantize gain to N equal levels. 0 = smooth, 12 = semitone-like steps</span>' +
+            '<span class="sc-key">Tilt</span><span>Frequency-dependent gain offset. Positive tilts up toward highs, negative toward lows. Applied post-sum</span>' +
             '</div>'
         ) +
 
@@ -379,16 +383,15 @@
             '</div>'
         ) +
 
-        section('Segment Operations',
-            para('Select multiple points (S tool + click/Ctrl+click), then use toolbar operations:') +
+        section('Slope & Cascading',
+            para('Each EQ point has a <b>slope selector</b> (12 / 24 / 48) that controls filter steepness by cascading identical biquad stages:') +
             '<div class="sc-grid">' +
-            '<span class="sc-key">Fill</span><span>Generate evenly-spaced points between selection</span>' +
-            '<span class="sc-key">Mirror</span><span>Flip gain values within selection</span>' +
-            '<span class="sc-key">Randomize</span><span>Random gain values for selected points</span>' +
-            '<span class="sc-key">Fade</span><span>Linear fade between first and last selected</span>' +
-            '<span class="sc-key">Normalize</span><span>Scale selection to fill the current dB range</span>' +
-            '<span class="sc-key">Flatten</span><span>Set all selected to 0 dB</span>' +
-            '</div>'
+            '<span class="sc-key">12 dB/oct</span><span>1 biquad stage \u2014 gentle, musical slope (default)</span>' +
+            '<span class="sc-key">24 dB/oct</span><span>2 cascaded stages \u2014 steeper, tighter isolation</span>' +
+            '<span class="sc-key">48 dB/oct</span><span>4 cascaded stages \u2014 near brick-wall, surgical cuts</span>' +
+            '</div>' +
+            para('Most useful for LP and HP filters where you need sharp cutoffs. For Bell/Shelf, higher slopes make the peak/shelf shape more aggressive. ' +
+                'The canvas curve updates to reflect the actual cascaded response.')
         );
 
     // ── EXPOSE TAB ──
@@ -398,7 +401,7 @@
             'By default, hosted plugin params are exposed when loaded.') +
 
         section('How It Works',
-            para('Modular Randomizer has a <b>unified pool of 2048 proxy parameters</b> (AP_0001 to AP_2048). ' +
+            para('Hostesa has a <b>unified pool of 2048 proxy parameters</b> (AP_0001 to AP_2048). ' +
                 'When you expose a plugin or block, its parameters are mapped to proxy slots. The DAW sees these slots as automatable parameters.') +
             '<div class="sc-grid">' +
             '<span class="sc-key">Block params</span><span>Assigned first \u2014 always appear at the top of the DAW\'s automation list</span>' +

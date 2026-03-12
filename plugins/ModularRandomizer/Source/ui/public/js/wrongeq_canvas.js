@@ -152,11 +152,14 @@ function weqFmtRange(pt) {
 function _weqUpdateLegendRanges() {
     var chips = document.querySelectorAll('.weq-band-range');
     if (chips.length === 0) return;
+    // Use stable base X during animation (same as initial legend render)
     var sorted = wrongEqPoints.map(function (p, idx) {
-        return { x: p.x, ref: p, origIdx: idx };
+        var stableX = (weqAnimRafId && weqAnimBaseX.length > idx) ? weqAnimBaseX[idx] : p.x;
+        // Create a temporary shallow copy with stable X for range computation
+        return { x: stableX, ref: p, stableRef: { x: stableX, y: p.y, q: p.q, type: p.type, mute: p.mute } };
     });
     sorted.sort(function (a, b) { return a.x - b.x; });
-    var qr = sorted.map(function (lp) { return weqBandRange(lp.ref); });
+    var qr = sorted.map(function (lp) { return weqBandRange(lp.stableRef); });
     for (var oi = 0; oi < qr.length - 1; oi++) {
         if (qr[oi].hi > qr[oi + 1].lo) {
             var mid = Math.sqrt(qr[oi].hi * qr[oi + 1].lo);
@@ -165,7 +168,12 @@ function _weqUpdateLegendRanges() {
         }
     }
     for (var ci = 0; ci < qr.length && ci < chips.length; ci++) {
-        chips[ci].textContent = weqFmtFreq(qr[ci].lo) + '–' + weqFmtFreq(qr[ci].hi);
+        chips[ci].textContent = weqFmtFreq(qr[ci].lo) + '\u2013' + weqFmtFreq(qr[ci].hi);
+    }
+    // Split mode: update passthrough chip (last .weq-band-range after the band chips)
+    if (weqSplitMode && chips.length > qr.length && sorted.length > 0) {
+        var lastStableFreq = weqXToFreq(sorted[sorted.length - 1].x);
+        chips[qr.length].textContent = weqFmtFreq(lastStableFreq) + '\u2013' + weqFmtFreq(20000) + ' pass';
     }
 }
 
@@ -281,7 +289,7 @@ function _weqSyncPluginBusIds() {
     if (typeof renderAllPlugins === 'function') renderAllPlugins();
     if (typeof saveUiStateToHost === 'function') saveUiStateToHost();
 }
-var weqSegSel = new Set(); // segment selection: set of band indices for multi-select operations
+
 
 // ── EQ Preset state ──
 var _weqCurrentPreset = null; // current loaded preset name (null = Init)
@@ -490,6 +498,7 @@ function _weqSmoothNoise(phase) {
 
 // Start/stop animation loop
 var weqAnimBaseX = [];      // snapshot of base X values (for frequency drift travel)
+var _weqDriftRangePreview = false; // true while dragging drift range knob — shows ghost range bars
 
 // Single source of truth: does any modulation source need the animation loop?
 function _weqNeedsAnim() {
@@ -513,11 +522,13 @@ function weqAnimStop() {
         cancelAnimationFrame(weqAnimRafId);
         weqAnimRafId = null;
     }
-    // Restore base positions (both X and Y)
-    for (var i = 0; i < wrongEqPoints.length; i++) {
-        if (i < weqAnimBaseY.length) wrongEqPoints[i].y = weqAnimBaseY[i];
-        if (i < weqAnimBaseX.length) wrongEqPoints[i].x = weqAnimBaseX[i];
-        if (i < weqAnimBaseQ.length) wrongEqPoints[i].q = weqAnimBaseQ[i];
+    // Always restore base positions (even if rAF was already cancelled, e.g. from freeze)
+    if (weqAnimBaseY.length > 0) {
+        for (var i = 0; i < wrongEqPoints.length; i++) {
+            if (i < weqAnimBaseY.length) wrongEqPoints[i].y = weqAnimBaseY[i];
+            if (i < weqAnimBaseX.length) wrongEqPoints[i].x = weqAnimBaseX[i];
+            if (i < weqAnimBaseQ.length) wrongEqPoints[i].q = weqAnimBaseQ[i];
+        }
     }
     weqAnimPhase = 0;
     _weqDriftTimeAccum = 0;
@@ -600,7 +611,10 @@ function weqAnimTick(now) {
                 var baseFreq = weqXToFreq(baseX);
                 var sweepOctaves = sweep * driftSweepWidth;
                 var newFreq = baseFreq * Math.pow(2, sweepOctaves);
-                newFreq = Math.max(WEQ_MIN_FREQ, Math.min(WEQ_MAX_FREQ, newFreq));
+                // Clamp to drift zone boundaries so points can't escape the lo/hi cut range
+                var driftFloor = weqDriftLoCut > 20 ? weqDriftLoCut : WEQ_MIN_FREQ;
+                var driftCeil = weqDriftHiCut < 20000 ? weqDriftHiCut : WEQ_MAX_FREQ;
+                newFreq = Math.max(driftFloor, Math.min(driftCeil, newFreq));
                 wrongEqPoints[i].x = weqFreqToX(newFreq);
             } else {
                 wrongEqPoints[i].x = baseX;
@@ -744,13 +758,13 @@ function weqRenderPanel() {
         // Sort points by position — use base X during animation to avoid jittery labels
         var legendPts = wrongEqPoints.map(function (p, idx) {
             var stableX = (weqAnimRafId && weqAnimBaseX.length > idx) ? weqAnimBaseX[idx] : p.x;
-            return { x: stableX, ref: p, origIdx: idx };
+            return { x: stableX, ref: p, origIdx: idx, stableRef: { x: stableX, y: p.y, q: p.q, type: p.type, mute: p.mute } };
         });
         legendPts.sort(function (a, b) { return a.x - b.x; });
         var legendRefs = legendPts.map(function (lp) { return lp.ref; });
 
         // Compute Q-based [lo, hi] for each sorted point (matching C++ ptLo/ptHi)
-        var qRanges = legendPts.map(function (lp) { return weqBandRange(lp.ref); });
+        var qRanges = legendPts.map(function (lp) { return weqBandRange(lp.stableRef); });
 
         // Handle overlapping Q ranges — same logic as C++:
         // when ptHi[i] > ptLo[i+1], split at geometric midpoint
@@ -882,22 +896,6 @@ function weqRenderPanel() {
         for (var sri = 0; sri < wrongEqPoints.length; sri++) if (wrongEqPoints[sri].solo) anySoloRow = true;
 
         h += '<div class="weq-bands-section">';
-        // Segment toolbar inline when 2+ selected (no title header)
-        if (weqSegSel.size >= 2) {
-            h += '<div class="weq-bands-header">';
-            h += '<div class="weq-seg-toolbar-inline">';
-            h += '<span class="weq-seg-info">' + weqSegSel.size + ' sel</span>';
-            h += '<button class="weq-seg-btn" data-segop="fill" title="Fill">Fill</button>';
-            h += '<button class="weq-seg-btn" data-segop="mirror" title="Mirror">Mirror</button>';
-            h += '<button class="weq-seg-btn" data-segop="randomize" title="Rand">Rand</button>';
-            h += '<button class="weq-seg-btn" data-segop="shape" title="Shape">Shape ▾</button>';
-            h += '<button class="weq-seg-btn" data-segop="fade" title="Fade">Fade</button>';
-            h += '<button class="weq-seg-btn" data-segop="normalize" title="Normalize">Norm</button>';
-            h += '<button class="weq-seg-btn" data-segop="flatten" title="Flatten">Flat</button>';
-            h += '<button class="weq-seg-btn weq-seg-clear" data-segop="clear" title="Clear">✕</button>';
-            h += '</div>';
-            h += '</div>';
-        }
 
         // ── Row container: routing sidebar + band cards ──
         h += '<div class="weq-bands-row">';
@@ -997,15 +995,12 @@ function weqRenderPanel() {
             var rGain = weqYToDB(displayY);
             var rQ = pt.q != null ? pt.q : 0.707;
             var rType = pt.type || 'Bell';
-            var isSegSelected = weqSegSel.has(ri);
             var ptPreEq = pt.preEq !== false;
-
             var classes = 'weq-band-card';
             if (dimmed) classes += ' dimmed';
             if (isMuted) classes += ' muted';
             if (isSoloed) classes += ' soloed';
             if (weqSelectedPt === ri) classes += ' focused';
-            if (isSegSelected) classes += ' seg-sel';
 
             // Wrap card + strip in a unit container
             h += '<div class="weq-band-unit">';
@@ -1017,7 +1012,6 @@ function weqRenderPanel() {
             // ── Card header: band number + controls ──
             h += '<div class="weq-card-head">';
             h += '<span class="weq-card-num">' + (ri + 1) + '</span>';
-            h += '<button class="weq-seg-chk' + (isSegSelected ? ' on' : '') + '" data-weqseg="' + ri + '" title="Segment select">✓</button>';
             h += '<div class="weq-card-head-spacer"></div>';
             h += '<button class="weq-s-btn' + (isSoloed ? ' on solo' : '') + '" data-weqsolo="' + ri + '" title="Solo">S</button>';
             h += '<button class="weq-s-btn' + (isMuted ? ' on mute' : '') + '" data-weqmute="' + ri + '" title="Mute">M</button>';
@@ -1044,6 +1038,12 @@ function weqRenderPanel() {
             h += '<button class="weq-type-btn' + (ptSlope === 4 ? ' active' : '') + '" data-weqslope="' + ri + ':4" title="48 dB/oct">48</button>';
             h += '</div>';
 
+            // ── Divider: slope → values ──
+            h += '<div class="weq-card-divider"></div>';
+
+            // ── Value block: freq + params in shared inset ──
+            h += '<div class="weq-card-value-block">';
+
             // ── Frequency — hero value (draggable) ──
             h += '<div class="weq-card-freq" data-weqfreq="' + ri + '" title="Drag ↕ frequency">' + weqFmtFreq(rFreq) + '</div>';
 
@@ -1058,6 +1058,7 @@ function weqRenderPanel() {
             }
             h += '<div class="weq-card-param-box"><span class="weq-card-plbl">Q</span><span class="weq-card-pval" data-weqq="' + ri + '" title="Drag ↕ Q">' + rQ.toFixed(2) + '</span></div>';
             h += '</div>';
+            h += '</div>'; // end weq-card-value-block
 
             // ── Stereo + Mode row ──
             h += '<div class="weq-card-mode-row">';
@@ -1319,10 +1320,13 @@ function weqEvalAtX(xPos) {
         if (pts[i].mute) continue;
         var pt = pts[i].type || 'Bell';
         var isGainBased = (pt === 'Bell' || pt === 'LShf' || pt === 'HShf');
+        // Slope cascading: N identical biquads → N × single_biquad_dB
+        var slopeN = pts[i].slope || 1;
+        var bandDB = _weqBandDB(xPos, pts[i]) * slopeN;
         if (isGainBased) {
-            gainDB += _weqBandDB(xPos, pts[i]) * depthScale;
+            gainDB += bandDB * depthScale;
         } else {
-            unityDB += _weqBandDB(xPos, pts[i]);
+            unityDB += bandDB;
         }
     }
 
@@ -1371,9 +1375,9 @@ function weqDrawCanvas() {
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, W, H);
     try {
-        // Background
-        ctx.fillStyle = weqCssVar('--canvas-bg', '') || weqCssVar('--bg-inset', '#1a1a20');
-        ctx.fillRect(0, 0, W, H);
+        // Background — CSS handles the bg color (same as lane canvas);
+        // just clear to transparent so it shows through.
+        // Do NOT fill a hardcoded color here.
 
         // Bypass overlay: dim the whole canvas
         if (weqGlobalBypass) {
@@ -1761,20 +1765,73 @@ function weqDrawCanvas() {
             ctx.setLineDash([]);
         }
 
-        // ── Draw breakpoints ──
-        // First pass: draw segment selection connection line
-        if (weqSegSel.size >= 2) {
-            var segPts = _weqSortedSel().map(function (i) { return wrongEqPoints[i]; });
-            ctx.beginPath();
-            ctx.strokeStyle = _weqAccentRgba(0.5);
-            ctx.lineWidth = 2;
-            ctx.setLineDash([5, 3]);
-            for (var si = 0; si < segPts.length; si++) {
-                var sx = segPts[si].x * W, sy = weqYtoCanvas(segPts[si].y, H);
-                if (si === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+        // ── Drift range preview: ghost bars showing each point's travel extent ──
+        if (_weqDriftRangePreview && wrongEqPoints.length > 0) {
+            var sweepW = (weqDriftRange / 50) * 4.0; // octaves
+            var driftFloor = weqDriftLoCut > 20 ? weqDriftLoCut : WEQ_MIN_FREQ;
+            var driftCeil = weqDriftHiCut < 20000 ? weqDriftHiCut : WEQ_MAX_FREQ;
+
+            // Compute each point's range
+            var driftBars = [];
+            for (var di = 0; di < wrongEqPoints.length; di++) {
+                var dp = wrongEqPoints[di];
+                var baseFreq = weqXToFreq(dp.x);
+                var loFreq = Math.max(driftFloor, baseFreq / Math.pow(2, sweepW));
+                var hiFreq = Math.min(driftCeil, baseFreq * Math.pow(2, sweepW));
+                var loX = weqFreqToX(loFreq) * W;
+                var hiX = weqFreqToX(hiFreq) * W;
+                var bcy = weqYtoCanvas(dp.y, H);
+                driftBars.push({ loX: loX, hiX: hiX, cy: bcy, col: _weqPointColor(dp), idx: di });
             }
-            ctx.stroke();
-            ctx.setLineDash([]);
+
+            // Check for overlaps and draw crossing zones in red
+            for (var da = 0; da < driftBars.length; da++) {
+                for (var db = da + 1; db < driftBars.length; db++) {
+                    var overlapLo = Math.max(driftBars[da].loX, driftBars[db].loX);
+                    var overlapHi = Math.min(driftBars[da].hiX, driftBars[db].hiX);
+                    if (overlapHi > overlapLo) {
+                        // Draw red crossing zone
+                        var midY = (driftBars[da].cy + driftBars[db].cy) / 2;
+                        var spanY = Math.abs(driftBars[da].cy - driftBars[db].cy) + 14;
+                        ctx.fillStyle = 'rgba(255, 60, 60, 0.08)';
+                        ctx.fillRect(overlapLo, midY - spanY / 2, overlapHi - overlapLo, spanY);
+                        // Red border lines
+                        ctx.strokeStyle = 'rgba(255, 60, 60, 0.35)';
+                        ctx.lineWidth = 1;
+                        ctx.setLineDash([3, 3]);
+                        ctx.beginPath();
+                        ctx.moveTo(overlapLo, midY - spanY / 2);
+                        ctx.lineTo(overlapLo, midY + spanY / 2);
+                        ctx.moveTo(overlapHi, midY - spanY / 2);
+                        ctx.lineTo(overlapHi, midY + spanY / 2);
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+                    }
+                }
+            }
+
+            // Draw each point's range bar
+            for (var dr = 0; dr < driftBars.length; dr++) {
+                var bar = driftBars[dr];
+                var barH = 6;
+                // Range bar
+                ctx.fillStyle = weqHexRgba(bar.col, 0.15);
+                ctx.fillRect(bar.loX, bar.cy - barH / 2, bar.hiX - bar.loX, barH);
+                // Bar border
+                ctx.strokeStyle = weqHexRgba(bar.col, 0.4);
+                ctx.lineWidth = 1;
+                ctx.strokeRect(bar.loX, bar.cy - barH / 2, bar.hiX - bar.loX, barH);
+                // Ghost endpoint dots
+                ctx.globalAlpha = 0.35;
+                ctx.beginPath();
+                ctx.arc(bar.loX, bar.cy, 3, 0, Math.PI * 2);
+                ctx.fillStyle = bar.col;
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(bar.hiX, bar.cy, 3, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalAlpha = 1.0;
+            }
         }
 
         for (var pi = 0; pi < sorted.length; pi++) {
@@ -1783,7 +1840,6 @@ function weqDrawCanvas() {
             var cx = pt.x * W;
             var cy = weqYtoCanvas(pt.y, H);
             var isSel = (realIdx === weqSelectedPt);
-            var isSegSel = weqSegSel.has(realIdx);
             var col = _weqPointColor(pt);
             var isMutedPt = pt.mute;
             var isNonSoloed = anySolo && !pt.solo;
@@ -1809,18 +1865,11 @@ function weqDrawCanvas() {
                 ctx.setLineDash([]);
             }
 
-            // Segment selection glow ring
-            if (isSegSel) {
-                ctx.beginPath();
-                ctx.arc(cx, cy, 10, 0, Math.PI * 2);
-                ctx.strokeStyle = _weqAccentRgba(0.6);
-                ctx.lineWidth = 2;
-                ctx.stroke();
-            }
+
 
             // Point shape based on filter type (FabFilter convention)
             var ptType = pt.type || 'Bell';
-            var r = isSel ? 7 : (isSegSel ? 6 : 5);
+            var r = isSel ? 7 : 5;
             ctx.beginPath();
             if (ptType === 'Bell' || ptType === 'Notch') {
                 // Circle (Bell) or Diamond (Notch)
@@ -1856,10 +1905,10 @@ function weqDrawCanvas() {
             } else {
                 ctx.arc(cx, cy, r, 0, Math.PI * 2);
             }
-            ctx.fillStyle = isSel ? '#fff' : (isSegSel ? _weqAccentRgba(0.7) : col);
+            ctx.fillStyle = isSel ? '#fff' : col;
             ctx.fill();
-            ctx.lineWidth = isSel ? 2 : (isSegSel ? 2 : 1.5);
-            ctx.strokeStyle = isSel ? col : (isSegSel ? _weqAccentRgba(0.8) : 'rgba(0,0,0,0.5)');
+            ctx.lineWidth = isSel ? 2 : 1.5;
+            ctx.strokeStyle = isSel ? col : 'rgba(0,0,0,0.5)';
             ctx.stroke();
 
             // Q bandwidth visualization for selected point
@@ -1920,14 +1969,17 @@ function weqDrawCanvas() {
             ctx.textAlign = 'center';
             ctx.fillText((pi + 1) + ' ' + typeStr + ' ' + weqFmtFreq(freq), cx, 10);
 
-            // dB + Q label near point
+            // dB + Q + slope label near point
             var dbVal = weqYToDB(pt.y);
             var ptQ = pt.q || 0.707;
+            var ptSl = pt.slope || 1;
+            var slopeDB = ptSl * 12;
             var detailLabel;
             if (typeStr === 'LP' || typeStr === 'HP') {
-                detailLabel = '12dB/oct';
+                detailLabel = slopeDB + 'dB/oct';
             } else {
                 detailLabel = weqFmtDB(dbVal) + 'dB  Q' + ptQ.toFixed(2);
+                if (ptSl > 1) detailLabel += '  ×' + ptSl;
             }
             ctx.fillStyle = isSel ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.35)';
             ctx.font = '8px "Share Tech Mono", monospace';
@@ -2200,12 +2252,6 @@ function weqSetupEvents() {
                 e.target.hasAttribute('data-weqq') || e.target.hasAttribute('data-weqdrift') ||
                 e.target.hasAttribute('data-weqfreq') || e.target.hasAttribute('data-weqpointpreq')) return;
             var idx = parseInt(row.dataset.bandidx);
-            if (e.shiftKey || e.ctrlKey) {
-                if (weqSegSel.has(idx)) weqSegSel.delete(idx);
-                else weqSegSel.add(idx);
-                weqRenderPanel();
-                return;
-            }
             var wasSelected = (weqFocusBand === idx && weqSelectedPt === idx);
             weqFocusBand = wasSelected ? -1 : idx;
             weqSelectedPt = wasSelected ? -1 : idx;
@@ -2216,27 +2262,6 @@ function weqSetupEvents() {
         };
     });
 
-    // Segment selection checkbox buttons
-    document.querySelectorAll('[data-weqseg]').forEach(function (btn) {
-        btn.onclick = function (e) {
-            e.stopPropagation();
-            var idx = parseInt(btn.dataset.weqseg);
-            if (weqSegSel.has(idx)) weqSegSel.delete(idx);
-            else weqSegSel.add(idx);
-            weqRenderPanel();
-        };
-    });
-
-    // Segment toolbar operations
-    document.querySelectorAll('[data-segop]').forEach(function (btn) {
-        btn.onclick = function (e) {
-            e.stopPropagation();
-            var op = btn.dataset.segop;
-            if (op === 'clear') { weqSegSel.clear(); weqRenderPanel(); return; }
-            if (op === 'shape') { _weqSegShapeMenu(e); return; }
-            _weqSegApply(op);
-        };
-    });
 
     // Routing panel toggle (+ button on each card)
     document.querySelectorAll('[data-weqrouting]').forEach(function (btn) {
@@ -2728,7 +2753,6 @@ function weqSetupEvents() {
                 if (weqAnimRafId && weqAnimBaseY.length > idx) { weqAnimBaseY.splice(idx, 1); weqAnimBaseX.splice(idx, 1); }
                 weqSelectedPt = -1;
                 weqFocusBand = -1;
-                weqSegSel.clear();
                 weqRenderPanel(); weqSyncToHost();
                 if (typeof markStateDirty === 'function') markStateDirty();
             }
@@ -2746,18 +2770,21 @@ function weqSetupEvents() {
             else if (key === 'steps') { weqGlobalSteps = 0; knob.textContent = 'Off'; }
             else if (key === 'tilt') { weqGlobalTilt = 0; knob.textContent = '+0'; }
 
-            else if (key === 'drift') { weqDrift = 0; knob.textContent = '+0'; knob.classList.remove('weq-anim-on'); if (!_weqNeedsAnim()) weqAnimStop(); }
+            else if (key === 'drift') { weqDrift = 0; knob.textContent = '+0'; knob.classList.remove('weq-anim-on'); }
             else if (key === 'driftRange') { weqDriftRange = 5; knob.textContent = '5%'; }
-            else if (key === 'speed') { weqAnimSpeed = 0; knob.textContent = 'Off'; knob.classList.remove('weq-anim-on'); if (!_weqNeedsAnim()) weqAnimStop(); }
+            else if (key === 'speed') { weqAnimSpeed = 0; knob.textContent = 'Off'; knob.classList.remove('weq-anim-on'); }
             else if (key === 'mod') { weqAnimDepth = 6; knob.textContent = '6dB'; }
             else if (key === 'gainLo') { weqGainLoCut = 20; knob.textContent = 'Off'; knob.classList.remove('weq-anim-on'); }
             else if (key === 'gainHi') { weqGainHiCut = 20000; knob.textContent = 'Off'; knob.classList.remove('weq-anim-on'); }
             else if (key === 'driftLo') { weqDriftLoCut = 20; knob.textContent = 'Off'; knob.classList.remove('weq-anim-on'); }
             else if (key === 'driftHi') { weqDriftHiCut = 20000; knob.textContent = 'Off'; knob.classList.remove('weq-anim-on'); }
-            else if (key === 'qSpeed') { weqQModSpeed = 0; knob.textContent = 'Off'; knob.classList.remove('weq-anim-on'); if (!_weqNeedsAnim()) weqAnimStop(); }
+            else if (key === 'qSpeed') { weqQModSpeed = 0; knob.textContent = 'Off'; knob.classList.remove('weq-anim-on'); }
             else if (key === 'qDepth') { weqQModDepth = 50; knob.textContent = '50%'; }
             else if (key === 'qLo') { weqQLoCut = 20; knob.textContent = 'Off'; knob.classList.remove('weq-anim-on'); }
             else if (key === 'qHi') { weqQHiCut = 20000; knob.textContent = 'Off'; knob.classList.remove('weq-anim-on'); }
+
+            // Always check: if no modulation is needed, restore base positions
+            if (!_weqNeedsAnim()) weqAnimStop();
 
             weqDrawCanvas(); weqSyncToHost(); weqSyncVirtualParams();
             if (typeof markStateDirty === 'function') markStateDirty();
@@ -2792,6 +2819,20 @@ function weqSetupEvents() {
                 return Math.round(20 * Math.pow(20000 / 20, Math.max(0, Math.min(1, norm))));
             }
 
+            // Freeze animation while dragging any side-panel knob so user sees base positions
+            var _wasFrozen = false;
+            if (weqAnimRafId) {
+                _wasFrozen = true;
+                cancelAnimationFrame(weqAnimRafId);
+                weqAnimRafId = null;
+                for (var fi = 0; fi < wrongEqPoints.length; fi++) {
+                    if (fi < weqAnimBaseY.length) wrongEqPoints[fi].y = weqAnimBaseY[fi];
+                    if (fi < weqAnimBaseX.length) wrongEqPoints[fi].x = weqAnimBaseX[fi];
+                    if (fi < weqAnimBaseQ.length) wrongEqPoints[fi].q = weqAnimBaseQ[fi];
+                }
+                weqDrawCanvas();
+            }
+
             function onMove(ev) {
                 var dy = startY - ev.clientY;
                 if (key === 'depth') {
@@ -2817,6 +2858,7 @@ function weqSetupEvents() {
                     weqDriftRange = Math.max(0, Math.min(50, Math.round(startVal + dy * 0.3)));
                     knob.textContent = weqDriftRange + '%';
                     knob.classList.toggle('weq-anim-on', Math.abs(weqDrift) > 0 && weqDriftRange > 0);
+                    _weqDriftRangePreview = true; // show ghost bars on canvas
                     var nl2 = _weqNeedsAnim();
                     if (nl2 && !weqAnimRafId) weqAnimStart();
                     else if (!nl2 && weqAnimRafId) weqAnimStop();
@@ -2898,6 +2940,20 @@ function weqSetupEvents() {
             function onUp() {
                 document.removeEventListener('mousemove', onMove);
                 document.removeEventListener('mouseup', onUp);
+                // Clear drift range preview
+                if (_weqDriftRangePreview) {
+                    _weqDriftRangePreview = false;
+                    weqDrawCanvas();
+                }
+                // Resume animation if it was frozen for knob drag
+                if (_wasFrozen) {
+                    if (_weqNeedsAnim()) {
+                        weqAnimStart();
+                    } else {
+                        // Modulation was turned off during drag — restore base positions
+                        weqAnimStop();
+                    }
+                }
                 weqSyncToHost(); weqSyncVirtualParams();
                 if (typeof markStateDirty === 'function') markStateDirty();
             }
@@ -3058,7 +3114,6 @@ function weqSetupEvents() {
                 _weqPushUndo();
                 wrongEqPoints.splice(weqSelectedPt, 1);
                 if (weqAnimRafId && weqAnimBaseY.length > weqSelectedPt) { weqAnimBaseY.splice(weqSelectedPt, 1); weqAnimBaseX.splice(weqSelectedPt, 1); }
-                weqSegSel.clear();
                 weqSelectedPt = -1;
                 weqFocusBand = -1;
                 weqRenderPanel(); weqSyncToHost();
@@ -3613,7 +3668,6 @@ function _weqBuildPointMenu(hit, e) {
         label: '⌫ Delete Point', action: function () {
             _weqPushUndo();
             wrongEqPoints.splice(hit, 1);
-            weqSegSel.clear();
             if (weqAnimRafId && weqAnimBaseY.length > hit) { weqAnimBaseY.splice(hit, 1); weqAnimBaseX.splice(hit, 1); }
             weqSelectedPt = -1;
             weqFocusBand = -1;
@@ -4224,193 +4278,6 @@ function weqSetVisible(visible) {
     }
 }
 
-// ════════════════════════════════════════════════════════════
-// SEGMENT EFFECTS — operations on selected band groups
-// ════════════════════════════════════════════════════════════
-
-// Get sorted selected indices (by frequency, low to high)
-function _weqSortedSel() {
-    var arr = Array.from(weqSegSel).filter(function (idx) {
-        return idx >= 0 && idx < wrongEqPoints.length;
-    });
-    arr.sort(function (a, b) { return wrongEqPoints[a].x - wrongEqPoints[b].x; });
-    return arr;
-}
-
-// ── Apply a segment operation ──
-function _weqSegApply(op) {
-    if (weqSegSel.size < 2) return;
-    var sorted = _weqSortedSel();
-    _weqPushUndo();
-    switch (op) {
-        case 'fill': _weqSegFill(sorted); break;
-        case 'mirror': _weqSegMirror(sorted); break;
-        case 'randomize': _weqSegRand(sorted); break;
-        case 'fade': _weqSegFade(sorted); break;
-        case 'normalize': _weqSegNormalize(sorted); break;
-        case 'flatten': _weqSegFlatten(sorted); break;
-        default: break;
-    }
-
-    weqRenderPanel();
-    weqSyncToHost();
-    weqSyncVirtualParams();
-    if (typeof markStateDirty === 'function') markStateDirty();
-}
-
-// FILL: Generate evenly-spaced points between the two outermost selected bands
-function _weqSegFill(sorted) {
-    var first = wrongEqPoints[sorted[0]];
-    var last = wrongEqPoints[sorted[sorted.length - 1]];
-    var xMin = first.x, xMax = last.x;
-    var yMin = first.y, yMax = last.y;
-    var qFirst = first.q || 0.707, qLast = last.q || 0.707;
-
-    // How many to add? prompt or use count. Use count = max(2, selected-2) to fill gaps
-    var count = Math.max(2, sorted.length);
-    for (var i = 1; i < count; i++) {
-        var t = i / count;
-        var newX = xMin + (xMax - xMin) * t;
-        var newY = yMin + (yMax - yMin) * t;
-        var newQ = qFirst + (qLast - qFirst) * t;
-        // Check if a point already exists near this frequency
-        var fNew = weqXToFreq(newX);
-        var exists = false;
-        for (var j = 0; j < wrongEqPoints.length; j++) {
-            var fExist = weqXToFreq(wrongEqPoints[j].x);
-            if (Math.abs(fExist - fNew) / fNew < 0.03) { exists = true; break; } // within 3%
-        }
-        if (!exists && wrongEqPoints.length < 32) {
-            var pt = { uid: _weqAllocUid(), x: newX, y: newY, pluginIds: [], preEq: true, seg: null, solo: false, mute: false, q: Math.round(newQ * 100) / 100, type: 'Bell', drift: 0 };
-            wrongEqPoints.push(pt);
-            if (weqAnimRafId) { weqAnimBaseY.push(pt.y); weqAnimBaseX.push(pt.x); }
-        }
-    }
-}
-
-// MIRROR: Flip gains across 0 dB
-function _weqSegMirror(sorted) {
-    for (var i = 0; i < sorted.length; i++) {
-        var pt = wrongEqPoints[sorted[i]];
-        var db = weqYToDB(pt.y);
-        pt.y = weqDBtoY(-db);
-        if (weqAnimRafId && weqAnimBaseY[sorted[i]] != null) {
-            weqAnimBaseY[sorted[i]] = pt.y;
-        }
-    }
-}
-
-// RANDOMIZE: Scatter gains randomly within ±range
-function _weqSegRand(sorted) {
-    for (var i = 0; i < sorted.length; i++) {
-        var pt = wrongEqPoints[sorted[i]];
-        // Random gain within ±maxDB range
-        var db = (Math.random() * 2 - 1) * weqDBRangeMax * 0.75;
-        pt.y = weqDBtoY(db);
-        // Random Q between 0.3 and 8
-        pt.q = Math.round((0.3 + Math.random() * 7.7) * 100) / 100;
-        if (weqAnimRafId && weqAnimBaseY[sorted[i]] != null) {
-            weqAnimBaseY[sorted[i]] = pt.y;
-        }
-    }
-}
-
-// FADE: Linear interpolation of gain between first and last selected band
-function _weqSegFade(sorted) {
-    if (sorted.length < 2) return;
-    var first = wrongEqPoints[sorted[0]];
-    var last = wrongEqPoints[sorted[sorted.length - 1]];
-    var dbStart = weqYToDB(first.y);
-    var dbEnd = weqYToDB(last.y);
-
-    for (var i = 0; i < sorted.length; i++) {
-        var t = i / (sorted.length - 1);
-        var db = dbStart + (dbEnd - dbStart) * t;
-        wrongEqPoints[sorted[i]].y = weqDBtoY(db);
-        if (weqAnimRafId && weqAnimBaseY[sorted[i]] != null) {
-            weqAnimBaseY[sorted[i]] = weqDBtoY(db);
-        }
-    }
-}
-
-// NORMALIZE: Scale all selected gains so the peak reaches ±maxDB * 0.8
-function _weqSegNormalize(sorted) {
-    var maxAbs = 0;
-    for (var i = 0; i < sorted.length; i++) {
-        var db = Math.abs(weqYToDB(wrongEqPoints[sorted[i]].y));
-        if (db > maxAbs) maxAbs = db;
-    }
-    if (maxAbs < 0.1) return; // all flat, nothing to normalize
-    var target = weqDBRangeMax * 0.8;
-    var scale = target / maxAbs;
-    for (var i = 0; i < sorted.length; i++) {
-        var db = weqYToDB(wrongEqPoints[sorted[i]].y);
-        wrongEqPoints[sorted[i]].y = weqDBtoY(db * scale);
-        if (weqAnimRafId && weqAnimBaseY[sorted[i]] != null) {
-            weqAnimBaseY[sorted[i]] = weqDBtoY(db * scale);
-        }
-    }
-}
-
-// FLATTEN: Set all selected bands to 0 dB
-function _weqSegFlatten(sorted) {
-    for (var i = 0; i < sorted.length; i++) {
-        wrongEqPoints[sorted[i]].y = weqDBtoY(0);
-        if (weqAnimRafId && weqAnimBaseY[sorted[i]] != null) {
-            weqAnimBaseY[sorted[i]] = weqDBtoY(0);
-        }
-    }
-}
-
-// SHAPE APPLY: Apply a waveform shape across the spectral range of selection
-function _weqSegShapeApply(sorted, shapeFn) {
-    if (sorted.length < 2) return;
-    for (var i = 0; i < sorted.length; i++) {
-        var t = i / (sorted.length - 1); // 0 to 1 across selection
-        var shapeVal = shapeFn(t); // -1 to 1
-        var db = shapeVal * weqDBRangeMax * 0.7; // scale to 70% of range
-        wrongEqPoints[sorted[i]].y = weqDBtoY(db);
-        if (weqAnimRafId && weqAnimBaseY[sorted[i]] != null) {
-            weqAnimBaseY[sorted[i]] = weqDBtoY(db);
-        }
-    }
-    weqRenderPanel();
-    weqSyncToHost();
-    weqSyncVirtualParams();
-    if (typeof markStateDirty === 'function') markStateDirty();
-}
-
-// Shape selection popup menu
-function _weqSegShapeMenu(e) {
-    var sorted = _weqSortedSel();
-    if (sorted.length < 2) return;
-
-    var shapes = [
-        { label: '∿ Sine', fn: function (t) { return Math.sin(t * Math.PI * 2); } },
-        { label: '∿ Sine ×2', fn: function (t) { return Math.sin(t * Math.PI * 4); } },
-        { label: '∿ Sine ×4', fn: function (t) { return Math.sin(t * Math.PI * 8); } },
-        { sep: true },
-        { label: '⟋ Saw Up', fn: function (t) { return t * 2 - 1; } },
-        { label: '⟍ Saw Down', fn: function (t) { return 1 - t * 2; } },
-        { label: '△ Triangle', fn: function (t) { return t < 0.5 ? t * 4 - 1 : 3 - t * 4; } },
-        { label: '⊓ Square', fn: function (t) { return t < 0.5 ? 1 : -1; } },
-        { sep: true },
-        { label: '⤴ Rise', fn: function (t) { return Math.pow(t, 1.5) * 2 - 1; } },
-        { label: '⤵ Fall', fn: function (t) { return (1 - Math.pow(t, 1.5)) * 2 - 1; } },
-        { label: '∩ Bump', fn: function (t) { return Math.sin(t * Math.PI); } },
-        { label: '∪ Dip', fn: function (t) { return -Math.sin(t * Math.PI); } },
-        { sep: true },
-        { label: '⚡ Noise', fn: function () { return Math.random() * 2 - 1; } },
-        { label: '↝ Smooth Noise', fn: function (t) { return Math.sin(t * 7.3 + 1.2) * 0.6 + Math.sin(t * 13.1 + 0.7) * 0.4; } }
-    ];
-
-    var items = shapes.map(function (s) {
-        if (s.sep) return { sep: true };
-        return { label: s.label, action: function () { _weqSegShapeApply(sorted, s.fn); } };
-    });
-
-    _weqShowCtxMenu(items, e);
-}
 
 // ── Open/close helpers ──
 function weqOpen() {

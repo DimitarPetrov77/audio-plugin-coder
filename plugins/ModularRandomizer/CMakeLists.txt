@@ -1,4 +1,4 @@
-# ModularRandomizer - Multi-Plugin Parameter Randomizer
+# Hostesa - Multi-Plugin Parameter Host
 # WebView-based UI with plugin hosting architecture
 # Windows: VST3/Standalone (WebView2)
 
@@ -19,18 +19,18 @@ elseif(UNIX)
     set(NEEDS_WEBVIEW2 FALSE)
     set(NEEDS_WEB_BROWSER TRUE)
     set(WEBVIEW_BACKEND "WebKitGTK")
-    set(LV2_URI "https://dimitarp.com/audio-plugin-coder/ModularRandomizer")
+    set(LV2_URI "https://dimitarp.com/audio-plugin-coder/Hostesa")
 else()
     message(FATAL_ERROR "Unsupported platform")
 endif()
 
-message(STATUS "ModularRandomizer: Building for ${PLUGIN_FORMATS}")
-message(STATUS "ModularRandomizer: WebView backend: ${WEBVIEW_BACKEND}")
+message(STATUS "Hostesa: Building for ${PLUGIN_FORMATS}")
+message(STATUS "Hostesa: WebView backend: ${WEBVIEW_BACKEND}")
 
 # ============================================
 # BINARY DATA (Web UI Resources)
 # ============================================
-juce_add_binary_data(ModularRandomizerWebUI
+juce_add_binary_data(HostesaWebUI
     HEADER_NAME "BinaryData.h"
     NAMESPACE BinaryData
     SOURCES
@@ -65,14 +65,14 @@ juce_add_binary_data(ModularRandomizerWebUI
 )
 
 # Set include directories for binary data
-set_target_properties(ModularRandomizerWebUI PROPERTIES
+set_target_properties(HostesaWebUI PROPERTIES
     POSITION_INDEPENDENT_CODE TRUE
 )
 
 # ============================================
 # PLUGIN TARGET
 # ============================================
-juce_add_plugin(ModularRandomizer
+juce_add_plugin(Hostesa
     COMPANY_NAME "Dimitar Petrov"
     IS_SYNTH FALSE
     NEEDS_MIDI_INPUT TRUE
@@ -81,12 +81,12 @@ juce_add_plugin(ModularRandomizer
     EDITOR_WANTS_KEYBOARD_FOCUS TRUE
     COPY_PLUGIN_AFTER_BUILD FALSE
     PLUGIN_MANUFACTURER_CODE DmPt
-    PLUGIN_CODE MdRn
+    PLUGIN_CODE Hsta
     FORMATS ${PLUGIN_FORMATS}
-    PRODUCT_NAME "ModularRandomizer"
-    BUNDLE_ID "com.dimitarp.modularrandomizer"
-    PLUGIN_NAME "ModularRandomizer"
-    DESCRIPTION "Multi-Plugin Parameter Randomizer"
+    PRODUCT_NAME "Hostesa"
+    BUNDLE_ID "com.dimitarp.hostesa"
+    PLUGIN_NAME "Hostesa"
+    DESCRIPTION "Multi-Plugin Parameter Host"
 
     # WebView2 requirement for Windows
     NEEDS_WEBVIEW2 ${NEEDS_WEBVIEW2}
@@ -95,7 +95,7 @@ juce_add_plugin(ModularRandomizer
 # ============================================
 # SOURCE FILES
 # ============================================
-target_sources(ModularRandomizer
+target_sources(Hostesa
     PRIVATE
         Source/PluginProcessor.cpp
         Source/PluginProcessor.h
@@ -109,7 +109,7 @@ target_sources(ModularRandomizer
 # ============================================
 # INCLUDE DIRECTORIES
 # ============================================
-target_include_directories(ModularRandomizer
+target_include_directories(Hostesa
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/Source
 )
@@ -117,7 +117,7 @@ target_include_directories(ModularRandomizer
 # ============================================
 # COMPILE DEFINITIONS
 # ============================================
-target_compile_definitions(ModularRandomizer
+target_compile_definitions(Hostesa
     PUBLIC
         JUCE_WEB_BROWSER=1
         JUCE_VST3_CAN_REPLACE_VST2=0
@@ -128,7 +128,7 @@ target_compile_definitions(ModularRandomizer
 
 # WebView2 static linking is Windows-only
 if(WIN32)
-    target_compile_definitions(ModularRandomizer PUBLIC
+    target_compile_definitions(Hostesa PUBLIC
         JUCE_USE_WIN_WEBVIEW2_WITH_STATIC_LINKING=1
     )
 endif()
@@ -136,9 +136,9 @@ endif()
 # ============================================
 # LINK LIBRARIES
 # ============================================
-target_link_libraries(ModularRandomizer
+target_link_libraries(Hostesa
     PRIVATE
-        ModularRandomizerWebUI
+        HostesaWebUI
         juce::juce_audio_basics
         juce::juce_audio_processors
         juce::juce_audio_plugin_client

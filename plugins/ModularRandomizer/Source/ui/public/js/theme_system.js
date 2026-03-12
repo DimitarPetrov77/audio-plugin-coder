@@ -152,14 +152,14 @@ var THEMES = {
         ],
 
         busColors: [
-            '#3A4258',
-            '#E8ECF2',
+            '#5A70B0',
+            '#E8A840',
             '#4A9EE0',
             '#E08840',
             '#44BB70',
             '#40B8A0',
             '#D85040',
-            '#6B7488',
+            '#B070D0',
         ],
 
         swatches: ['#0C0E14', '#1A1F2C', '#E8A840', '#4A9EE0', '#D85040'],
@@ -330,13 +330,14 @@ var THEMES = {
         ],
 
         busColors: [
-            '#627476',
+            '#2E98A8',
             '#00C8B4',
             '#E87040',
             '#4AC8E8',
             '#E8A030',
             '#A0D860',
             '#D06CC0',
+            '#50D0B0',
         ],
 
         swatches: ['#0C1416', '#1E2A2C', '#E8F4F4', '#00C8B4', '#E8A030']
@@ -487,7 +488,7 @@ var THEMES = {
             '#8A6030',  // bronze
             '#0A4A7A',  // deep navy
         ],
-        busColors: ['#787878', '#1F5FA6', '#A04000', '#1A6E5A', '#4A8AB0', '#B08800', '#8A6030', '#425830'],
+        busColors: ['#4A80B0', '#1F5FA6', '#A04000', '#1A6E5A', '#4A8AB0', '#B08800', '#8A6030', '#607898'],
         swatches: ['#C8C8C8', '#E8E8E8', '#0A0A0A', '#1F5FA6', '#1A6E5A']
     },
 
@@ -640,14 +641,14 @@ var THEMES = {
         ],
 
         busColors: [
-            '#504538',
-            '#E8E0D4',
+            '#8A6030',
+            '#E8C878',
             '#5C98B8',
             '#C87830',
             '#6AAD5C',
             '#5CA888',
             '#B85040',
-            '#887A66',
+            '#A08050',
         ],
 
         swatches: ['#12100C', '#252019', '#C8A050', '#6AAD5C', '#B85040'],
@@ -726,7 +727,7 @@ var THEMES = {
         },
         // FIX: bcolors updated — morph slot was #C8785A (same as shapes). Now phosphor green
         bcolors: ['#B8C840', '#D4943A', '#7ABCCC', '#CC6644', '#C8785A', '#88CC44', '#C0B090', '#D8D0B8'],
-        busColors: ['#686858', '#B8C840', '#D4943A', '#7ABCCC', '#CC6644', '#88CC44', '#C8785A', '#88AA80'],
+        busColors: ['#8AAC30', '#B8C840', '#D4943A', '#7ABCCC', '#CC6644', '#88CC44', '#C8785A', '#60B878'],
         swatches: ['#1E1E1C', '#383835', '#F0E8D0', '#B8C840', '#D4943A']
     },
 
@@ -833,7 +834,7 @@ var THEMES = {
             '--drag-highlight': '#D4A840',
         },
         bcolors: ['#D4A840', '#E85A30', '#3AAAE0', '#50D890', '#E05A40', '#44DD66', '#9090A8', '#E0E0F0'],
-        busColors: ['#3A3A48', '#D4A840', '#E85A30', '#3AAAE0', '#50D890', '#E05A40', '#44DD66', '#9090A8'],
+        busColors: ['#6A5AB0', '#D4A840', '#E85A30', '#3AAAE0', '#50D890', '#E05A40', '#44DD66', '#A878D0'],
         swatches: ['#111116', '#222228', '#F0EEF8', '#D4A840', '#E85A30'],
     },
 
@@ -946,7 +947,7 @@ var THEMES = {
             '--drag-highlight': '#C8781E',
         },
         bcolors: ['#C8781E', '#D4A030', '#78BCCC', '#A0C840', '#D46050', '#88CC44', '#B8A878', '#F0E8C8'],
-        busColors: ['#584838', '#C8781E', '#D46050', '#78BCCC', '#D4A030', '#A0C840', '#88CC44', '#B8A878'],
+        busColors: ['#A07038', '#C8781E', '#D46050', '#78BCCC', '#D4A030', '#A0C840', '#88CC44', '#C8A050'],
         swatches: ['#120E08', '#252018', '#F0E8C8', '#C8781E', '#D4A030'],
     },
 
@@ -958,26 +959,26 @@ var THEMES = {
             '--bg-app': '#C0C0C0',
             '--bg-panel': '#D4D0C8',
             '--bg-cell': '#FFFFFF',
-            '--bg-cell-hover': '#E8E8E0',
-            '--bg-inset': '#808080',
+            '--bg-cell-hover': '#E8E4DC',
+            '--bg-inset': '#404040',
 
             // ── BORDERS ───────────────────────────────────────────────
             // The iconic beveled 3D look — dark bottom-right, light top-left.
-            '--border': '#808080',
+            '--border': '#888888',
             '--border-strong': '#404040',
             '--border-focus': '#000080',  // navy focus — just like a selected title bar
 
             // ── TEXT ──────────────────────────────────────────────────
             '--text-primary': '#000000',
-            '--text-secondary': '#404040',
-            '--text-muted': '#808080',
+            '--text-secondary': '#303030',
+            '--text-muted': '#606060',
             '--input-text': '#000000',
 
             // ── ACCENT ────────────────────────────────────────────────
             // The unmistakable navy-blue of a selected title bar / highlighted menu item.
             '--accent': '#000080',
             '--accent-hover': '#0000AA',
-            '--accent-light': 'rgba(0,0,128,0.10)',
+            '--accent-light': 'rgba(0,0,128,0.12)',
             '--accent-border': 'rgba(0,0,128,0.40)',
 
             // ── STATUS ────────────────────────────────────────────────
@@ -992,34 +993,34 @@ var THEMES = {
 
             // ── MODE COLORS ───────────────────────────────────────────
             // The Windows 16-color palette — unapologetically 4-bit.
-            '--rand-color': '#0000FF',   // blue
-            '--env-color': '#FF8000',    // orange (dark yellow + red)
-            '--sample-color': '#008000', // green
-            '--morph-color': '#008080',  // teal
-            '--shapes-color': '#C00000', // dark red
+            '--rand-color': '#0000DD',   // darker blue visible on light bg
+            '--env-color': '#CC6600',    // dark orange visible on light bg
+            '--sample-color': '#006600', // dark green visible on light bg
+            '--morph-color': '#006666',  // dark teal
+            '--shapes-color': '#AA0000', // dark red
 
-            '--thumb-color': '#808080',
+            '--thumb-color': '#606060',
 
             // ── KNOBS ─────────────────────────────────────────────────
-            '--knob-track': '#C0C0C0',
+            '--knob-track': '#A0A0A0',
             '--knob-value': '#000080',   // navy sweep
             '--knob-dot': '#000000',
 
             // ── PLUGIN CARD ───────────────────────────────────────────
             '--pf-bg': '#D4D0C8',
-            '--pf-border': '#808080',
-            '--pf-text': '#404040',
+            '--pf-border': '#707070',
+            '--pf-text': '#303030',
 
             '--ph-bg': '#000080',        // title bar blue
             '--ph-border': '#404040',
             '--ph-text': '#FFFFFF',      // white text on blue title bar
 
             // ── LINKED KNOBS (mode-tinted light bg) ──────────────────
-            '--lk-rand-track': '#D0D0E8', '--lk-rand-value': '#0000FF', '--lk-rand-dot': '#0000CC',
-            '--lk-env-track': '#E8DCC8', '--lk-env-value': '#FF8000', '--lk-env-dot': '#CC6600',
-            '--lk-smp-track': '#C8E0C8', '--lk-smp-value': '#008000', '--lk-smp-dot': '#006600',
-            '--lk-morph-track': '#C8E0DC', '--lk-morph-value': '#008080', '--lk-morph-dot': '#006666',
-            '--lk-shapes-track': '#E0C8C8', '--lk-shapes-value': '#C00000', '--lk-shapes-dot': '#990000',
+            '--lk-rand-track': '#C8C8E8', '--lk-rand-value': '#0000DD', '--lk-rand-dot': '#0000AA',
+            '--lk-env-track': '#E8D8C0', '--lk-env-value': '#CC6600', '--lk-env-dot': '#AA5500',
+            '--lk-smp-track': '#C0DCC0', '--lk-smp-value': '#006600', '--lk-smp-dot': '#005500',
+            '--lk-morph-track': '#C0DCD8', '--lk-morph-value': '#006666', '--lk-morph-dot': '#005555',
+            '--lk-shapes-track': '#DCC0C0', '--lk-shapes-value': '#AA0000', '--lk-shapes-dot': '#880000',
 
             // ── SOURCE INDICATORS ─────────────────────────────────────
             '--si-rand-bg': 'rgba(0,0,255,0.10)',
@@ -1036,18 +1037,18 @@ var THEMES = {
 
 
             // ── SLIDER ────────────────────────────────────────────────
-            '--slider-track': '#808080',
-            '--slider-thumb': '#D4D0C8',  // raised button look
+            '--slider-track': '#707070',
+            '--slider-thumb': '#E8E4DC',
 
             // ── PARAM BAR ─────────────────────────────────────────────
-            '--bar-track': '#C0C0C0',
+            '--bar-track': '#A0A0A0',
             '--bar-fill': '#000080',
 
             // ── CARD BUTTONS ──────────────────────────────────────────
             '--card-btn-bg': '#D4D0C8',
-            '--card-btn-border': '#808080',
+            '--card-btn-border': '#707070',
             '--card-btn-text': '#000000',
-            '--card-btn-hover': '#E8E8E0',
+            '--card-btn-hover': '#E8E4DC',
 
             // ── SNAP RING ─────────────────────────────────────────────
             '--snap-ring-color': '#000080',
@@ -1065,8 +1066,8 @@ var THEMES = {
             '--range-arc': '#0000FF',
 
             // ── SCROLLBAR ─────────────────────────────────────────────
-            '--scrollbar-thumb': '#D4D0C8',
-            '--scrollbar-track': '#C0C0C0',
+            '--scrollbar-thumb': '#A0A0A0',
+            '--scrollbar-track': '#D4D0C8',
 
             // ── BUS CONTROLS ──────────────────────────────────────────
             '--bus-mute-bg': '#C00000', '--bus-mute-text': '#FFFFFF',
@@ -1104,28 +1105,28 @@ var THEMES = {
         },
 
         bcolors: [
-            '#000000',  // black — primary
-            '#0000FF',  // blue — rand
-            '#FF8000',  // orange — env
-            '#008000',  // green — sample
-            '#008080',  // teal — morph
-            '#C00000',  // red — shapes
-            '#808080',  // grey
-            '#C0C0C0',  // silver
+            '#000080',  // navy — primary
+            '#0000DD',  // blue — rand
+            '#CC6600',  // dark orange — env
+            '#006600',  // dark green — sample
+            '#006666',  // dark teal — morph
+            '#AA0000',  // dark red — shapes
+            '#800080',  // purple
+            '#808000',  // olive
         ],
 
         busColors: [
-            '#808080',
-            '#000000',
+            '#000080',
+            '#800080',
             '#0000FF',
-            '#FF8000',
-            '#008000',
-            '#008080',
-            '#C00000',
-            '#C0C0C0',
+            '#CC6600',
+            '#006600',
+            '#006666',
+            '#AA0000',
+            '#808000',
         ],
 
-        swatches: ['#C0C0C0', '#D4D0C8', '#000080', '#008000', '#C00000'],
+        swatches: ['#C0C0C0', '#D4D0C8', '#000080', '#006600', '#AA0000'],
     },
 
     // ─────────────────────────────────────────────────────────────────
@@ -1430,7 +1431,7 @@ var THEMES = {
         ],
 
         busColors: [
-            '#404858',  // neutral
+            '#3070B0',  // steel blue
             '#E8D9A0',  // gold
             '#00B4D8',  // ice blue
             '#E06C1A',  // orange
@@ -1593,14 +1594,14 @@ var THEMES = {
         ],
 
         busColors: [
-            '#3D3D3D',
+            '#AA44FF',
             '#FFFFFF',
             '#00AAFF',
             '#FF6600',
             '#00CC66',
             '#00CCAA',
             '#FF4400',
-            '#888888',
+            '#FF44AA',
         ],
 
         swatches: ['#000000', '#1A1A1A', '#FFFFFF', '#00AAFF', '#FF4400'],
@@ -1757,14 +1758,14 @@ var THEMES = {
         ],
 
         busColors: [
-            '#383850',
+            '#7060CC',
             '#ECEAF4',
             '#4CB0FF',
             '#FF9030',
             '#50E880',
             '#30D8C0',
             '#FF4060',
-            '#6A6680',
+            '#B080E0',
         ],
 
         swatches: ['#0A0A10', '#1A1A22', '#8070FF', '#50E880', '#FF4060'],

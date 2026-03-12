@@ -4,16 +4,16 @@ description: "Ship a new release — sync code to CI repo, push, and trigger bui
 
 # Ship Workflow
 
-Push the latest ModularRandomizer code to the CI repo and trigger a cross-platform build.
+Push the latest Hostesa code to the CI repo and trigger a cross-platform build.
 
 ## Steps
 
 1. Ask the user for a version number (e.g. "1.0.1") and a short description of changes.
 
 // turbo
-2. Stage all ModularRandomizer changes in the parent repo:
+2. Stage all Hostesa changes in the parent repo:
 ```powershell
-git -C "c:\Users\dpetr\Desktop\Juce project\noizefield\audio-plugin-coder" add plugins/ModularRandomizer .github .agent
+git -C "c:\Users\dpetr\Desktop\Juce project\noizefield\audio-plugin-coder" add plugins/Hostesa .github .agent
 ```
 
 3. Commit with the user's description:

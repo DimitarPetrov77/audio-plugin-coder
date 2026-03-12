@@ -4,7 +4,7 @@
 
 IMPORTANT: PLEASE READ THIS LICENSE CAREFULLY BEFORE USING THIS SOFTWARE.
 
-By installing, copying, or otherwise using ModularRandomizer ("the Software"),
+By installing, copying, or otherwise using Hostesa ("the Software"),
 you agree to be bound by the terms of this agreement.
 
 1. GRANT OF LICENSE

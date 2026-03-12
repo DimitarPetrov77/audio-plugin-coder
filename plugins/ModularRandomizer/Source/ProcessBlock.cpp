@@ -41,7 +41,7 @@ bool sehGuardedProcessBlock (juce::AudioPluginInstance* instance,
 }
 #endif
 
-void ModularRandomizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
+void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                                      juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;

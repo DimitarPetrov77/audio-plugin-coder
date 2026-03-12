@@ -126,10 +126,10 @@ Source/
 ```powershell
 # From the repository root
 cmake -B build -G "Visual Studio 17 2022"
-cmake --build build --config Release --target ModularRandomizer_VST3
+cmake --build build --config Release --target Hostesa_VST3
 ```
 
-**Output:** `build/plugins/ModularRandomizer/ModularRandomizer_artefacts/Release/VST3/ModularRandomizer.vst3`
+**Output:** `build/plugins/Hostesa/Hostesa_artefacts/Release/VST3/Hostesa.vst3`
 
 ---
 

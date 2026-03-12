@@ -1,4 +1,4 @@
-﻿/*
+/*
   ==============================================================================
 
     Modular Randomizer - PluginProcessor
@@ -12,10 +12,10 @@
 #include "ParameterIDs.hpp"
 
 //==============================================================================
-// Enum parsers — called once per updateLogicBlocks (message thread), so processBlock
+// Enum parsers � called once per updateLogicBlocks (message thread), so processBlock
 // uses integer comparisons instead of ~100 juce::String == "literal" per call (H4 fix).
 //==============================================================================
-using P = ModularRandomizerAudioProcessor;
+using P = HostesaAudioProcessor;
 
 P::BlockMode P::parseBlockMode (const juce::String& s) {
     if (s == "randomize")    return BlockMode::Randomize;
@@ -151,7 +151,7 @@ float P::parseBeatsPerDiv (const juce::String& div) {
 }
 
 //==============================================================================
-ModularRandomizerAudioProcessor::ModularRandomizerAudioProcessor()
+HostesaAudioProcessor::HostesaAudioProcessor()
 #ifndef JucePlugin_PreferredChannelConfigurations
      : AudioProcessor (BusesProperties()
                      #if ! JucePlugin_IsMidiEffect
@@ -165,7 +165,7 @@ ModularRandomizerAudioProcessor::ModularRandomizerAudioProcessor()
 #else
      :
 #endif
-       apvts (*this, nullptr, "ModularRandomizer", createParameterLayout())
+       apvts (*this, nullptr, "Hostesa", createParameterLayout())
 {
     // Register VST3 format for plugin scanning/hosting
     formatManager.addFormat (new juce::VST3PluginFormat());
@@ -186,7 +186,7 @@ ModularRandomizerAudioProcessor::ModularRandomizerAudioProcessor()
     // while the audio thread iterates (audio thread doesn't hold pluginMutex)
     hostedPlugins.reserve (32);
 
-    // Look up proxy raw pointers from APVTS (unified pool: AP_0000–AP_2047)
+    // Look up proxy raw pointers from APVTS (unified pool: AP_0000�AP_2047)
     for (int i = 0; i < proxyParamCount; ++i)
     {
         auto id = juce::String ("AP_") + juce::String (i).paddedLeft ('0', 4);
@@ -195,18 +195,18 @@ ModularRandomizerAudioProcessor::ModularRandomizerAudioProcessor()
         proxyValueCache[i].store (-999.0f);
     }
 
-    // ── Create organized preset directory structure ──
+    // -- Create organized preset directory structure --
     getDataRoot().createDirectory();
     getChainsDir().createDirectory();
     getSnapshotsDir().createDirectory();
     getImportDir().createDirectory();
 
-    // One-time migration from old flat → new organized structure
+    // One-time migration from old flat ? new organized structure
     migrateOldPresets();
 }
 
 
-ModularRandomizerAudioProcessor::~ModularRandomizerAudioProcessor()
+HostesaAudioProcessor::~HostesaAudioProcessor()
 {
     // Unregister proxy listeners (unified pool)
     for (int i = 0; i < proxyParamCount; ++i)
@@ -215,7 +215,7 @@ ModularRandomizerAudioProcessor::~ModularRandomizerAudioProcessor()
         apvts.removeParameterListener (id, this);
     }
 
-    // Release all hosted plugins — SEH-guarded per-plugin so one crashing
+    // Release all hosted plugins � SEH-guarded per-plugin so one crashing
     // plugin doesn't prevent cleanup of the rest.
     {
         std::lock_guard<std::mutex> lock (pluginMutex);
@@ -237,7 +237,7 @@ ModularRandomizerAudioProcessor::~ModularRandomizerAudioProcessor()
 }
 
 //==============================================================================
-juce::AudioProcessorValueTreeState::ParameterLayout ModularRandomizerAudioProcessor::createParameterLayout()
+juce::AudioProcessorValueTreeState::ParameterLayout HostesaAudioProcessor::createParameterLayout()
 {
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
 
@@ -257,7 +257,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout ModularRandomizerAudioProces
         false
     ));
 
-    // Unified proxy parameter pool — AP_0000 to AP_2047
+    // Unified proxy parameter pool � AP_0000 to AP_2047
     // Block params assigned first (top of DAW list), plugin params fill after
     for (int i = 0; i < proxyParamCount; ++i)
     {
@@ -275,7 +275,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout ModularRandomizerAudioProces
 }
 
 //==============================================================================
-void ModularRandomizerAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
+void HostesaAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     currentSampleRate = sampleRate;
     currentBlockSize = samplesPerBlock;
@@ -366,7 +366,7 @@ void ModularRandomizerAudioProcessor::prepareToPlay (double sampleRate, int samp
         {
             try
             {
-                // Always reconfigure — sample rate or block size may have changed
+                // Always reconfigure � sample rate or block size may have changed
                 int pluginIns  = hp->instance->getTotalNumInputChannels();
                 int pluginOuts = hp->instance->getTotalNumOutputChannels();
                 hp->instance->setPlayConfigDetails (pluginIns, pluginOuts,
@@ -385,9 +385,9 @@ void ModularRandomizerAudioProcessor::prepareToPlay (double sampleRate, int samp
     }
 }
 
-void ModularRandomizerAudioProcessor::syncProxyCacheToHost()
+void HostesaAudioProcessor::syncProxyCacheToHost()
 {
-    // Drain proxy value cache from audio thread → call setValueNotifyingHost on message thread.
+    // Drain proxy value cache from audio thread ? call setValueNotifyingHost on message thread.
     // Audio thread writes float values into proxyValueCache atomics; this method reads them.
     if (! proxyDirty.exchange (false, std::memory_order_acquire))
         return;
@@ -405,8 +405,8 @@ void ModularRandomizerAudioProcessor::syncProxyCacheToHost()
     proxySyncActive.store (false);
 }
 
-std::vector<ModularRandomizerAudioProcessor::BlockParamUpdate>
-ModularRandomizerAudioProcessor::drainBlockProxyCache()
+std::vector<HostesaAudioProcessor::BlockParamUpdate>
+HostesaAudioProcessor::drainBlockProxyCache()
 {
     std::vector<BlockParamUpdate> updates;
     if (! blockProxyDirty.exchange (false))
@@ -425,7 +425,7 @@ ModularRandomizerAudioProcessor::drainBlockProxyCache()
     return updates;
 }
 
-void ModularRandomizerAudioProcessor::releaseResources()
+void HostesaAudioProcessor::releaseResources()
 {
     std::lock_guard<std::mutex> lock (pluginMutex);
     for (auto& hp : hostedPlugins)
@@ -443,7 +443,7 @@ void ModularRandomizerAudioProcessor::releaseResources()
 }
 
 #ifndef JucePlugin_PreferredChannelConfigurations
-bool ModularRandomizerAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
+bool HostesaAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
   #if JucePlugin_IsMidiEffect
     juce::ignoreUnused (layouts);
@@ -473,7 +473,7 @@ bool ModularRandomizerAudioProcessor::isBusesLayoutSupported (const BusesLayout&
 
 
 
-void ModularRandomizerAudioProcessor::updateLogicBlocks (const juce::String& jsonData)
+void HostesaAudioProcessor::updateLogicBlocks (const juce::String& jsonData)
 {
     auto parsed = juce::JSON::parse (jsonData);
     if (! parsed.isArray()) return;
@@ -552,7 +552,7 @@ void ModularRandomizerAudioProcessor::updateLogicBlocks (const juce::String& jso
         lb.morphSource  = obj->getProperty("morphSource").toString();
         lb.playheadX    = (float)(double) obj->getProperty("playheadX");
         lb.playheadY    = (float)(double) obj->getProperty("playheadY");
-        // Circular clamp â€” ensure playhead is inside the pad (r=0.45)
+        // Circular clamp — ensure playhead is inside the pad (r=0.45)
         { float pdx = lb.playheadX - 0.5f, pdy = lb.playheadY - 0.5f;
           float pd = std::sqrt (pdx * pdx + pdy * pdy);
           if (pd > 0.45f) { float ps = 0.45f / pd; lb.playheadX = 0.5f + pdx * ps; lb.playheadY = 0.5f + pdy * ps; } }
@@ -574,7 +574,7 @@ void ModularRandomizerAudioProcessor::updateLogicBlocks (const juce::String& jso
         if (lb.morphSyncDiv.isEmpty()) lb.morphSyncDiv = "1/4";
         if (lb.snapRadius <= 0.0f)    lb.snapRadius = 1.0f;
 
-        // â”€â”€ Shapes Block fields â”€â”€
+        // ── Shapes Block fields ──
         lb.shapeType      = obj->getProperty("shapeType").toString();
         lb.shapeTracking  = obj->getProperty("shapeTracking").toString();
         lb.shapeSize      = (float)(double) obj->getProperty("shapeSize");
@@ -609,7 +609,7 @@ void ModularRandomizerAudioProcessor::updateLogicBlocks (const juce::String& jso
                 lb.targetRangeBaseValues.push_back((float)(double) rangeBasesVar[ri]);
         }
 
-        // ── Lane clips ──
+        // -- Lane clips --
         auto lanesVar = obj->getProperty("lanes");
         if (lanesVar.isArray())
         {
@@ -727,8 +727,8 @@ void ModularRandomizerAudioProcessor::updateLogicBlocks (const juce::String& jso
                         std::sort(lc.morphSnapshots.begin(), lc.morphSnapshots.end(),
                             [](const auto& a, const auto& b) { return a.position < b.position; });
 
-                        // ── Pre-parse snapshot values for audio thread (ZERO allocations at RT) ──
-                        // Convert string keys "pluginId:paramIndex" → integer pairs.
+                        // -- Pre-parse snapshot values for audio thread (ZERO allocations at RT) --
+                        // Convert string keys "pluginId:paramIndex" ? integer pairs.
                         // Sort by (pluginId, paramIndex) so all snapshots share the same key order,
                         // enabling index-matched iteration on the audio thread.
                         for (auto& snap : lc.morphSnapshots)
@@ -756,7 +756,7 @@ void ModularRandomizerAudioProcessor::updateLogicBlocks (const juce::String& jso
                         }
                     }
 
-                    // ── Pre-build sorted target key set for audio thread ──
+                    // -- Pre-build sorted target key set for audio thread --
                     lc.targetKeySorted.clear();
                     lc.targetKeySorted.reserve(lc.targets.size());
                     for (const auto& tgt : lc.targets)
@@ -899,7 +899,7 @@ void ModularRandomizerAudioProcessor::updateLogicBlocks (const juce::String& jso
                 break;
             }
         }
-        // H4 fix: parse string fields → enum mirrors + pre-compute beat divisions
+        // H4 fix: parse string fields ? enum mirrors + pre-compute beat divisions
         // Called once on message thread so processBlock uses integer comparisons.
         lb.modeE          = parseBlockMode (lb.mode);
         lb.triggerE       = parseTriggerType (lb.trigger);
@@ -925,7 +925,7 @@ void ModularRandomizerAudioProcessor::updateLogicBlocks (const juce::String& jso
         lb.morphSyncDivBeats = parseBeatsPerDiv (lb.morphSyncDiv);
         lb.shapeSyncDivBeats = parseBeatsPerDiv (lb.shapeSyncDiv);
 
-        // Force relative for continuous blocks — absolute only valid for Randomize
+        // Force relative for continuous blocks � absolute only valid for Randomize
         if (lb.modeE == BlockMode::Envelope || lb.modeE == BlockMode::Sample)
             lb.rangeModeE = RangeMode::Relative;
         if (lb.modeE == BlockMode::Shapes || lb.modeE == BlockMode::ShapesRange)
@@ -957,7 +957,7 @@ void ModularRandomizerAudioProcessor::updateLogicBlocks (const juce::String& jso
 
     std::lock_guard<std::mutex> lock (blockMutex);
 
-    // Restore base values for blocks that transitioned enabledâ†’disabled
+    // Restore base values for blocks that transitioned enabled→disabled
     // or lost targets (proper modulation recall behavior)
     for (const auto& old : logicBlocks)
     {
@@ -976,7 +976,7 @@ void ModularRandomizerAudioProcessor::updateLogicBlocks (const juce::String& jso
 
         if (!wasModulating) continue;
 
-        // Block removed, disabled, or targets cleared â†’ restore bases
+        // Block removed, disabled, or targets cleared → restore bases
         bool shouldRestore = (newLb == nullptr)
             || (!newLb->enabled)
             || (newLb->targets.empty());
@@ -1030,7 +1030,7 @@ void ModularRandomizerAudioProcessor::updateLogicBlocks (const juce::String& jso
         for (auto& old : logicBlocks)
             if (old.id == nb.id) { oldMatch = &old; break; }
 
-        // If block is new, changed mode, or changed targets → clear touched for its targets
+        // If block is new, changed mode, or changed targets ? clear touched for its targets
         bool changed = (oldMatch == nullptr)
                      || (oldMatch->mode != nb.mode)
                      || (oldMatch->targets.size() != nb.targets.size());
@@ -1059,7 +1059,7 @@ void ModularRandomizerAudioProcessor::updateLogicBlocks (const juce::String& jso
     logicBlocks = std::move (newBlocks);
 }
 
-void ModularRandomizerAudioProcessor::updateMorphPlayhead (int blockId, float x, float y)
+void HostesaAudioProcessor::updateMorphPlayhead (int blockId, float x, float y)
 {
     std::lock_guard<std::mutex> lock (blockMutex);
     for (auto& lb : logicBlocks)
@@ -1077,7 +1077,7 @@ void ModularRandomizerAudioProcessor::updateMorphPlayhead (int blockId, float x,
     }
 }
 
-void ModularRandomizerAudioProcessor::fireLaneTrigger (int blockId, int laneIdx)
+void HostesaAudioProcessor::fireLaneTrigger (int blockId, int laneIdx)
 {
     std::lock_guard<std::mutex> lock (blockMutex);
     for (auto& lb : logicBlocks)
@@ -1090,7 +1090,7 @@ void ModularRandomizerAudioProcessor::fireLaneTrigger (int blockId, int laneIdx)
     }
 }
 
-int ModularRandomizerAudioProcessor::slotForId (int pluginId) const
+int HostesaAudioProcessor::slotForId (int pluginId) const
 {
     // Use pluginId directly as the array slot (modulo kMaxPlugins).
     // pluginIds are unique and monotonically increasing, so no collisions
@@ -1099,12 +1099,12 @@ int ModularRandomizerAudioProcessor::slotForId (int pluginId) const
     return pluginId % kMaxPlugins;
 }
 
-int ModularRandomizerAudioProcessor::getSpectrumBins (float* outBins, int maxBins)
+int HostesaAudioProcessor::getSpectrumBins (float* outBins, int maxBins)
 {
     if (!fftReady.load()) return 0;
     fftReady.store (false);
 
-    // Perform FFT (on message thread — safe, no audio thread overhead)
+    // Perform FFT (on message thread � safe, no audio thread overhead)
     juce::dsp::FFT fft (fftOrder);
     fft.performRealOnlyForwardTransform (fftWorkBuffer, true);
 
@@ -1148,7 +1148,7 @@ int ModularRandomizerAudioProcessor::getSpectrumBins (float* outBins, int maxBin
     return numBins;
 }
 
-void ModularRandomizerAudioProcessor::rebuildPluginSlots()
+void HostesaAudioProcessor::rebuildPluginSlots()
 {
     // Called from message thread whenever plugins are added/removed/reordered.
     // Populates O(1) lookup table used by audio thread hot path.
@@ -1189,18 +1189,18 @@ void ModularRandomizerAudioProcessor::rebuildPluginSlots()
 }
 
 // The actual gesture callback is handled by GestureListener (see header)
-void ModularRandomizerAudioProcessor::parameterGestureChanged (int, bool) {}
+void HostesaAudioProcessor::parameterGestureChanged (int, bool) {}
 
 
-void ModularRandomizerAudioProcessor::setParamDirect (int pluginId, int paramIndex, float value)
+void HostesaAudioProcessor::setParamDirect (int pluginId, int paramIndex, float value)
 {
-    // ── WrongEQ virtual params: write modulation OFFSETS to eqPoints ──
+    // -- WrongEQ virtual params: write modulation OFFSETS to eqPoints --
     // The base values (freqHz, gainDB, q) are set by JS via setEqCurve().
     // Modulation writes to separate modFreqHz/modGainDB/modQ offsets so
     // JS drift animation doesn't fight with C++ modulation sources.
     if (pluginId == kWeqPluginId)
     {
-        // ── Per-band params (0..31): band*4+field ──
+        // -- Per-band params (0..31): band*4+field --
         if (paramIndex >= 0 && paramIndex < maxEqBands * 4)
         {
             int band  = paramIndex / 4;
@@ -1209,7 +1209,7 @@ void ModularRandomizerAudioProcessor::setParamDirect (int pluginId, int paramInd
             {
                 switch (field)
                 {
-                    case 0: // freqHz (log: norm 0..1 → 20..20000 Hz)
+                    case 0: // freqHz (log: norm 0..1 ? 20..20000 Hz)
                     {
                         float targetHz = 20.0f * std::pow (1000.0f, juce::jlimit (0.0f, 1.0f, value));
                         float baseHz   = eqPoints[band].freqHz.load (std::memory_order_relaxed);
@@ -1217,7 +1217,7 @@ void ModularRandomizerAudioProcessor::setParamDirect (int pluginId, int paramInd
                         eqPoints[band].modActive.store (true, std::memory_order_relaxed);
                         break;
                     }
-                    case 1: // gainDB (norm 0..1 → -maxDB..+maxDB dB)
+                    case 1: // gainDB (norm 0..1 ? -maxDB..+maxDB dB)
                     {
                         float maxDB   = eqDbRange.load (std::memory_order_relaxed);
                         float targetDB = juce::jlimit (0.0f, 1.0f, value) * maxDB * 2.0f - maxDB;
@@ -1226,7 +1226,7 @@ void ModularRandomizerAudioProcessor::setParamDirect (int pluginId, int paramInd
                         eqPoints[band].modActive.store (true, std::memory_order_relaxed);
                         break;
                     }
-                    case 2: // Q (norm 0..1 → 0.025..40.0)
+                    case 2: // Q (norm 0..1 ? 0.025..40.0)
                     {
                         float targetQ = 0.025f + juce::jlimit (0.0f, 1.0f, value) * 39.975f;
                         float baseQ   = eqPoints[band].q.load (std::memory_order_relaxed);
@@ -1234,7 +1234,7 @@ void ModularRandomizerAudioProcessor::setParamDirect (int pluginId, int paramInd
                         eqPoints[band].modActive.store (true, std::memory_order_relaxed);
                         break;
                     }
-                    case 3: // driftPct (norm 0..1 → 0..100%)
+                    case 3: // driftPct (norm 0..1 ? 0..100%)
                         eqPoints[band].driftPct.store (juce::jlimit (0.0f, 1.0f, value) * 100.0f,
                                                         std::memory_order_relaxed);
                         eqDirty.store (true, std::memory_order_release);
@@ -1242,30 +1242,30 @@ void ModularRandomizerAudioProcessor::setParamDirect (int pluginId, int paramInd
                 }
             }
         }
-        // ── Global params (100..110): EQ globals ──
+        // -- Global params (100..110): EQ globals --
         else if (paramIndex >= kWeqGlobalBase && paramIndex < kWeqGlobalBase + kWeqGlobalCount)
         {
             int g = paramIndex - kWeqGlobalBase;
             float v = juce::jlimit (0.0f, 1.0f, value);
             switch (g)
             {
-                case 0: // depth (norm 0..1 → 0..200%)
+                case 0: // depth (norm 0..1 ? 0..200%)
                     eqGlobalDepth.store (v * 200.0f, std::memory_order_relaxed);
                     eqDirty.store (true, std::memory_order_release);
                     break;
-                case 1: // warp (norm 0..1 → -100..+100)
+                case 1: // warp (norm 0..1 ? -100..+100)
                     eqGlobalWarp.store (v * 200.0f - 100.0f, std::memory_order_relaxed);
                     eqDirty.store (true, std::memory_order_release);
                     break;
-                case 2: // steps (norm 0..1 → 0..32)
+                case 2: // steps (norm 0..1 ? 0..32)
                     eqGlobalSteps.store ((int) (v * 32.0f), std::memory_order_relaxed);
                     eqDirty.store (true, std::memory_order_release);
                     break;
-                case 3: // tilt (norm 0..1 → -100..+100)
+                case 3: // tilt (norm 0..1 ? -100..+100)
                     eqGlobalTilt.store (v * 200.0f - 100.0f, std::memory_order_relaxed);
                     eqDirty.store (true, std::memory_order_release);
                     break;
-                // Cases 4-10 are JS-side meta params (drift, lfo) — they don't
+                // Cases 4-10 are JS-side meta params (drift, lfo) � they don't
                 // have C++ atomics. Modulation for these is applied via JS weqApplyVirtualParam.
                 // Setting eqDirty is enough to trigger a re-sync from JS.
                 default:
@@ -1284,7 +1284,7 @@ void ModularRandomizerAudioProcessor::setParamDirect (int pluginId, int paramInd
         && paramTouched[slot][paramIndex].load (std::memory_order_acquire))
         return;
 
-    // O(1) lookup via pluginSlots — no linear scan
+    // O(1) lookup via pluginSlots � no linear scan
     auto* hp = pluginSlots[slot];
     if (hp && hp->id == pluginId && hp->instance)
     {
@@ -1296,9 +1296,9 @@ void ModularRandomizerAudioProcessor::setParamDirect (int pluginId, int paramInd
     }
 }
 
-float ModularRandomizerAudioProcessor::getParamValue (int pluginId, int paramIndex) const
+float HostesaAudioProcessor::getParamValue (int pluginId, int paramIndex) const
 {
-    // ── WrongEQ virtual params: read from eqPoints/globals atomics ──
+    // -- WrongEQ virtual params: read from eqPoints/globals atomics --
     if (pluginId == kWeqPluginId)
     {
         // Per-band params (0..31)
@@ -1332,7 +1332,7 @@ float ModularRandomizerAudioProcessor::getParamValue (int pluginId, int paramInd
                 case 1: return (eqGlobalWarp.load (std::memory_order_relaxed) + 100.0f) / 200.0f;
                 case 2: return (float) eqGlobalSteps.load (std::memory_order_relaxed) / 32.0f;
                 case 3: return (eqGlobalTilt.load (std::memory_order_relaxed) + 100.0f) / 200.0f;
-                // Cases 4-13: JS-side meta params — no C++ atomics. Return 0.5 as safe default.
+                // Cases 4-13: JS-side meta params � no C++ atomics. Return 0.5 as safe default.
                 default: return 0.5f;
             }
         }
@@ -1353,14 +1353,14 @@ float ModularRandomizerAudioProcessor::getParamValue (int pluginId, int paramInd
     return 0.5f; // safe default center
 }
 
-void ModularRandomizerAudioProcessor::randomizeParams (int pluginId,
+void HostesaAudioProcessor::randomizeParams (int pluginId,
                                                         const std::vector<int>& paramIndices,
                                                         float minVal, float maxVal)
 {
-    // Persistent RNG — avoids identical sequences when called rapidly (M2 fix)
+    // Persistent RNG � avoids identical sequences when called rapidly (M2 fix)
     static juce::Random messageThreadRng;
 
-    // No mutex needed — hostedPlugins is structurally stable, setValue() is atomic
+    // No mutex needed � hostedPlugins is structurally stable, setValue() is atomic
     for (auto& hp : hostedPlugins)
     {
         if (hp->id == pluginId && hp->instance != nullptr)
@@ -1381,9 +1381,9 @@ void ModularRandomizerAudioProcessor::randomizeParams (int pluginId,
     }
 }
 
-void ModularRandomizerAudioProcessor::applyParamBatch (const juce::String& jsonBatch)
+void HostesaAudioProcessor::applyParamBatch (const juce::String& jsonBatch)
 {
-    // Batch param apply — sets N params in a single call.
+    // Batch param apply � sets N params in a single call.
     // JSON format: [{"p":pluginId,"i":paramIndex,"v":value}, ...]
     // No lock needed: hostedPlugins is structurally stable, setValue() is atomic.
     auto parsed = juce::JSON::parse (jsonBatch);
@@ -1415,8 +1415,8 @@ void ModularRandomizerAudioProcessor::applyParamBatch (const juce::String& jsonB
     }
 }
 
-std::vector<ModularRandomizerAudioProcessor::HostedPluginInfo>
-ModularRandomizerAudioProcessor::getHostedPluginList()
+std::vector<HostesaAudioProcessor::HostedPluginInfo>
+HostesaAudioProcessor::getHostedPluginList()
 {
     std::vector<HostedPluginInfo> result;
     std::lock_guard<std::mutex> lock (pluginMutex);
@@ -1437,7 +1437,7 @@ ModularRandomizerAudioProcessor::getHostedPluginList()
     return result;
 }
 
-juce::AudioPluginInstance* ModularRandomizerAudioProcessor::getHostedPluginInstance (int pluginId)
+juce::AudioPluginInstance* HostesaAudioProcessor::getHostedPluginInstance (int pluginId)
 {
     std::lock_guard<std::mutex> lock (pluginMutex);
 
@@ -1449,14 +1449,14 @@ juce::AudioPluginInstance* ModularRandomizerAudioProcessor::getHostedPluginInsta
     return nullptr;
 }
 
-void ModularRandomizerAudioProcessor::setPluginBusId (int pluginId, int busId)
+void HostesaAudioProcessor::setPluginBusId (int pluginId, int busId)
 {
     std::lock_guard<std::mutex> lock (pluginMutex);
     for (auto& hp : hostedPlugins)
     {
         if (hp->id == pluginId)
         {
-            // busId is now a stable UID (not a band index) — just store it.
+            // busId is now a stable UID (not a band index) � just store it.
             // 0 = unassigned, positive = matches eqPoints[p].busId for routing.
             hp->busId = std::max (0, busId);
             break;
@@ -1464,26 +1464,26 @@ void ModularRandomizerAudioProcessor::setPluginBusId (int pluginId, int busId)
     }
 }
 
-void ModularRandomizerAudioProcessor::setBusVolume (int bus, float vol)
+void HostesaAudioProcessor::setBusVolume (int bus, float vol)
 {
     if (bus >= 0 && bus < maxBuses)
         busVolume[bus].store (juce::jlimit (0.0f, 2.0f, vol));
 }
 
-void ModularRandomizerAudioProcessor::setBusMute (int bus, bool m)
+void HostesaAudioProcessor::setBusMute (int bus, bool m)
 {
     if (bus >= 0 && bus < maxBuses)
         busMute[bus].store (m);
 }
 
-void ModularRandomizerAudioProcessor::setBusSolo (int bus, bool s)
+void HostesaAudioProcessor::setBusSolo (int bus, bool s)
 {
     if (bus >= 0 && bus < maxBuses)
         busSolo[bus].store (s);
 }
 
-// ── WrongEQ: receive curve data from JS ──
-void ModularRandomizerAudioProcessor::setEqCurve (const juce::String& jsonData)
+// -- WrongEQ: receive curve data from JS --
+void HostesaAudioProcessor::setEqCurve (const juce::String& jsonData)
 {
     auto parsed = juce::JSON::parse (jsonData);
     if (parsed.isVoid()) return;
@@ -1507,7 +1507,7 @@ void ModularRandomizerAudioProcessor::setEqCurve (const juce::String& jsonData)
             eqDirty.store (true, std::memory_order_release); // reconfigure crossovers
         }
     }
-    // Oversampling factor (1=off, 2=2×, 4=4×)
+    // Oversampling factor (1=off, 2=2�, 4=4�)
     if (obj->hasProperty ("oversample"))
     {
         int newOS = juce::jlimit (1, 4, (int) obj->getProperty ("oversample"));
@@ -1565,7 +1565,7 @@ void ModularRandomizerAudioProcessor::setEqCurve (const juce::String& jsonData)
         if (slot < 0 || weqParamBase[slot] < -0.5f)
             eqGlobalWarp.store (juce::jlimit (-100.0f, 100.0f, (float)(double) obj->getProperty ("globalWarp")));
     }
-    // Global steps: quantize gain to N discrete levels (0 = continuous, ≥2 = stepped)
+    // Global steps: quantize gain to N discrete levels (0 = continuous, =2 = stepped)
     if (obj->hasProperty ("globalSteps"))
     {
         int slot = weqSlot (kWeqGlobalBase + 2);
@@ -1637,7 +1637,7 @@ void ModularRandomizerAudioProcessor::setEqCurve (const juce::String& jsonData)
 
         // Only set eqDirty if the point data actually changed.
         // The animation calls setEqCurve periodically, but usually only
-        // drift offsets change — user EQ points stay the same. Setting
+        // drift offsets change � user EQ points stay the same. Setting
         // eqDirty unconditionally caused crossover reconfig too often.
         bool pointDataChanged = ((int) sorted.size() != numEqPoints.load());
         if (!pointDataChanged)
@@ -1660,7 +1660,7 @@ void ModularRandomizerAudioProcessor::setEqCurve (const juce::String& jsonData)
         // Store sorted points into atomic arrays
         // KEY: Write to eqPoints[origIdx] (original JS order), NOT sorted position.
         // This keeps each biquad slot associated with the same logical point even
-        // when points swap frequency order during drag — preventing massive
+        // when points swap frequency order during drag � preventing massive
         // coefficient discontinuities (FabFilter Pro-Q 3 behavior).
         for (int i = 0; i < (int) sorted.size(); ++i)
         {
@@ -1678,7 +1678,7 @@ void ModularRandomizerAudioProcessor::setEqCurve (const juce::String& jsonData)
             eqPoints[idx].slope.store (sorted[i].slope);
         }
 
-        // Store sorted order for crossover pass (sorted position → original index)
+        // Store sorted order for crossover pass (sorted position ? original index)
         for (int i = 0; i < (int) sorted.size(); ++i)
             eqSortOrder[i] = sorted[i].origIdx;
         for (int i = (int) sorted.size(); i < maxEqBands; ++i)
@@ -1706,13 +1706,13 @@ void ModularRandomizerAudioProcessor::setEqCurve (const juce::String& jsonData)
 
 //==============================================================================
 //==============================================================================
-void ModularRandomizerAudioProcessor::setUiState (const juce::String& json)
+void HostesaAudioProcessor::setUiState (const juce::String& json)
 {
     std::lock_guard<std::mutex> lock (uiStateMutex);
     uiStateJson = json;
 }
 
-juce::String ModularRandomizerAudioProcessor::getUiState() const
+juce::String HostesaAudioProcessor::getUiState() const
 {
     std::lock_guard<std::mutex> lock (uiStateMutex);
     return uiStateJson;
@@ -1722,7 +1722,7 @@ juce::String ModularRandomizerAudioProcessor::getUiState() const
 // Sample Modulator API
 //==============================================================================
 
-bool ModularRandomizerAudioProcessor::loadSampleForBlock (int blockId, const juce::String& filePath)
+bool HostesaAudioProcessor::loadSampleForBlock (int blockId, const juce::String& filePath)
 {
     juce::File file (filePath);
     if (! file.existsAsFile())
@@ -1793,7 +1793,7 @@ bool ModularRandomizerAudioProcessor::loadSampleForBlock (int blockId, const juc
     return false;
 }
 
-std::vector<float> ModularRandomizerAudioProcessor::getSampleWaveform (int blockId)
+std::vector<float> HostesaAudioProcessor::getSampleWaveform (int blockId)
 {
     std::lock_guard<std::mutex> lock (blockMutex);
     for (const auto& lb : logicBlocks)
@@ -1804,7 +1804,7 @@ std::vector<float> ModularRandomizerAudioProcessor::getSampleWaveform (int block
     return {};
 }
 
-juce::String ModularRandomizerAudioProcessor::getSampleFileName (int blockId)
+juce::String HostesaAudioProcessor::getSampleFileName (int blockId)
 {
     std::lock_guard<std::mutex> lock (blockMutex);
     for (const auto& lb : logicBlocks)
@@ -1816,30 +1816,30 @@ juce::String ModularRandomizerAudioProcessor::getSampleFileName (int blockId)
 }
 
 //==============================================================================
-juce::AudioProcessorEditor* ModularRandomizerAudioProcessor::createEditor()
+juce::AudioProcessorEditor* HostesaAudioProcessor::createEditor()
 {
-    return new ModularRandomizerAudioProcessorEditor (*this);
+    return new HostesaAudioProcessorEditor (*this);
 }
 
-bool ModularRandomizerAudioProcessor::hasEditor() const
+bool HostesaAudioProcessor::hasEditor() const
 {
     return true;
 }
 
 //==============================================================================
-const juce::String ModularRandomizerAudioProcessor::getName() const           { return JucePlugin_Name; }
-bool ModularRandomizerAudioProcessor::acceptsMidi() const                     { return true; }
-bool ModularRandomizerAudioProcessor::producesMidi() const                    { return false; }
-bool ModularRandomizerAudioProcessor::isMidiEffect() const                    { return false; }
-double ModularRandomizerAudioProcessor::getTailLengthSeconds() const          { return 0.0; }
-int ModularRandomizerAudioProcessor::getNumPrograms()                         { return 1; }
-int ModularRandomizerAudioProcessor::getCurrentProgram()                      { return 0; }
-void ModularRandomizerAudioProcessor::setCurrentProgram (int)                 {}
-const juce::String ModularRandomizerAudioProcessor::getProgramName (int)      { return {}; }
-void ModularRandomizerAudioProcessor::changeProgramName (int, const juce::String&) {}
+const juce::String HostesaAudioProcessor::getName() const           { return JucePlugin_Name; }
+bool HostesaAudioProcessor::acceptsMidi() const                     { return true; }
+bool HostesaAudioProcessor::producesMidi() const                    { return false; }
+bool HostesaAudioProcessor::isMidiEffect() const                    { return false; }
+double HostesaAudioProcessor::getTailLengthSeconds() const          { return 0.0; }
+int HostesaAudioProcessor::getNumPrograms()                         { return 1; }
+int HostesaAudioProcessor::getCurrentProgram()                      { return 0; }
+void HostesaAudioProcessor::setCurrentProgram (int)                 {}
+const juce::String HostesaAudioProcessor::getProgramName (int)      { return {}; }
+void HostesaAudioProcessor::changeProgramName (int, const juce::String&) {}
 
 //==============================================================================
-void ModularRandomizerAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
+void HostesaAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
@@ -1859,7 +1859,7 @@ void ModularRandomizerAudioProcessor::getStateInformation (juce::MemoryBlock& de
             plugEl->setAttribute ("path", hp->path);
             plugEl->setAttribute ("busId", hp->busId);
 
-            // Save all parameter values — wrapped per-plugin so one
+            // Save all parameter values � wrapped per-plugin so one
             // misbehaving VST3 doesn't prevent saving the others.
             if (hp->instance)
             {
@@ -1898,7 +1898,7 @@ void ModularRandomizerAudioProcessor::getStateInformation (juce::MemoryBlock& de
     copyXmlToBinary (*xml, destData);
 }
 
-void ModularRandomizerAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
+void HostesaAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     std::unique_ptr<juce::XmlElement> xmlState (getXmlFromBinary (data, sizeInBytes));
     if (xmlState == nullptr) return;
@@ -1914,7 +1914,7 @@ void ModularRandomizerAudioProcessor::setStateInformation (const void* data, int
         int restoredNextId = pluginsXml->getIntAttribute ("nextId", 0);
         routingMode.store (pluginsXml->getIntAttribute ("routingMode", 0));
 
-        // Clear existing plugins safely — audio thread doesn't hold pluginMutex.
+        // Clear existing plugins safely � audio thread doesn't hold pluginMutex.
         // Single lock scope: null instances + clear vector atomically so the audio
         // thread never sees a partially-cleared vector.
         {
@@ -1934,7 +1934,7 @@ void ModularRandomizerAudioProcessor::setStateInformation (const void* data, int
                 if (hp->instance)
                     sehDestroyInstance (hp->instance.release());
 #else
-                hp->instance.reset();  // audio thread sees nullptr → skips
+                hp->instance.reset();  // audio thread sees nullptr ? skips
 #endif
                 hp->prepared = false;
             }
@@ -1964,7 +1964,7 @@ void ModularRandomizerAudioProcessor::setStateInformation (const void* data, int
             proxyValueCache[i].store (-999.0f);
         }
 
-        // Reload each plugin from its saved path — wrapped per-plugin so
+        // Reload each plugin from its saved path � wrapped per-plugin so
         // one crashing VST3 doesn't prevent restoring the others.
         for (auto* plugEl : pluginsXml->getChildIterator())
         {
@@ -2041,8 +2041,8 @@ void ModularRandomizerAudioProcessor::setStateInformation (const void* data, int
         std::lock_guard<std::mutex> lock (uiStateMutex);
         uiStateJson = uiStateXml->getAllSubText().trim();
 
-        // ── Pre-populate EQ points from saved UI state so audio processing starts
-        // immediately without waiting for the WebView to load and call setEqCurve. ──
+        // -- Pre-populate EQ points from saved UI state so audio processing starts
+        // immediately without waiting for the WebView to load and call setEqCurve. --
         if (routingMode.load() == 2 && uiStateJson.isNotEmpty())
         {
             auto parsed = juce::JSON::parse (uiStateJson);
@@ -2090,11 +2090,11 @@ void ModularRandomizerAudioProcessor::setStateInformation (const void* data, int
                         {
                             if (auto* pt = (*ptsArr)[i].getDynamicObject())
                             {
-                                // Convert normalized x (0-1 log scale) → freq Hz
+                                // Convert normalized x (0-1 log scale) ? freq Hz
                                 float xNorm = (float)(double) pt->getProperty ("x");
                                 float hz = 20.0f * std::pow (1000.0f, juce::jlimit (0.0f, 1.0f, xNorm));
 
-                                // Convert normalized y (0=top=+maxDB, 1=bottom=-maxDB) → dB
+                                // Convert normalized y (0=top=+maxDB, 1=bottom=-maxDB) ? dB
                                 float yNorm = (float)(double) pt->getProperty ("y");
                                 float db = (-maxDB) + (1.0f - juce::jlimit (0.0f, 1.0f, yNorm)) * (maxDB * 2.0f);
 
@@ -2158,7 +2158,7 @@ void ModularRandomizerAudioProcessor::setStateInformation (const void* data, int
 }
 
 //==============================================================================
-void ModularRandomizerAudioProcessor::setPluginBypass (int pluginId, bool bypass)
+void HostesaAudioProcessor::setPluginBypass (int pluginId, bool bypass)
 {
     std::lock_guard<std::mutex> lock (pluginMutex);
     for (auto& hp : hostedPlugins)
@@ -2171,7 +2171,7 @@ void ModularRandomizerAudioProcessor::setPluginBypass (int pluginId, bool bypass
     }
 }
 
-void ModularRandomizerAudioProcessor::resetPluginCrash (int pluginId)
+void HostesaAudioProcessor::resetPluginCrash (int pluginId)
 {
     std::lock_guard<std::mutex> lock (pluginMutex);
     for (auto& hp : hostedPlugins)
@@ -2202,9 +2202,9 @@ void ModularRandomizerAudioProcessor::resetPluginCrash (int pluginId)
 }
 
 //==============================================================================
-// One-time migration: old flat structure → new organized structure
+// One-time migration: old flat structure ? new organized structure
 //==============================================================================
-void ModularRandomizerAudioProcessor::migrateOldPresets()
+void HostesaAudioProcessor::migrateOldPresets()
 {
     auto root = getDataRoot();
     auto marker = root.getChildFile (".migrated_v2");
@@ -2214,7 +2214,7 @@ void ModularRandomizerAudioProcessor::migrateOldPresets()
 
     LOG_TO_FILE ("migrateOldPresets: starting one-time preset migration...");
 
-    // ── Migrate GlobalPresets/*.json → Chains/*.mrchain ──
+    // -- Migrate GlobalPresets/*.json ? Chains/*.mrchain --
     auto oldGlobal = root.getChildFile ("GlobalPresets");
     if (oldGlobal.isDirectory())
     {
@@ -2230,7 +2230,7 @@ void ModularRandomizerAudioProcessor::migrateOldPresets()
         }
     }
 
-    // ── Migrate Presets/{pluginName}/ → Snapshots/Unknown/{pluginName}/ ──
+    // -- Migrate Presets/{pluginName}/ ? Snapshots/Unknown/{pluginName}/ --
     auto oldPresets = root.getChildFile ("Presets");
     if (oldPresets.isDirectory())
     {
@@ -2254,15 +2254,15 @@ void ModularRandomizerAudioProcessor::migrateOldPresets()
         }
     }
 
-    // ── Generate README.txt ──
+    // -- Generate README.txt --
     auto readme = root.getChildFile ("README.txt");
     if (! readme.existsAsFile())
     {
         readme.replaceWithText (
-            "ModularRandomizer Preset Library\n"
+            "Hostesa Preset Library\n"
             "================================\n\n"
             "Chains/       - Complete plugin chains (.mrchain files)\n"
-            "                Share these with other ModularRandomizer users!\n"
+            "                Share these with other Hostesa users!\n"
             "                Drop .mrchain files into Chains/_Import/ to import them.\n\n"
             "Snapshots/    - Individual plugin presets, organized by manufacturer\n"
             "                e.g. Snapshots/Xfer Records/OTT/My Preset.json\n\n"
@@ -2278,5 +2278,5 @@ void ModularRandomizerAudioProcessor::migrateOldPresets()
 //==============================================================================
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
-    return new ModularRandomizerAudioProcessor();
+    return new HostesaAudioProcessor();
 }

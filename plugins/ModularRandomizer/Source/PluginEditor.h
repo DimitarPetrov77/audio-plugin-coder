@@ -103,18 +103,18 @@ private:
 
 //==============================================================================
 /**
- * ModularRandomizer Editor — WebView2-based UI
+ * Hostesa Editor — WebView2-based UI
  *
  * ⚠️ CRITICAL: Member declaration order prevents DAW crashes on unload.
  *    Destruction order = reverse of declaration.
  *    Order: Relays → WebView → Attachments
  */
-class ModularRandomizerAudioProcessorEditor : public juce::AudioProcessorEditor,
+class HostesaAudioProcessorEditor : public juce::AudioProcessorEditor,
                                                private juce::Timer
 {
 public:
-    ModularRandomizerAudioProcessorEditor (ModularRandomizerAudioProcessor&);
-    ~ModularRandomizerAudioProcessorEditor() override;
+    HostesaAudioProcessorEditor (HostesaAudioProcessor&);
+    ~HostesaAudioProcessorEditor() override;
 
     //==============================================================================
     void paint (juce::Graphics&) override;
@@ -130,7 +130,7 @@ private:
     // Open/close a hosted plugin's editor window
     void openPluginEditorWindow (int pluginId);
 
-    ModularRandomizerAudioProcessor& audioProcessor;
+    HostesaAudioProcessor& audioProcessor;
 
     // ═══════════════════════════════════════════════════════════════
     // CRITICAL: Destruction Order = Reverse of Declaration
@@ -180,5 +180,5 @@ private:
     std::unordered_set<std::string> visibleParamKeys;
 
     //==============================================================================
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ModularRandomizerAudioProcessorEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HostesaAudioProcessorEditor)
 };

@@ -1,9 +1,9 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 
 <head>
     <meta charset="UTF-8">
-    <title>Modular Randomizer v5</title>
+    <title>Hostesa</title>
     <link rel="stylesheet" href="css/variables.css">
     <link rel="stylesheet" href="css/base.css">
     <link rel="stylesheet" href="css/header.css">
@@ -19,7 +19,7 @@
     <div class="app">
         <div class="header">
             <div class="brand">
-                <div class="brand-mark"></div><span class="brand-name">MODULAR RANDOMIZER</span>
+                <div class="brand-mark"></div><span class="brand-name">HOSTESA</span>
             </div>
             <div class="h-div"></div>
             <div class="gp-area">
@@ -119,9 +119,11 @@
                     <span class="pb-title">Plugin Blocks</span>
                     <button class="sm-btn weq-open-btn" id="weqOpenBtn" title="Open WrongEQ"
                         style="display:none">WrongEQ</button>
-                    <button class="sm-btn" id="collapseAllBtn" title="Collapse all plugins">▲</button>
-                    <button class="sm-btn" id="expandAllBtn" title="Expand all plugins">▼</button>
-                    <button class="sm-btn" id="addPluginBtn">+ Plugin</button>
+                    <div class="pb-fold-group">
+                        <button class="pb-fold-btn" id="collapseAllBtn" title="Collapse all plugins">▲</button>
+                        <button class="pb-fold-btn" id="expandAllBtn" title="Expand all plugins">▼</button>
+                    </div>
+                    <button class="pb-add-btn" id="addPluginBtn">+ Plugin</button>
                 </div>
                 <div class="assign-banner" id="assignBanner">Assigning to <span id="assignTarget"></span></div>
                 <div class="plugin-scroll" id="pluginScroll"></div>

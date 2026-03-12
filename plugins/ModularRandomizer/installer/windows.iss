@@ -1,8 +1,8 @@
-; ModularRandomizer Windows Installer
+; Hostesa Windows Installer
 ; Inno Setup Script — Professional VST3/Standalone installer
 ; Build with: ISCC.exe windows.iss
 
-#define PluginName    "ModularRandomizer"
+#define PluginName    "Hostesa"
 #define PluginVersion "1.0.0"
 #define Publisher     "Dimitar Petrov"
 #define PublisherURL  "https://dimitarp.com"
@@ -47,12 +47,12 @@ Name: "standalone"; Description: "Standalone App";   Types: full custom
 
 [Files]
 ; VST3 plugin — always installed to Common Files\VST3
-Source: "{#BuildDir}\plugins\ModularRandomizer\ModularRandomizer_artefacts\Release\VST3\ModularRandomizer.vst3\*"; \
-  DestDir: "{commoncf64}\VST3\ModularRandomizer.vst3"; \
+Source: "{#BuildDir}\plugins\Hostesa\Hostesa_artefacts\Release\VST3\Hostesa.vst3\*"; \
+  DestDir: "{commoncf64}\VST3\Hostesa.vst3"; \
   Components: vst3; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Standalone app — installed to user-chosen directory
-Source: "{#BuildDir}\plugins\ModularRandomizer\ModularRandomizer_artefacts\Release\Standalone\ModularRandomizer.exe"; \
+Source: "{#BuildDir}\plugins\Hostesa\Hostesa_artefacts\Release\Standalone\Hostesa.exe"; \
   DestDir: "{app}"; \
   Components: standalone; Flags: ignoreversion
 
@@ -83,7 +83,7 @@ Filename: "{app}\{#PluginName}.exe"; \
 
 [UninstallDelete]
 ; Clean up the VST3 folder on uninstall
-Type: filesandordirs; Name: "{commoncf64}\VST3\ModularRandomizer.vst3"
+Type: filesandordirs; Name: "{commoncf64}\VST3\Hostesa.vst3"
 
 [Messages]
 BeveledLabel={#PluginName} v{#PluginVersion} — {#Publisher}

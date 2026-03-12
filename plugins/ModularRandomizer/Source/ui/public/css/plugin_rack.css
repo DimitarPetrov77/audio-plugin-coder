@@ -22,7 +22,71 @@
     justify-content: space-between;
     padding: 8px 12px;
     background: var(--bg-cell);
-    border-bottom: 1px solid var(--border-strong)
+    border-bottom: 1px solid var(--border-strong);
+    gap: 6px
+}
+
+/* ── Collapse / Expand pill toggle ── */
+.pb-fold-group {
+    display: flex;
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    margin-left: auto
+}
+
+.pb-fold-btn {
+    background: var(--bg-cell);
+    border: none;
+    color: var(--text-muted);
+    font-size: 8px;
+    padding: 4px 8px;
+    cursor: pointer;
+    transition: all .12s;
+    line-height: 1
+}
+
+.pb-fold-btn:first-child {
+    border-right: 1px solid var(--border)
+}
+
+.pb-fold-btn:hover {
+    background: var(--bg-cell-hover);
+    color: var(--text-primary)
+}
+
+.pb-fold-btn:active {
+    background: var(--accent);
+    color: var(--fire-text, #fff)
+}
+
+/* ── Accented + Plugin button ── */
+.pb-add-btn {
+    background: color-mix(in srgb, var(--accent) 15%, var(--bg-cell));
+    border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--border));
+    color: var(--accent);
+    font-family: var(--font-sans);
+    font-size: 10px;
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    letter-spacing: .3px;
+    transition: all .15s
+}
+
+.pb-add-btn:hover {
+    background: color-mix(in srgb, var(--accent) 25%, var(--bg-cell));
+    border-color: var(--accent);
+    box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 30%, transparent),
+        0 0 20px color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--text-primary)
+}
+
+.pb-add-btn:active {
+    background: var(--accent);
+    color: var(--fire-text, #fff);
+    transform: scale(0.97)
 }
 
 .pb-title {

@@ -26,7 +26,7 @@
 
 //==============================================================================
 /**
- * Modular Randomizer - Multi-Plugin Parameter Randomizer
+ * Hostesa - Multi-Plugin Parameter Host
  *
  * Hosts multiple VST3 plugins, exposes their parameters,
  * and allows randomization via the WebView UI.
@@ -189,14 +189,14 @@ struct SampleData
     float durationSeconds = 0.0f;
 };
 
-class ModularRandomizerAudioProcessor : public juce::AudioProcessor,
+class HostesaAudioProcessor : public juce::AudioProcessor,
                                         public juce::AudioProcessorValueTreeState::Listener,
                                         public juce::AudioProcessorParameter::Listener
 {
 public:
     //==============================================================================
-    ModularRandomizerAudioProcessor();
-    ~ModularRandomizerAudioProcessor() override;
+    HostesaAudioProcessor();
+    ~HostesaAudioProcessor() override;
 
     //==============================================================================
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
@@ -364,13 +364,13 @@ public:
     // File System Helpers — organized preset directory structure
     //==============================================================================
 
-    /** Root data directory: %APPDATA%/Noizefield/ModularRandomizer (Win)
-                             ~/Library/Noizefield/ModularRandomizer (Mac)
-                             ~/.local/share/Noizefield/ModularRandomizer (Linux, future) */
+    /** Root data directory: %APPDATA%/DimitarPetrov/Hostesa (Win)
+                             ~/Library/DimitarPetrov/Hostesa (Mac)
+                             ~/.local/share/DimitarPetrov/Hostesa (Linux, future) */
     static juce::File getDataRoot()
     {
         return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-            .getChildFile ("Noizefield/ModularRandomizer");
+            .getChildFile ("DimitarPetrov/Hostesa");
     }
 
     static juce::File getChainsDir()    { return getDataRoot().getChildFile ("Chains"); }
@@ -1721,5 +1721,5 @@ public:
     }
 
 private:
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ModularRandomizerAudioProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HostesaAudioProcessor)
 };

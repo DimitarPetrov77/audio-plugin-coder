@@ -14,12 +14,12 @@
 #include <BinaryData.h>
 
 //==============================================================================
-ModularRandomizerAudioProcessorEditor::ModularRandomizerAudioProcessorEditor (
-    ModularRandomizerAudioProcessor& p)
+HostesaAudioProcessorEditor::HostesaAudioProcessorEditor (
+    HostesaAudioProcessor& p)
     : AudioProcessorEditor (&p),
       audioProcessor (p)
 {
-    DBG ("ModularRandomizer: Editor constructor started");
+    DBG ("Hostesa: Editor constructor started");
 
     //==========================================================================
     // CRITICAL: CREATION ORDER (matches CloudWash webview-004 fix)
@@ -30,7 +30,7 @@ ModularRandomizerAudioProcessorEditor::ModularRandomizerAudioProcessorEditor (
     //==========================================================================
 
     // Create parameter attachments BEFORE creating WebView
-    DBG ("ModularRandomizer: Creating parameter attachments");
+    DBG ("Hostesa: Creating parameter attachments");
     mixAttachment = std::make_unique<juce::WebSliderParameterAttachment> (
         *audioProcessor.getAPVTS().getParameter (ParameterIDs::MIX), mixRelay);
 
@@ -39,7 +39,7 @@ ModularRandomizerAudioProcessorEditor::ModularRandomizerAudioProcessorEditor (
 
     // Create WebBrowserComponent with JUCE 8 proper API
     // CRITICAL: Attachments must be created BEFORE this point
-    DBG ("ModularRandomizer: Creating WebView");
+    DBG ("Hostesa: Creating WebView");
 
     // Build base options — platform-specific backend selection
     auto webViewOptions = juce::WebBrowserComponent::Options{}
@@ -70,7 +70,7 @@ ModularRandomizerAudioProcessorEditor::ModularRandomizerAudioProcessorEditor (
                     }
 
                     if (paths.isEmpty())
-                        paths = ModularRandomizerAudioProcessor::getDefaultScanPaths();
+                        paths = HostesaAudioProcessor::getDefaultScanPaths();
 
                     // Optional: force rescan (deletes cache) if second arg is true
                     bool forceRescan = args.size() > 1 && (bool) args[1];
@@ -145,7 +145,7 @@ ModularRandomizerAudioProcessorEditor::ModularRandomizerAudioProcessorEditor (
                 [this] (const juce::Array<juce::var>&,
                         juce::WebBrowserComponent::NativeFunctionCompletion completion)
                 {
-                    auto paths = ModularRandomizerAudioProcessor::getDefaultScanPaths();
+                    auto paths = HostesaAudioProcessor::getDefaultScanPaths();
                     juce::var result;
                     for (const auto& p : paths)
                         result.append (juce::var (p));
@@ -468,7 +468,7 @@ ModularRandomizerAudioProcessorEditor::ModularRandomizerAudioProcessorEditor (
                     {
                         int pluginId = (int) args[0];
                         // Must run on message thread (creates GUI)
-                        juce::Component::SafePointer<ModularRandomizerAudioProcessorEditor> safeThis (this);
+                        juce::Component::SafePointer<HostesaAudioProcessorEditor> safeThis (this);
                         juce::MessageManager::callAsync ([safeThis, pluginId]()
                         {
                             if (safeThis != nullptr)
@@ -563,14 +563,14 @@ ModularRandomizerAudioProcessorEditor::ModularRandomizerAudioProcessorEditor (
                 {
                     if (args.size() >= 4)
                     {
-                        auto manufacturer = ModularRandomizerAudioProcessor::sanitizeForFilename (args[0].toString());
-                        auto pluginName   = ModularRandomizerAudioProcessor::sanitizeForFilename (args[1].toString());
+                        auto manufacturer = HostesaAudioProcessor::sanitizeForFilename (args[0].toString());
+                        auto pluginName   = HostesaAudioProcessor::sanitizeForFilename (args[1].toString());
                         auto presetName   = args[2].toString();
                         auto jsonData     = args[3].toString();
 
                         if (manufacturer.isEmpty()) manufacturer = "Unknown";
 
-                        auto presetsDir = ModularRandomizerAudioProcessor::getSnapshotsDir()
+                        auto presetsDir = HostesaAudioProcessor::getSnapshotsDir()
                                               .getChildFile (manufacturer)
                                               .getChildFile (pluginName);
                         presetsDir.createDirectory();
@@ -591,11 +591,11 @@ ModularRandomizerAudioProcessorEditor::ModularRandomizerAudioProcessorEditor (
                     juce::Array<juce::var> presetNames;
                     if (args.size() >= 2)
                     {
-                        auto manufacturer = ModularRandomizerAudioProcessor::sanitizeForFilename (args[0].toString());
-                        auto pluginName   = ModularRandomizerAudioProcessor::sanitizeForFilename (args[1].toString());
+                        auto manufacturer = HostesaAudioProcessor::sanitizeForFilename (args[0].toString());
+                        auto pluginName   = HostesaAudioProcessor::sanitizeForFilename (args[1].toString());
                         if (manufacturer.isEmpty()) manufacturer = "Unknown";
 
-                        auto presetsDir = ModularRandomizerAudioProcessor::getSnapshotsDir()
+                        auto presetsDir = HostesaAudioProcessor::getSnapshotsDir()
                                               .getChildFile (manufacturer)
                                               .getChildFile (pluginName);
 
@@ -615,12 +615,12 @@ ModularRandomizerAudioProcessorEditor::ModularRandomizerAudioProcessorEditor (
                 {
                     if (args.size() >= 3)
                     {
-                        auto manufacturer = ModularRandomizerAudioProcessor::sanitizeForFilename (args[0].toString());
-                        auto pluginName   = ModularRandomizerAudioProcessor::sanitizeForFilename (args[1].toString());
+                        auto manufacturer = HostesaAudioProcessor::sanitizeForFilename (args[0].toString());
+                        auto pluginName   = HostesaAudioProcessor::sanitizeForFilename (args[1].toString());
                         auto presetName   = args[2].toString();
                         if (manufacturer.isEmpty()) manufacturer = "Unknown";
 
-                        auto presetsDir = ModularRandomizerAudioProcessor::getSnapshotsDir()
+                        auto presetsDir = HostesaAudioProcessor::getSnapshotsDir()
                                               .getChildFile (manufacturer)
                                               .getChildFile (pluginName);
                         auto presetFile = presetsDir.getChildFile (presetName + ".json");
@@ -637,12 +637,12 @@ ModularRandomizerAudioProcessorEditor::ModularRandomizerAudioProcessorEditor (
                 {
                     if (args.size() >= 3)
                     {
-                        auto manufacturer = ModularRandomizerAudioProcessor::sanitizeForFilename (args[0].toString());
-                        auto pluginName   = ModularRandomizerAudioProcessor::sanitizeForFilename (args[1].toString());
+                        auto manufacturer = HostesaAudioProcessor::sanitizeForFilename (args[0].toString());
+                        auto pluginName   = HostesaAudioProcessor::sanitizeForFilename (args[1].toString());
                         auto presetName   = args[2].toString();
                         if (manufacturer.isEmpty()) manufacturer = "Unknown";
 
-                        auto presetsDir = ModularRandomizerAudioProcessor::getSnapshotsDir()
+                        auto presetsDir = HostesaAudioProcessor::getSnapshotsDir()
                                               .getChildFile (manufacturer)
                                               .getChildFile (pluginName);
                         auto presetFile = presetsDir.getChildFile (presetName + ".json");
@@ -689,7 +689,7 @@ ModularRandomizerAudioProcessorEditor::ModularRandomizerAudioProcessorEditor (
                         int progIdx  = (int) args[1];
                         juce::String filePath = args.size() >= 3 ? args[2].toString() : "";
 
-                        std::vector<ModularRandomizerAudioProcessor::ParamInfo> params;
+                        std::vector<HostesaAudioProcessor::ParamInfo> params;
                         if (filePath.isNotEmpty())
                             params = audioProcessor.loadFactoryPresetFromFile (pluginId, filePath);
                         else
@@ -719,7 +719,7 @@ ModularRandomizerAudioProcessorEditor::ModularRandomizerAudioProcessorEditor (
                     {
                         auto presetName = args[0].toString();
                         auto jsonData   = args[1].toString();
-                        auto chainsDir  = ModularRandomizerAudioProcessor::getChainsDir();
+                        auto chainsDir  = HostesaAudioProcessor::getChainsDir();
                         chainsDir.createDirectory();
                         auto presetFile = chainsDir.getChildFile (presetName + ".mrchain");
                         presetFile.replaceWithText (jsonData);
@@ -762,7 +762,7 @@ ModularRandomizerAudioProcessorEditor::ModularRandomizerAudioProcessorEditor (
                     };
 
                     juce::Array<juce::var> presetEntries;
-                    auto chainsDir = ModularRandomizerAudioProcessor::getChainsDir();
+                    auto chainsDir = HostesaAudioProcessor::getChainsDir();
                     if (chainsDir.isDirectory())
                     {
                         for (const auto& f : chainsDir.findChildFiles (juce::File::findFiles, false, "*.mrchain"))
@@ -774,7 +774,7 @@ ModularRandomizerAudioProcessorEditor::ModularRandomizerAudioProcessorEditor (
                         }
                     }
                     // Also scan _Import/ folder for new chain files
-                    auto importDir = ModularRandomizerAudioProcessor::getImportDir();
+                    auto importDir = HostesaAudioProcessor::getImportDir();
                     if (importDir.isDirectory())
                     {
                         for (const auto& f : importDir.findChildFiles (juce::File::findFiles, false, "*.mrchain"))
@@ -813,7 +813,7 @@ ModularRandomizerAudioProcessorEditor::ModularRandomizerAudioProcessorEditor (
                     if (args.size() >= 1)
                     {
                         auto presetName = args[0].toString();
-                        auto chainsDir  = ModularRandomizerAudioProcessor::getChainsDir();
+                        auto chainsDir  = HostesaAudioProcessor::getChainsDir();
                         auto presetFile = chainsDir.getChildFile (presetName + ".mrchain");
                         if (presetFile.existsAsFile())
                         {
@@ -832,7 +832,7 @@ ModularRandomizerAudioProcessorEditor::ModularRandomizerAudioProcessorEditor (
                     if (args.size() >= 1)
                     {
                         auto presetName = args[0].toString();
-                        auto chainsDir  = ModularRandomizerAudioProcessor::getChainsDir();
+                        auto chainsDir  = HostesaAudioProcessor::getChainsDir();
                         auto presetFile = chainsDir.getChildFile (presetName + ".mrchain");
                         if (presetFile.existsAsFile())
                             presetFile.deleteFile();
@@ -850,7 +850,7 @@ ModularRandomizerAudioProcessorEditor::ModularRandomizerAudioProcessorEditor (
                     {
                         auto presetName = args[0].toString();
                         auto jsonData   = args[1].toString();
-                        auto eqDir      = ModularRandomizerAudioProcessor::getEqPresetsDir();
+                        auto eqDir      = HostesaAudioProcessor::getEqPresetsDir();
                         eqDir.createDirectory();
                         auto presetFile = eqDir.getChildFile (presetName + ".mreq");
                         presetFile.replaceWithText (jsonData);
@@ -864,7 +864,7 @@ ModularRandomizerAudioProcessorEditor::ModularRandomizerAudioProcessorEditor (
                         juce::WebBrowserComponent::NativeFunctionCompletion completion)
                 {
                     juce::ignoreUnused (args);
-                    auto eqDir = ModularRandomizerAudioProcessor::getEqPresetsDir();
+                    auto eqDir = HostesaAudioProcessor::getEqPresetsDir();
                     juce::Array<juce::var> presetList;
                     if (eqDir.isDirectory())
                     {
@@ -883,7 +883,7 @@ ModularRandomizerAudioProcessorEditor::ModularRandomizerAudioProcessorEditor (
                     if (args.size() >= 1)
                     {
                         auto presetName = args[0].toString();
-                        auto eqDir      = ModularRandomizerAudioProcessor::getEqPresetsDir();
+                        auto eqDir      = HostesaAudioProcessor::getEqPresetsDir();
                         auto presetFile = eqDir.getChildFile (presetName + ".mreq");
                         if (presetFile.existsAsFile())
                         {
@@ -902,7 +902,7 @@ ModularRandomizerAudioProcessorEditor::ModularRandomizerAudioProcessorEditor (
                     if (args.size() >= 1)
                     {
                         auto presetName = args[0].toString();
-                        auto eqDir      = ModularRandomizerAudioProcessor::getEqPresetsDir();
+                        auto eqDir      = HostesaAudioProcessor::getEqPresetsDir();
                         auto presetFile = eqDir.getChildFile (presetName + ".mreq");
                         if (presetFile.existsAsFile())
                             presetFile.deleteFile();
@@ -927,29 +927,29 @@ ModularRandomizerAudioProcessorEditor::ModularRandomizerAudioProcessorEditor (
                         juce::File target;
                         if (type == "chain")
                         {
-                            target = ModularRandomizerAudioProcessor::getChainsDir()
+                            target = HostesaAudioProcessor::getChainsDir()
                                          .getChildFile (presetName + ".mrchain");
                         }
                         else if (type == "snapshot" && args.size() >= 4)
                         {
-                            auto manufacturer = ModularRandomizerAudioProcessor::sanitizeForFilename (args[2].toString());
-                            auto pluginName   = ModularRandomizerAudioProcessor::sanitizeForFilename (args[3].toString());
+                            auto manufacturer = HostesaAudioProcessor::sanitizeForFilename (args[2].toString());
+                            auto pluginName   = HostesaAudioProcessor::sanitizeForFilename (args[3].toString());
                             if (manufacturer.isEmpty()) manufacturer = "Unknown";
-                            target = ModularRandomizerAudioProcessor::getSnapshotsDir()
+                            target = HostesaAudioProcessor::getSnapshotsDir()
                                          .getChildFile (manufacturer)
                                          .getChildFile (pluginName)
                                          .getChildFile (presetName + ".json");
                         }
                         else if (type == "root")
                         {
-                            target = ModularRandomizerAudioProcessor::getChainsDir();
+                            target = HostesaAudioProcessor::getChainsDir();
                         }
                         else if (type == "eq")
                         {
-                            target = ModularRandomizerAudioProcessor::getEqPresetsDir()
+                            target = HostesaAudioProcessor::getEqPresetsDir()
                                          .getChildFile (presetName + ".mreq");
                             if (! target.existsAsFile())
-                                target = ModularRandomizerAudioProcessor::getEqPresetsDir();
+                                target = HostesaAudioProcessor::getEqPresetsDir();
                         }
 
                         if (target.exists())
@@ -972,7 +972,7 @@ ModularRandomizerAudioProcessorEditor::ModularRandomizerAudioProcessorEditor (
                         constexpr int baseW = 1060, baseH = 720;
                         int w = juce::roundToInt (baseW * scale);
                         int h = juce::roundToInt (baseH * scale);
-                        juce::Component::SafePointer<ModularRandomizerAudioProcessorEditor> safeThis (this);
+                        juce::Component::SafePointer<HostesaAudioProcessorEditor> safeThis (this);
                         juce::MessageManager::callAsync ([safeThis, w, h]()
                         {
                             if (safeThis != nullptr)
@@ -1182,11 +1182,11 @@ ModularRandomizerAudioProcessorEditor::ModularRandomizerAudioProcessorEditor (
     webView = std::make_unique<juce::WebBrowserComponent> (webViewOptions);
 
     // CRITICAL: addAndMakeVisible AFTER attachments are created
-    DBG ("ModularRandomizer: Adding WebView to component");
+    DBG ("Hostesa: Adding WebView to component");
     addAndMakeVisible (*webView);
 
     // Navigate to resource provider root (serves index.html via root handler)
-    DBG ("ModularRandomizer: Loading web content");
+    DBG ("Hostesa: Loading web content");
     webView->goToURL (juce::WebBrowserComponent::getResourceProviderRoot());
 
     // Set editor size
@@ -1199,10 +1199,10 @@ ModularRandomizerAudioProcessorEditor::ModularRandomizerAudioProcessorEditor (
     DBG ("Resource provider root: " + juce::WebBrowserComponent::getResourceProviderRoot());
 #endif
 
-    DBG ("ModularRandomizer: Editor constructor completed");
+    DBG ("Hostesa: Editor constructor completed");
 }
 
-ModularRandomizerAudioProcessorEditor::~ModularRandomizerAudioProcessorEditor()
+HostesaAudioProcessorEditor::~HostesaAudioProcessorEditor()
 {
     stopTimer();
 
@@ -1213,18 +1213,18 @@ ModularRandomizerAudioProcessorEditor::~ModularRandomizerAudioProcessorEditor()
 }
 
 //==============================================================================
-void ModularRandomizerAudioProcessorEditor::paint (juce::Graphics& g)
+void HostesaAudioProcessorEditor::paint (juce::Graphics& g)
 {
     g.fillAll (juce::Colour (0xFF252018));
 }
 
-void ModularRandomizerAudioProcessorEditor::resized()
+void HostesaAudioProcessorEditor::resized()
 {
     if (webView != nullptr)
         webView->setBounds (getLocalBounds());
 }
 
-void ModularRandomizerAudioProcessorEditor::timerCallback()
+void HostesaAudioProcessorEditor::timerCallback()
 {
     if (webView == nullptr) return;
 
@@ -1623,8 +1623,8 @@ void ModularRandomizerAudioProcessorEditor::timerCallback()
     // ── Spectrum analyzer data for WrongEQ (~20Hz update) ──
     if (timerTickCount % 3 == 0)
     {
-        float specBins[ModularRandomizerAudioProcessor::spectrumBinCount];
-        int n = audioProcessor.getSpectrumBins (specBins, ModularRandomizerAudioProcessor::spectrumBinCount);
+        float specBins[HostesaAudioProcessor::spectrumBinCount];
+        int n = audioProcessor.getSpectrumBins (specBins, HostesaAudioProcessor::spectrumBinCount);
         if (n > 0)
         {
             juce::Array<juce::var> specArr;
@@ -1639,7 +1639,7 @@ void ModularRandomizerAudioProcessorEditor::timerCallback()
     // so it can update canvas + virtual param displays. Only send if there are EQ points.
     if (timerTickCount % 6 == 0)
     {
-        ModularRandomizerAudioProcessor::WeqReadbackPoint weqPts[8];
+        HostesaAudioProcessor::WeqReadbackPoint weqPts[8];
         int nPts = audioProcessor.getWeqReadback (weqPts, 8);
         if (nPts > 0)
         {
@@ -1673,7 +1673,7 @@ void ModularRandomizerAudioProcessorEditor::timerCallback()
 }
 
 std::optional<juce::WebBrowserComponent::Resource>
-ModularRandomizerAudioProcessorEditor::getResource (const juce::String& url)
+HostesaAudioProcessorEditor::getResource (const juce::String& url)
 {
     const auto urlToRetrieve = url == "/" ? juce::String { "index.html" }
                                          : url.fromFirstOccurrenceOf ("/", false, false);
@@ -1717,7 +1717,7 @@ ModularRandomizerAudioProcessorEditor::getResource (const juce::String& url)
     return std::nullopt;
 }
 
-const char* ModularRandomizerAudioProcessorEditor::getMimeForExtension (const juce::String& extension)
+const char* HostesaAudioProcessorEditor::getMimeForExtension (const juce::String& extension)
 {
     static const std::unordered_map<juce::String, const char*> mimeMap =
     {
@@ -1739,7 +1739,7 @@ const char* ModularRandomizerAudioProcessorEditor::getMimeForExtension (const ju
     return "text/plain";
 }
 
-void ModularRandomizerAudioProcessorEditor::openPluginEditorWindow (int pluginId)
+void HostesaAudioProcessorEditor::openPluginEditorWindow (int pluginId)
 {
     // Toggle: if already open, close it
     auto it = pluginEditorWindows.find (pluginId);
@@ -1776,7 +1776,7 @@ void ModularRandomizerAudioProcessorEditor::openPluginEditorWindow (int pluginId
         [this, pluginId]()
         {
             // Schedule removal to avoid deleting during callback
-            juce::Component::SafePointer<ModularRandomizerAudioProcessorEditor> safeThis (this);
+            juce::Component::SafePointer<HostesaAudioProcessorEditor> safeThis (this);
             juce::MessageManager::callAsync ([safeThis, pluginId]()
             {
                 if (safeThis != nullptr)
