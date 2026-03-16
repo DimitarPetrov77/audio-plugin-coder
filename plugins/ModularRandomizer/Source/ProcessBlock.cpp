@@ -1994,7 +1994,10 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
     // ── Crash-protected single-plugin processing (shared by both modes) ──
     // Creates a stereo-only alias buffer so hosted plugins never see sidechain channels.
-    auto processOnePlugin = [this, &midiMessages, mainBusChannels] (HostedPlugin& hp, juce::AudioBuffer<float>& buf) -> bool
+    // Takes an explicit MidiBuffer& so callers can pass a copy when needed
+    // (e.g. parallel bus mode: each synth gets its own copy so consumption by one
+    //  synth doesn't starve the next).
+    auto processOnePlugin = [this, mainBusChannels] (HostedPlugin& hp, juce::AudioBuffer<float>& buf, juce::MidiBuffer& midi) -> bool
     {
         if (hp.instance == nullptr || ! hp.prepared || hp.bypassed || hp.crashed)
             return true; // skip = success
@@ -2018,7 +2021,7 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             rollback.copyFrom (ch, 0, pluginBuf, ch, 0, numSmp);
 
         bool ok = false;
-        try { ok = sehGuardedProcessBlock (hp.instance.get(), pluginBuf, midiMessages); }
+        try { ok = sehGuardedProcessBlock (hp.instance.get(), pluginBuf, midi); }
         catch (...) { ok = false; }
 
         if (! ok)
@@ -2102,7 +2105,7 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 for (int ch = 0; ch < juce::jmin (numChannels, synthBuf.getNumChannels()); ++ch)
                     synthBuf.clear (ch, 0, juce::jmin (numSamples, synthBuf.getNumSamples()));
 
-                processOnePlugin (*hp, synthBuf);
+                processOnePlugin (*hp, synthBuf, midiMessages);
 
                 // Accumulate (layer) — ADD this synth's output to the accum buffer
                 for (int ch = 0; ch < accumCh; ++ch)
@@ -2117,14 +2120,14 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             for (auto& hp : hostedPlugins)
             {
                 if (hp->isInstrument) continue; // already processed
-                processOnePlugin (*hp, buffer);
+                processOnePlugin (*hp, buffer, midiMessages);
             }
         }
         else
         {
             // Pure FX chain — no instruments, process DAW input directly
             for (auto& hp : hostedPlugins)
-                processOnePlugin (*hp, buffer);
+                processOnePlugin (*hp, buffer, midiMessages);
         }
     }
     else if (routingMode.load() == 2)
@@ -2140,14 +2143,14 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             eqDirty.exchange (false); // consume pending updates
             // Still process serial chain so plugins stay fed
             for (auto& hp : hostedPlugins)
-                processOnePlugin (*hp, buffer);
+                processOnePlugin (*hp, buffer, midiMessages);
         }
         else if (nPts < 1)
         {
             // No EQ points — serial fallback
             eqDirty.exchange (false);
             for (auto& hp : hostedPlugins)
-                processOnePlugin (*hp, buffer);
+                processOnePlugin (*hp, buffer, midiMessages);
         }
         else
         {
@@ -2709,7 +2712,7 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 if (bandMuted[targetBand] || bandSilenced[targetBand]) continue;
 
                 // Plugin processes its assigned band
-                processOnePlugin (*hp, eqBandBuffers[targetBand]);
+                processOnePlugin (*hp, eqBandBuffers[targetBand], midiMessages);
             }
 
             // ── Step 2.5: M/S decode point bands back to L/R ──
@@ -2808,7 +2811,7 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                     if (assigned) continue; // already processed in Step 2
 
                     // Unassigned: process on the full summed buffer (post-EQ global insert)
-                    processOnePlugin (*hp, buffer);
+                    processOnePlugin (*hp, buffer, midiMessages);
                 }
             }
 
@@ -2820,7 +2823,7 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 for (auto& hp : hostedPlugins)
                 {
                     if (! hp->instance || ! hp->prepared || hp->bypassed || hp->crashed) continue;
-                    processOnePlugin (*hp, buffer);
+                    processOnePlugin (*hp, buffer, midiMessages);
                 }
             }
 
@@ -2879,7 +2882,7 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 int b = juce::jlimit (0, maxBuses - 2, hp->busId);
                 if (busMute[b].load()) continue;
                 if (anySolo && ! busSolo[b].load()) continue;
-                processOnePlugin (*hp, buffer);
+                processOnePlugin (*hp, buffer, midiMessages);
             }
             // Apply bus volume for the single active bus
             if (effectiveBusCount == 1)
@@ -2927,7 +2930,19 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 int b = juce::jlimit (0, maxBuses - 2, hp->busId);
                 if (busMute[b].load()) continue;
                 if (anySolo && ! busSolo[b].load()) continue;
-                processOnePlugin (*hp, busBuffers[b]);
+
+                // Instruments: give each synth its OWN copy of MIDI so one
+                // consuming the buffer doesn't starve the next.
+                // Effects: pass the original (they typically don't consume MIDI).
+                if (hp->isInstrument)
+                {
+                    juce::MidiBuffer midiCopy (midiMessages);
+                    processOnePlugin (*hp, busBuffers[b], midiCopy);
+                }
+                else
+                {
+                    processOnePlugin (*hp, busBuffers[b], midiMessages);
+                }
             }
 
             // Sum all active bus outputs into main buffer — UNITY GAIN
