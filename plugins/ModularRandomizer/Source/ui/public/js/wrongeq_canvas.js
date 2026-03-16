@@ -811,10 +811,10 @@ function weqRenderPanel() {
     // ─── CURVE section ───
     h += '<div class="weq-sp-section">';
     h += '<div class="weq-sp-title">Curve</div>';
-    h += '<div class="weq-sp-row"><span class="weq-sp-label">Dep</span><span class="weq-sp-knob" data-wk="depth" title="Depth — scales all band gains, dbl-click reset">' + weqGlobalDepth + '%</span></div>';
-    h += '<div class="weq-sp-row"><span class="weq-sp-label">Wrp</span><span class="weq-sp-knob" data-wk="warp" title="Warp — S-curve contrast, dbl-click reset">' + (weqGlobalWarp >= 0 ? '+' : '') + weqGlobalWarp + '</span></div>';
-    h += '<div class="weq-sp-row"><span class="weq-sp-label">Stp</span><span class="weq-sp-knob" data-wk="steps" title="Steps — quantize gain levels, dbl-click reset">' + (weqGlobalSteps || 'Off') + '</span></div>';
-    h += '<div class="weq-sp-row"><span class="weq-sp-label">Tlt</span><span class="weq-sp-knob" data-wk="tilt" title="Tilt — tilt spectrum (+ highs / − lows), dbl-click reset">' + (weqGlobalTilt >= 0 ? '+' : '') + weqGlobalTilt + '</span></div>';
+    h += '<div class="weq-sp-row"><span class="weq-sp-label">Depth</span><span class="weq-sp-knob" data-wk="depth" title="Depth — scales all band gains, dbl-click reset">' + weqGlobalDepth + '%</span></div>';
+    h += '<div class="weq-sp-row"><span class="weq-sp-label">Warp</span><span class="weq-sp-knob" data-wk="warp" title="Warp — S-curve contrast, dbl-click reset">' + (weqGlobalWarp >= 0 ? '+' : '') + weqGlobalWarp + '</span></div>';
+    h += '<div class="weq-sp-row"><span class="weq-sp-label">Steps</span><span class="weq-sp-knob" data-wk="steps" title="Steps — quantize gain levels, dbl-click reset">' + (weqGlobalSteps || 'Off') + '</span></div>';
+    h += '<div class="weq-sp-row"><span class="weq-sp-label">Tilt</span><span class="weq-sp-knob" data-wk="tilt" title="Tilt — tilt spectrum (+ highs / − lows), dbl-click reset">' + (weqGlobalTilt >= 0 ? '+' : '') + weqGlobalTilt + '</span></div>';
     h += '</div>';
 
 
@@ -823,16 +823,16 @@ function weqRenderPanel() {
     var driftActive = Math.abs(weqDrift) > 0 && weqDriftRange > 0;
     h += '<div class="weq-sp-section">';
     h += '<div class="weq-sp-title">Drift</div>';
-    h += '<div class="weq-sp-row"><span class="weq-sp-label">Spd</span><span class="weq-sp-knob' + (driftActive ? ' weq-anim-on' : '') + '" data-wk="drift" title="Drift — freq sweep speed (+smooth / −jitter), dbl-click reset">' + (weqDrift >= 0 ? '+' : '') + weqDrift + '</span></div>';
-    h += '<div class="weq-sp-row"><span class="weq-sp-label">Rng</span><span class="weq-sp-knob' + (driftActive ? ' weq-anim-on' : '') + '" data-wk="driftRange" title="Drift Range — sweep width 0-4 oct, dbl-click reset">' + weqDriftRange + '%</span></div>';
-    h += '<div class="weq-sp-row"><span class="weq-sp-label">Scl</span><select class="weq-sp-sel" data-wf="driftScale" title="Drift Scale — musical period">';
+    h += '<div class="weq-sp-row"><span class="weq-sp-label">Speed</span><span class="weq-sp-knob' + (driftActive ? ' weq-anim-on' : '') + '" data-wk="drift" title="Drift — freq sweep speed (+smooth / −jitter), dbl-click reset">' + (weqDrift >= 0 ? '+' : '') + weqDrift + '</span></div>';
+    h += '<div class="weq-sp-row"><span class="weq-sp-label">Range</span><span class="weq-sp-knob' + (driftActive ? ' weq-anim-on' : '') + '" data-wk="driftRange" title="Drift Range — sweep width 0-4 oct, dbl-click reset">' + weqDriftRange + '%</span></div>';
+    h += '<div class="weq-sp-row"><span class="weq-sp-label">Scale</span><select class="weq-sp-sel" data-wf="driftScale" title="Drift Scale — musical period">';
     var DS_WEQ_OPTS = ['1/16', '1/8', '1/4', '1/2', '1/1', '2/1', '4/1', '8/1', '16/1', '32/1'];
     var DS_WEQ_LABELS = { '1/1': '1 bar', '2/1': '2 bars', '4/1': '4 bars', '8/1': '8 bars', '16/1': '16 bars', '32/1': '32 bars' };
     DS_WEQ_OPTS.forEach(function (dv) {
         h += '<option value="' + dv + '"' + (weqDriftScale === dv ? ' selected' : '') + '>' + (DS_WEQ_LABELS[dv] || dv) + '</option>';
     });
     h += '</select></div>';
-    h += '<div class="weq-sp-row"><span class="weq-sp-label">Tex</span><select class="weq-sp-sel" data-wf="driftTexture" title="Drift texture — frequency modulation character">';
+    h += '<div class="weq-sp-row"><span class="weq-sp-label">Texture</span><select class="weq-sp-sel" data-wf="driftTexture" title="Drift texture — frequency modulation character">';
     WEQ_DRIFT_TEXTURE_KEYS.forEach(function (tk) {
         h += '<option value="' + tk + '"' + (weqDriftTexture === tk ? ' selected' : '') + '>' + WEQ_DRIFT_TEXTURES[tk].label + '</option>';
     });
@@ -840,24 +840,24 @@ function weqRenderPanel() {
     h += '<div class="weq-sp-row">';
     h += '<button class="weq-sp-toggle' + (weqDriftContinuous ? ' on weq-anim-on' : '') + '" id="weqContinuous" title="Continuous — also modulate gain with complex noise">∿ Cont</button>';
     h += '</div>';
-    h += '<div class="weq-sp-row"><span class="weq-sp-label">Lo</span><span class="weq-sp-knob' + (weqDriftLoCut > 20 ? ' weq-anim-on' : '') + '" data-wk="driftLo" title="Drift low cut, dbl-click reset">' + (weqDriftLoCut > 20 ? weqFmtFreq(weqDriftLoCut) : 'Off') + '</span></div>';
-    h += '<div class="weq-sp-row"><span class="weq-sp-label">Hi</span><span class="weq-sp-knob' + (weqDriftHiCut < 20000 ? ' weq-anim-on' : '') + '" data-wk="driftHi" title="Drift high cut, dbl-click reset">' + (weqDriftHiCut < 20000 ? weqFmtFreq(weqDriftHiCut) : 'Off') + '</span></div>';
+    h += '<div class="weq-sp-row"><span class="weq-sp-label">Lo Cut</span><span class="weq-sp-knob' + (weqDriftLoCut > 20 ? ' weq-anim-on' : '') + '" data-wk="driftLo" title="Drift low cut, dbl-click reset">' + (weqDriftLoCut > 20 ? weqFmtFreq(weqDriftLoCut) : 'Off') + '</span></div>';
+    h += '<div class="weq-sp-row"><span class="weq-sp-label">Hi Cut</span><span class="weq-sp-knob' + (weqDriftHiCut < 20000 ? ' weq-anim-on' : '') + '" data-wk="driftHi" title="Drift high cut, dbl-click reset">' + (weqDriftHiCut < 20000 ? weqFmtFreq(weqDriftHiCut) : 'Off') + '</span></div>';
     h += '</div>';
 
     // ─── LFO section ───
     h += '<div class="weq-sp-section">';
-    h += '<div class="weq-sp-title">LFO</div>';
+    h += '<div class="weq-sp-title">Gain Mod</div>';
     var _spdDisp = weqAnimSpeed > 0 ? (weqAnimSpeed < 1 ? weqAnimSpeed.toFixed(2) + 'Hz' : weqAnimSpeed.toFixed(1) + 'Hz') : 'Off';
     h += '<div class="weq-sp-row"><span class="weq-sp-label">Rate</span><span class="weq-sp-knob' + (weqAnimSpeed > 0 ? ' weq-anim-on' : '') + '" data-wk="speed" title="LFO rate (Hz), dbl-click to stop">' + _spdDisp + '</span></div>';
-    h += '<div class="weq-sp-row"><span class="weq-sp-label">Dep</span><span class="weq-sp-knob' + (weqAnimDepth > 0 && weqAnimSpeed > 0 ? ' weq-anim-on' : '') + '" data-wk="mod" title="LFO depth (dB), dbl-click reset">' + weqAnimDepth + 'dB</span></div>';
-    h += '<div class="weq-sp-row"><span class="weq-sp-label">Shp</span><select class="weq-sp-sel" data-wf="lfoShape" title="LFO waveform shape">';
+    h += '<div class="weq-sp-row"><span class="weq-sp-label">Depth</span><span class="weq-sp-knob' + (weqAnimDepth > 0 && weqAnimSpeed > 0 ? ' weq-anim-on' : '') + '" data-wk="mod" title="LFO depth (dB), dbl-click reset">' + weqAnimDepth + 'dB</span></div>';
+    h += '<div class="weq-sp-row"><span class="weq-sp-label">Shape</span><select class="weq-sp-sel" data-wf="lfoShape" title="LFO waveform shape">';
     WEQ_LFO_SHAPE_KEYS.forEach(function (sk) {
         var sh = WEQ_LFO_SHAPES[sk];
         h += '<option value="' + sk + '"' + (weqAnimShape === sk ? ' selected' : '') + '>' + sh.icon + ' ' + sh.label + '</option>';
     });
     h += '</select></div>';
-    h += '<div class="weq-sp-row"><span class="weq-sp-label">Lo</span><span class="weq-sp-knob' + (weqGainLoCut > 20 ? ' weq-anim-on' : '') + '" data-wk="gainLo" title="Gain LFO low cut, dbl-click reset">' + (weqGainLoCut > 20 ? weqFmtFreq(weqGainLoCut) : 'Off') + '</span></div>';
-    h += '<div class="weq-sp-row"><span class="weq-sp-label">Hi</span><span class="weq-sp-knob' + (weqGainHiCut < 20000 ? ' weq-anim-on' : '') + '" data-wk="gainHi" title="Gain LFO high cut, dbl-click reset">' + (weqGainHiCut < 20000 ? weqFmtFreq(weqGainHiCut) : 'Off') + '</span></div>';
+    h += '<div class="weq-sp-row"><span class="weq-sp-label">Lo Cut</span><span class="weq-sp-knob' + (weqGainLoCut > 20 ? ' weq-anim-on' : '') + '" data-wk="gainLo" title="Gain LFO low cut, dbl-click reset">' + (weqGainLoCut > 20 ? weqFmtFreq(weqGainLoCut) : 'Off') + '</span></div>';
+    h += '<div class="weq-sp-row"><span class="weq-sp-label">Hi Cut</span><span class="weq-sp-knob' + (weqGainHiCut < 20000 ? ' weq-anim-on' : '') + '" data-wk="gainHi" title="Gain LFO high cut, dbl-click reset">' + (weqGainHiCut < 20000 ? weqFmtFreq(weqGainHiCut) : 'Off') + '</span></div>';
     h += '</div>';
 
     // ─── Q MOD section ───
@@ -866,15 +866,15 @@ function weqRenderPanel() {
     h += '<div class="weq-sp-title">Q Mod</div>';
     var _qSpdDisp = weqQModSpeed > 0 ? (weqQModSpeed < 1 ? weqQModSpeed.toFixed(2) + 'Hz' : weqQModSpeed.toFixed(1) + 'Hz') : 'Off';
     h += '<div class="weq-sp-row"><span class="weq-sp-label">Rate</span><span class="weq-sp-knob' + (qModActive ? ' weq-anim-on' : '') + '" data-wk="qSpeed" title="Q modulation rate (Hz), dbl-click to stop">' + _qSpdDisp + '</span></div>';
-    h += '<div class="weq-sp-row"><span class="weq-sp-label">Dep</span><span class="weq-sp-knob' + (qModActive ? ' weq-anim-on' : '') + '" data-wk="qDepth" title="Q modulation depth (%), dbl-click reset">' + weqQModDepth + '%</span></div>';
-    h += '<div class="weq-sp-row"><span class="weq-sp-label">Shp</span><select class="weq-sp-sel" data-wf="qShape" title="Q modulation waveform">';
+    h += '<div class="weq-sp-row"><span class="weq-sp-label">Depth</span><span class="weq-sp-knob' + (qModActive ? ' weq-anim-on' : '') + '" data-wk="qDepth" title="Q modulation depth (%), dbl-click reset">' + weqQModDepth + '%</span></div>';
+    h += '<div class="weq-sp-row"><span class="weq-sp-label">Shape</span><select class="weq-sp-sel" data-wf="qShape" title="Q modulation waveform">';
     WEQ_QMOD_SHAPE_KEYS.forEach(function (qk) {
         var qs = WEQ_QMOD_SHAPES[qk];
         h += '<option value="' + qk + '"' + (weqQModShape === qk ? ' selected' : '') + '>' + qs.label + '</option>';
     });
     h += '</select></div>';
-    h += '<div class="weq-sp-row"><span class="weq-sp-label">Lo</span><span class="weq-sp-knob' + (weqQLoCut > 20 ? ' weq-anim-on' : '') + '" data-wk="qLo" title="Q mod low cut, dbl-click reset">' + (weqQLoCut > 20 ? weqFmtFreq(weqQLoCut) : 'Off') + '</span></div>';
-    h += '<div class="weq-sp-row"><span class="weq-sp-label">Hi</span><span class="weq-sp-knob' + (weqQHiCut < 20000 ? ' weq-anim-on' : '') + '" data-wk="qHi" title="Q mod high cut, dbl-click reset">' + (weqQHiCut < 20000 ? weqFmtFreq(weqQHiCut) : 'Off') + '</span></div>';
+    h += '<div class="weq-sp-row"><span class="weq-sp-label">Lo Cut</span><span class="weq-sp-knob' + (weqQLoCut > 20 ? ' weq-anim-on' : '') + '" data-wk="qLo" title="Q mod low cut, dbl-click reset">' + (weqQLoCut > 20 ? weqFmtFreq(weqQLoCut) : 'Off') + '</span></div>';
+    h += '<div class="weq-sp-row"><span class="weq-sp-label">Hi Cut</span><span class="weq-sp-knob' + (weqQHiCut < 20000 ? ' weq-anim-on' : '') + '" data-wk="qHi" title="Q mod high cut, dbl-click reset">' + (weqQHiCut < 20000 ? weqFmtFreq(weqQHiCut) : 'Off') + '</span></div>';
     h += '</div>';
 
     // ─── RANGE section ───
