@@ -39,7 +39,7 @@ static juce::AudioPluginInstance* createInstanceInner (
     return result.release();
 }
 
-// Outer SEH wrapper: catches hardware faults. No C++ objects here — only a function call.
+// Outer SEH wrapper: catches hardware faults. No C++ objects here - only a function call.
 #pragma warning(push)
 #pragma warning(disable: 4611)  // interaction between setjmp and C++ object destruction
 static bool sehCreateInstance (
@@ -60,7 +60,7 @@ static bool sehCreateInstance (
 }
 #pragma warning(pop)
 
-// SEH wrapper for setStateInformation — some plugins crash on malformed state data
+// SEH wrapper for setStateInformation - some plugins crash on malformed state data
 static bool sehSetState (juce::AudioPluginInstance* instance, const void* data, int size)
 {
     __try {
@@ -72,7 +72,7 @@ static bool sehSetState (juce::AudioPluginInstance* instance, const void* data, 
     }
 }
 
-// SEH wrapper for releaseResources — some plugins crash during cleanup
+// SEH wrapper for releaseResources - some plugins crash during cleanup
 bool sehReleaseResources (juce::AudioPluginInstance* instance)
 {
     __try {
@@ -84,9 +84,9 @@ bool sehReleaseResources (juce::AudioPluginInstance* instance)
     }
 }
 
-// SEH wrapper for plugin instance destruction — some plugins crash in their
+// SEH wrapper for plugin instance destruction - some plugins crash in their
 // destructor (e.g. GPU surface cleanup, COM shutdown). C++ try-catch cannot
-// catch access violations — only __try/__except can.
+// catch access violations - only __try/__except can.
 // Takes a raw pointer and deletes it inside the SEH guard.
 bool sehDestroyInstance (juce::AudioPluginInstance* rawInstance)
 {
@@ -96,6 +96,18 @@ bool sehDestroyInstance (juce::AudioPluginInstance* rawInstance)
     }
     __except (EXCEPTION_EXECUTE_HANDLER) {
         // The instance leaked, but the host process survives.
+        return false;
+    }
+}
+
+// SEH wrapper for prepareToPlay - some plugins crash during audio setup
+static bool sehPrepareToPlay (juce::AudioPluginInstance* instance, double sampleRate, int blockSize)
+{
+    __try {
+        instance->prepareToPlay (sampleRate, blockSize);
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
 }
@@ -202,7 +214,7 @@ std::vector<ScannedPlugin> HostesaAudioProcessor::scanForPlugins (
 
     if (!cacheLoaded)
     {
-        // No valid cache — do the full deep scan with per-file progress
+        // No valid cache - do the full deep scan with per-file progress
         scanActive.store (true);
 #ifdef _WIN32
         CoInitializeEx (nullptr, COINIT_APARTMENTTHREADED);
@@ -214,10 +226,13 @@ std::vector<ScannedPlugin> HostesaAudioProcessor::scanForPlugins (
             for (const auto& dir : paths)
                 searchPath.add (juce::File (dir));
 
+            auto deadMansPedal = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                .getChildFile ("DimitarPetrov/Hostesa/scan_deadmanspedal.txt");
+
             juce::PluginDirectoryScanner scanner (
                 knownPlugins, *format, searchPath,
                 true,  // recursive
-                juce::File()
+                deadMansPedal
             );
 
             juce::String name;
@@ -229,22 +244,17 @@ std::vector<ScannedPlugin> HostesaAudioProcessor::scanForPlugins (
                 {
 #ifdef _WIN32
                     int r = sehScanOneFile (&scanner, &name);
-                    if (r <= 0)
-                    {
-                        if (r < 0)
-                            LOG_TO_FILE ("  SEH FAULT during deep scan of: "
-                                         << name.toStdString());
-                        scanning = false;
-                    }
+                    if (r == 0)
+                        scanning = false; // normal completion
+                    else if (r < 0)
+                        continue; // SEH crash on this plugin -- skip it, keep scanning
 #else
                     scanning = scanner.scanNextFile (true, name);
 #endif
                 }
                 catch (...)
                 {
-                    LOG_TO_FILE ("  EXCEPTION during deep scan of: "
-                                 << name.toStdString());
-                    scanning = false;
+                    continue; // exception on this plugin -- skip it, keep scanning
                 }
 
                 ++scannedCount;
@@ -284,42 +294,47 @@ std::vector<ScannedPlugin> HostesaAudioProcessor::scanForPlugins (
     }
     LOG_TO_FILE ("  Known plugins: " << knownPlugins.getNumTypes() << " types available");
 
-    // Phase 2: Enrich filesystem results with real metadata from knownPlugins
-    // (populated by Phase 1.5 deep scan above)
-    for (auto& sp : results)
+    // Phase 2: Build results directly from knownPlugins metadata.
+    // The deep scan already extracted isInstrument, category, manufacturerName
+    // from each VST3's moduleinfo.json / class info. Use it directly.
+    if (knownPlugins.getNumTypes() > 0)
     {
-        auto pluginFileName = juce::File (sp.path).getFileNameWithoutExtension();
+        results.clear();
+        seen.clear();
 
         for (const auto& desc : knownPlugins.getTypes())
         {
-            if (desc.fileOrIdentifier == sp.path
-                || desc.fileOrIdentifier.containsIgnoreCase (pluginFileName))
-            {
-                // Overwrite with real metadata
-                sp.name = desc.name;
-                sp.vendor = desc.manufacturerName;
-                sp.format = desc.pluginFormatName;
+            if (seen.contains (desc.fileOrIdentifier))
+                continue;
+            seen.add (desc.fileOrIdentifier);
 
-                // Classify using PluginDescription metadata
-                if (desc.isInstrument)
-                    sp.category = "synth";
-                else if (desc.category.containsIgnoreCase ("Instrument")
-                      || desc.category.containsIgnoreCase ("Synth")
-                      || desc.category.containsIgnoreCase ("Generator"))
-                    sp.category = "synth";
-                else if (desc.category.containsIgnoreCase ("Sampler"))
-                    sp.category = "sampler";
-                else if (desc.category.containsIgnoreCase ("Analyzer")
-                      || desc.category.containsIgnoreCase ("Tools")
-                      || desc.category.containsIgnoreCase ("Mastering")
-                      || desc.category.containsIgnoreCase ("Restoration")
-                      || desc.category.containsIgnoreCase ("Network"))
-                    sp.category = "utility";
-                else
-                    sp.category = "fx";
+            ScannedPlugin sp;
+            sp.name   = desc.name;
+            sp.vendor = desc.manufacturerName;
+            sp.path   = desc.fileOrIdentifier;
+            sp.format = desc.pluginFormatName;
 
-                break;
-            }
+            // Classify using VST3 metadata (isInstrument flag + category string).
+            // VST3 categories: "Fx|EQ", "Instrument|Synth", etc.
+            auto cat = desc.category.toLowerCase();
+
+            if (desc.isInstrument)
+                sp.category = "synth";
+            else if (cat.contains ("instrument") || cat.contains ("synth")
+                  || cat.contains ("generator"))
+                sp.category = "synth";
+            else if (cat.contains ("sampler"))
+                sp.category = "sampler";
+            else if (cat.contains ("analyzer") || cat.contains ("analyser")
+                  || cat.contains ("tools") || cat.contains ("mastering")
+                  || cat.contains ("restoration") || cat.contains ("network")
+                  || cat.contains ("meter") || cat.contains ("up-downmix")
+                  || cat.contains ("spatial") || cat.contains ("surround"))
+                sp.category = "utility";
+            else
+                sp.category = "fx";
+
+            results.push_back (sp);
         }
     }
 
@@ -365,7 +380,7 @@ bool HostesaAudioProcessor::findPluginDescription (
         }
     }
 
-    // Not cached — scan single file (disk I/O)
+    // Not cached - scan single file (disk I/O)
     LOG_TO_FILE ("  Plugin not in known list, scanning single file...");
 
     for (int fi = 0; fi < formatManager.getNumFormats(); ++fi)
@@ -421,7 +436,7 @@ bool HostesaAudioProcessor::findPluginDescription (
     return false;
 }
 
-// -- Phase 2: Instantiate plugin (message thread only — COM requirement) --
+// -- Phase 2: Instantiate plugin (message thread only - COM requirement) --
 int HostesaAudioProcessor::instantiatePlugin (const juce::PluginDescription& desc)
 {
     juce::String errorMessage;
@@ -430,7 +445,7 @@ int HostesaAudioProcessor::instantiatePlugin (const juce::PluginDescription& des
 #ifdef _WIN32
     // SEH guard: some VST3 plugins trigger access violations during
     // factory creation / COM initialization. C++ try-catch doesn't catch
-    // hardware faults on Windows — only __try/__except does.
+    // hardware faults on Windows - only __try/__except does.
     juce::AudioPluginInstance* rawInstance = nullptr;
     bool sehOk = sehCreateInstance (&formatManager, &desc,
                                     currentSampleRate, currentBlockSize,
@@ -532,6 +547,13 @@ int HostesaAudioProcessor::instantiatePlugin (const juce::PluginDescription& des
     }
 
     // Prepare the instance
+#ifdef _WIN32
+    if (! sehPrepareToPlay (instance.get(), currentSampleRate, currentBlockSize))
+    {
+        LOG_TO_FILE ("  SEH FAULT during prepareToPlay for: " << desc.name.toStdString());
+        return -1;
+    }
+#else
     try
     {
         instance->prepareToPlay (currentSampleRate, currentBlockSize);
@@ -541,6 +563,7 @@ int HostesaAudioProcessor::instantiatePlugin (const juce::PluginDescription& des
         LOG_TO_FILE ("  CRASH during prepareToPlay for: " << desc.name.toStdString());
         return -1;
     }
+#endif
 
     // Create hosted plugin entry
     auto hp = std::make_unique<HostedPlugin>();
@@ -559,7 +582,7 @@ int HostesaAudioProcessor::instantiatePlugin (const juce::PluginDescription& des
         std::lock_guard<std::mutex> lock (pluginMutex);
 
         // Safety: if we'd exceed reserved capacity, the push_back would
-        // reallocate the vector — which would invalidate any pointers the
+        // reallocate the vector - which would invalidate any pointers the
         // audio thread holds (it iterates hostedPlugins without the mutex).
         // Reject the load instead of crashing.
         if (hostedPlugins.size() >= hostedPlugins.capacity())
@@ -599,13 +622,13 @@ int HostesaAudioProcessor::loadPlugin (const juce::String& pluginPath)
 
 void HostesaAudioProcessor::removePlugin (int pluginId)
 {
-    // This function must ALWAYS succeed — no exceptions, no crashes.
+    // This function must ALWAYS succeed - no exceptions, no crashes.
     try
     {
         // 1. Free proxy slots (safe, no mutex needed for proxy array)
         try { freeProxySlotsForPlugin (pluginId); } catch (...) {}
 
-        // 2. Null the instance — audio thread will see nullptr and skip.
+        // 2. Null the instance - audio thread will see nullptr and skip.
         //    Do NOT erase from the vector (audio thread may be iterating it).
         std::unique_ptr<juce::AudioPluginInstance> instanceToDestroy;
         {
@@ -614,7 +637,7 @@ void HostesaAudioProcessor::removePlugin (int pluginId)
             {
                 if (hp->id == pluginId)
                 {
-                    // Take ownership — audio thread sees nullptr ? skips
+                    // Take ownership - audio thread sees nullptr ? skips
                     instanceToDestroy = std::move (hp->instance);
                     hp->prepared = false;
                     hp->crashed = true;
@@ -625,7 +648,7 @@ void HostesaAudioProcessor::removePlugin (int pluginId)
             rebuildPluginSlots();
 
             // 3. Mark any active glides targeting this plugin as expired.
-            // The audio thread owns glidePool — we don't erase from here.
+            // The audio thread owns glidePool - we don't erase from here.
             // Setting samplesLeft=0 causes the audio thread to remove them.
             for (int gi = 0; gi < numActiveGlides; ++gi)
             {
@@ -636,7 +659,7 @@ void HostesaAudioProcessor::removePlugin (int pluginId)
 
         // 4. Release resources OUTSIDE the mutex (some plugins do blocking I/O)
         //    SEH-guarded: some plugins crash during releaseResources or their destructor.
-        //    C++ try-catch cannot catch Access Violations — only SEH can.
+        //    C++ try-catch cannot catch Access Violations - only SEH can.
         if (instanceToDestroy)
         {
 #ifdef _WIN32
@@ -672,7 +695,7 @@ void HostesaAudioProcessor::reorderPlugins (const std::vector<int>& orderedIds)
 {
     std::lock_guard<std::mutex> lock (pluginMutex);
 
-    // In-place reorder using swaps — the vector's size and allocation never change,
+    // In-place reorder using swaps - the vector's size and allocation never change,
     // so the audio thread's iteration remains safe (no iterator invalidation).
     for (size_t targetPos = 0; targetPos < orderedIds.size() && targetPos < hostedPlugins.size(); ++targetPos)
     {
@@ -948,7 +971,7 @@ HostesaAudioProcessor::loadFactoryPresetFromFile (int pluginId, const juce::Stri
                 }
                 else
                 {
-                    // Non-VST3 format (.fxp etc.) — try raw data
+                    // Non-VST3 format (.fxp etc.) - try raw data
                     LOG_TO_FILE ("loadFactoryPresetFromFile: trying raw data for '"
                                  << presetFile.getFileName().toStdString()
                                  << "' (" << fileData.getSize() << " bytes)");
@@ -962,7 +985,7 @@ HostesaAudioProcessor::loadFactoryPresetFromFile (int pluginId, const juce::Stri
 }
 
 // ============================================================
-// PRESET INDEX — Bitwig-style scan-all-directories approach
+// PRESET INDEX - Bitwig-style scan-all-directories approach
 // ============================================================
 
 juce::File HostesaAudioProcessor::getPresetIndexFile() const
@@ -1085,7 +1108,7 @@ void HostesaAudioProcessor::buildPresetIndex()
                 }
                 else
                 {
-                    // Just a file at root level — use parent dir name
+                    // Just a file at root level - use parent dir name
                     pluginKey = rootDir.getFileName().toLowerCase();
                 }
 
@@ -1260,7 +1283,7 @@ bool HostesaAudioProcessor::loadPresetIndexFromFile()
 
 void HostesaAudioProcessor::setHostedParam (int pluginId, int paramIndex, float normValue)
 {
-    // O(1) lookup via pluginSlots — no linear scan needed
+    // O(1) lookup via pluginSlots - no linear scan needed
     int slot = slotForId (pluginId);
     if (slot >= 0)
     {
@@ -1380,7 +1403,7 @@ void HostesaAudioProcessor::parameterChanged (const juce::String& parameterID, f
 
     if (m.isBlock())
     {
-        // Block param — store value for editor timer to forward to JS
+        // Block param - store value for editor timer to forward to JS
         proxyValueCache[slot].store (newValue);
         blockProxyDirty.store (true);
         return;
@@ -1406,7 +1429,7 @@ void HostesaAudioProcessor::parameterChanged (const juce::String& parameterID, f
 }
 
 //==============================================================================
-// Expose State — Selective proxy slot management
+// Expose State - Selective proxy slot management
 //==============================================================================
 
 void HostesaAudioProcessor::updateExposeState (const juce::String& jsonData)
@@ -1443,7 +1466,7 @@ void HostesaAudioProcessor::updateExposeState (const juce::String& jsonData)
 
                 if (! exposed)
                 {
-                    // Unexpose entire plugin — free all its proxy slots
+                    // Unexpose entire plugin - free all its proxy slots
                     freeProxySlotsForPlugin (pluginId);
                 }
                 else if (! excludedParams.empty())
