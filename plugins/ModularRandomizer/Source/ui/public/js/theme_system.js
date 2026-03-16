@@ -14,6 +14,7 @@ var THEMES = {
             '--bg-cell': '#1A1F2C',
             '--bg-cell-hover': '#232938',
             '--bg-inset': '#080A10',
+            '--canvas-bg': '#0A0A0A',
 
             // ── BORDERS ───────────────────────────────────────────────
             '--border': '#2A3040',
@@ -195,6 +196,7 @@ var THEMES = {
             '--bg-cell': '#1E2A2C',
             '--bg-cell-hover': '#263436',
             '--bg-inset': '#0A1214',
+            '--canvas-bg': '#0A0A0A',
 
             // BORDERS
             '--border': '#627476',
@@ -739,6 +741,7 @@ var THEMES = {
             '--bg-cell': '#222228',
             '--bg-cell-hover': '#2A2A32',
             '--bg-inset': '#0E0E12',
+            '--canvas-bg': '#0C0C0C',
 
             '--border': '#7A7A90',
             '--border-strong': '#909098',
@@ -1284,6 +1287,7 @@ var THEMES = {
             '--bg-cell': '#1C2333',  // L2
             '--bg-cell-hover': '#222D3F',  // L3
             '--bg-inset': '#090D12',  // L4
+            '--canvas-bg': '#0A0A0A',
 
             // ── BORDERS ───────────────────────────────────────────────
             // Structure comes from bg elevation differences, not drawn lines.
@@ -1617,6 +1621,7 @@ var THEMES = {
             '--bg-cell': '#1A1A22',
             '--bg-cell-hover': '#22222C',
             '--bg-inset': '#06060A',
+            '--canvas-bg': '#080808',
 
             // ── BORDERS ───────────────────────────────────────────────
             // Barely-there edges — structure comes from elevation, not lines.
@@ -1778,7 +1783,9 @@ var THEMES = {
             '--bg-panel': '#101A12',  // L1 — first visible green
             '--bg-cell': '#162214',  // L2 — clearly dark green
             '--bg-cell-hover': '#1C2C1E',  // L3 — perceptibly lighter
-            '--bg-inset': '#050A06',  // L4 — deepest well
+            '--bg-inset': '#050A06',  // L4
+            '--canvas-bg': '#080808',
+
 
             // ── BORDERS ───────────────────────────────────────────────
             // Structure comes from elevation, not drawn lines.
