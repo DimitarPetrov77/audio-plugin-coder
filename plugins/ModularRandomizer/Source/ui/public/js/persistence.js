@@ -63,7 +63,8 @@ function saveUiStateToHost() {
                     };
                 }),
                 enabled: b.enabled !== false,
-                expanded: b.expanded
+                expanded: b.expanded,
+                linkSources: b.linkSources || [], linkMin: b.linkMin || {}, linkMax: b.linkMax || {}, linkBases: b.linkBases || {}, linkSmoothMs: b.linkSmoothMs || 0
             };
         }),
         bc: bc, actId: actId,
@@ -104,7 +105,7 @@ function saveUiStateToHost() {
                 // During animation, save the stable base positions — not the animated jittering values
                 var saveX = (typeof weqAnimRafId !== 'undefined' && weqAnimRafId && typeof weqAnimBaseX !== 'undefined' && weqAnimBaseX.length > idx) ? weqAnimBaseX[idx] : p.x;
                 var saveY = (typeof weqAnimRafId !== 'undefined' && weqAnimRafId && typeof weqAnimBaseY !== 'undefined' && weqAnimBaseY.length > idx) ? weqAnimBaseY[idx] : p.y;
-                return { uid: p.uid, x: saveX, y: saveY, pluginIds: p.pluginIds || [], seg: p.seg || null, solo: p.solo || false, mute: p.mute || false, q: p.q != null ? p.q : 0.707, type: p.type || 'Bell', drift: p.drift || 0, preEq: p.preEq !== false, stereoMode: p.stereoMode || 0, slope: p.slope || 1 };
+                return { uid: p.uid, x: saveX, y: saveY, pluginIds: p.pluginIds || [], seg: p.seg || null, solo: p.solo || false, mute: p.mute || false, q: p.q != null ? p.q : 0.707, type: p.type || 'Bell', drift: p.drift || 0, preEq: p.preEq !== false, stereoMode: p.stereoMode || 0, slope: p.slope || 1, modExclude: p.modExclude || 0 };
             }),
             interp: typeof weqGlobalInterp !== 'undefined' ? weqGlobalInterp : 'smooth',
             depth: typeof weqGlobalDepth !== 'undefined' ? weqGlobalDepth : 100,
@@ -118,6 +119,7 @@ function saveUiStateToHost() {
             animSpeed: typeof weqAnimSpeed !== 'undefined' ? weqAnimSpeed : 0,
             animDepth: typeof weqAnimDepth !== 'undefined' ? weqAnimDepth : 6,
             animShape: typeof weqAnimShape !== 'undefined' ? weqAnimShape : 'sine',
+            animSpread: typeof weqAnimSpread !== 'undefined' ? weqAnimSpread : 0,
             drift: typeof weqDrift !== 'undefined' ? weqDrift : 0,
             driftRange: typeof weqDriftRange !== 'undefined' ? weqDriftRange : 5,
             driftScale: typeof weqDriftScale !== 'undefined' ? weqDriftScale : '1/1',
@@ -131,13 +133,15 @@ function saveUiStateToHost() {
             qModSpeed: typeof weqQModSpeed !== 'undefined' ? weqQModSpeed : 0,
             qModDepth: typeof weqQModDepth !== 'undefined' ? weqQModDepth : 50,
             qModShape: typeof weqQModShape !== 'undefined' ? weqQModShape : 'sine',
+            qModSpread: typeof weqQModSpread !== 'undefined' ? weqQModSpread : 0,
             qLoCut: typeof weqQLoCut !== 'undefined' ? weqQLoCut : 20,
             qHiCut: typeof weqQHiCut !== 'undefined' ? weqQHiCut : 20000,
 
             dbRange: typeof weqDBRangeMax !== 'undefined' ? weqDBRangeMax : 24,
             splitMode: typeof weqSplitMode !== 'undefined' ? weqSplitMode : false,
             oversample: typeof weqOversample !== 'undefined' ? weqOversample : 1,
-            splitSavedGains: typeof _weqSplitSavedGains !== 'undefined' ? _weqSplitSavedGains : null
+            splitSavedGains: typeof _weqSplitSavedGains !== 'undefined' ? _weqSplitSavedGains : null,
+            modEnabled: typeof weqModEnabled !== 'undefined' ? weqModEnabled : true
         }
     };
     fn(JSON.stringify(state));
@@ -299,7 +303,9 @@ function restoreFromHost() {
                                 };
                             }),
                             enabled: sb.enabled !== false,
-                            expanded: sb.expanded !== undefined ? sb.expanded : true
+                            expanded: sb.expanded !== undefined ? sb.expanded : true,
+                            linkSources: sb.linkSources || (sb.linkSourcePluginId != null && sb.linkSourcePluginId >= 0 ? [{ pluginId: sb.linkSourcePluginId, paramIndex: sb.linkSourceParamIndex || -1, pluginName: sb.linkSourcePluginName || '', paramName: sb.linkSourceParamName || '' }] : []),
+                            linkMin: sb.linkMin || {}, linkMax: sb.linkMax || {}, linkBases: sb.linkBases || {}, linkSmoothMs: sb.linkSmoothMs || 0
                         };
                     });
                     bc = saved.bc || 0;
@@ -344,7 +350,7 @@ function restoreFromHost() {
                 var weq = saved.wrongEq;
                 if (weq.points) {
                     wrongEqPoints = weq.points.map(function (p) {
-                        var pt = { x: p.x, y: p.y, pluginIds: p.pluginIds || [], seg: p.seg || null, solo: p.solo || false, mute: p.mute || false, q: p.q != null ? p.q : 0.707, type: p.type || 'Bell', drift: p.drift || 0, preEq: p.preEq !== undefined ? p.preEq : (weq.preEq !== undefined ? weq.preEq : true), stereoMode: p.stereoMode || 0, slope: p.slope || 1 };
+                        var pt = { x: p.x, y: p.y, pluginIds: p.pluginIds || [], seg: p.seg || null, solo: p.solo || false, mute: p.mute || false, q: p.q != null ? p.q : 0.707, type: p.type || 'Bell', drift: p.drift || 0, preEq: p.preEq !== undefined ? p.preEq : (weq.preEq !== undefined ? weq.preEq : true), stereoMode: p.stereoMode || 0, slope: p.slope || 1, modExclude: p.modExclude || 0 };
                         if (p.uid) pt.uid = p.uid; // restore saved uid
                         return pt;
                     });
@@ -368,6 +374,7 @@ function restoreFromHost() {
                 if (typeof weqAnimSpeed !== 'undefined' && weq.animSpeed != null) weqAnimSpeed = weq.animSpeed;
                 if (typeof weqAnimDepth !== 'undefined' && weq.animDepth != null) weqAnimDepth = weq.animDepth;
                 if (typeof weqAnimShape !== 'undefined' && weq.animShape != null) weqAnimShape = weq.animShape;
+                if (typeof weqAnimSpread !== 'undefined' && weq.animSpread != null) weqAnimSpread = weq.animSpread;
                 if (typeof weqDrift !== 'undefined' && weq.drift != null) weqDrift = weq.drift;
                 if (typeof weqDriftRange !== 'undefined' && weq.driftRange != null) weqDriftRange = weq.driftRange;
                 if (typeof weqDriftScale !== 'undefined' && weq.driftScale != null) weqDriftScale = weq.driftScale;
@@ -381,6 +388,7 @@ function restoreFromHost() {
                 if (typeof weqQModSpeed !== 'undefined' && weq.qModSpeed != null) weqQModSpeed = weq.qModSpeed;
                 if (typeof weqQModDepth !== 'undefined' && weq.qModDepth != null) weqQModDepth = weq.qModDepth;
                 if (typeof weqQModShape !== 'undefined' && weq.qModShape != null) weqQModShape = weq.qModShape;
+                if (typeof weqQModSpread !== 'undefined' && weq.qModSpread != null) weqQModSpread = weq.qModSpread;
                 if (typeof weqQLoCut !== 'undefined' && weq.qLoCut != null) weqQLoCut = weq.qLoCut;
                 if (typeof weqQHiCut !== 'undefined' && weq.qHiCut != null) weqQHiCut = weq.qHiCut;
 
@@ -388,6 +396,7 @@ function restoreFromHost() {
                 if (typeof weqSplitMode !== 'undefined' && weq.splitMode != null) weqSplitMode = weq.splitMode;
                 if (typeof weqOversample !== 'undefined' && weq.oversample != null) weqOversample = weq.oversample;
                 if (typeof _weqSplitSavedGains !== 'undefined' && weq.splitSavedGains != null) _weqSplitSavedGains = weq.splitSavedGains;
+                if (typeof weqModEnabled !== 'undefined' && weq.modEnabled != null) weqModEnabled = weq.modEnabled;
             }
             // Show WrongEQ button if mode 2, sync restored state to C++
             if (typeof weqSetVisible === 'function') weqSetVisible(routingMode === 2);
@@ -404,7 +413,7 @@ function restoreFromHost() {
                 }, 1500);
             }
             // Auto-start animation if it was running (speed or drift active)
-            var needsAnim = (weqAnimSpeed > 0) || (Math.abs(weqDrift) > 0 && weqDriftRange > 0) || (weqDriftContinuous && weqDriftRange > 0);
+            var needsAnim = (typeof _weqNeedsAnim === 'function') ? _weqNeedsAnim() : ((weqAnimSpeed > 0) || (Math.abs(weqDrift) > 0 && weqDriftRange > 0) || (weqDriftContinuous && weqDriftRange > 0));
             if (routingMode === 2 && needsAnim && typeof weqAnimStart === 'function') weqAnimStart();
             // Restore also from getFullState response
             if (result.routingMode !== undefined && !(saved && saved.routingMode !== undefined)) {

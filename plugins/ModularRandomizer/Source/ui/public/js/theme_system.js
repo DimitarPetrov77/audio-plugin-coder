@@ -82,6 +82,11 @@ var THEMES = {
             '--si-morph-bg': 'rgba(64,184,160,0.12)',
             '--si-shapes-bg': 'rgba(216,80,64,0.12)',
 
+            // ── LINK ──────────────────────────────────────────────────
+            '--link-color': '#E8A840',
+            '--si-link-bg': 'color-mix(in srgb, #E8A840 14%, transparent)',
+            '--lk-link-track': '#2A2010', '--lk-link-value': '#E8A840', '--lk-link-dot': '#F0C070',
+
             // ── FIRE BUTTON ───────────────────────────────────────────
             '--fire-text': '#0C0E14',
             '--fire-active-bg': '#E8A840',  // amber fire — unmistakable
@@ -259,6 +264,11 @@ var THEMES = {
             '--si-morph-bg': 'rgba(160,216,96,0.12)',
             '--si-shapes-bg': 'rgba(232,112,64,0.12)',
 
+            // LINK
+            '--link-color': '#00C8B4',
+            '--si-link-bg': 'color-mix(in srgb, #00C8B4 14%, transparent)',
+            '--lk-link-track': '#0A201C', '--lk-link-value': '#00C8B4', '--lk-link-dot': '#40E0D0',
+
             // FIRE BUTTON
             '--fire-text': '#0A1414',
             '--fire-active-bg': '#00C8B4',
@@ -423,6 +433,11 @@ var THEMES = {
             '--si-morph-bg': 'rgba(66,88,48,0.14)',
             '--si-shapes-bg': 'rgba(10,10,10,0.10)',
 
+            // LINK
+            '--link-color': '#1F5FA6',
+            '--si-link-bg': 'color-mix(in srgb, #1F5FA6 14%, transparent)',
+            '--lk-link-track': '#607090', '--lk-link-value': '#1F5FA6', '--lk-link-dot': '#4080C0',
+
             '--fire-text': '#F4F4F4',
             '--fire-active-bg': '#1A4F8A',
 
@@ -572,6 +587,11 @@ var THEMES = {
             '--si-morph-bg': 'rgba(92,168,136,0.12)',
             '--si-shapes-bg': 'rgba(184,80,64,0.12)',
 
+            // ── LINK ──────────────────────────────────────────────────
+            '--link-color': '#C8A050',
+            '--si-link-bg': 'color-mix(in srgb, #C8A050 14%, transparent)',
+            '--lk-link-track': '#201A0C', '--lk-link-value': '#C8A050', '--lk-link-dot': '#E0C080',
+
             // ── FIRE BUTTON ───────────────────────────────────────────
             '--fire-text': '#12100C',
             '--fire-active-bg': '#C8A050',
@@ -707,6 +727,11 @@ var THEMES = {
             '--si-morph-bg': 'rgba(136,204,68,0.14)',
             '--si-shapes-bg': 'rgba(200,120,90,0.14)',
 
+            // LINK
+            '--link-color': '#B8C840',
+            '--si-link-bg': 'color-mix(in srgb, #B8C840 14%, transparent)',
+            '--lk-link-track': '#1C2010', '--lk-link-value': '#B8C840', '--lk-link-dot': '#D0E060',
+
             '--fire-text': '#1A1A18', '--fire-active-bg': '#A0B030',
 
             '--slider-track': '#444438', '--slider-thumb': '#E0D8C0',
@@ -796,6 +821,11 @@ var THEMES = {
             '--si-env-bg': 'rgba(232,90,48,0.12)',
             '--si-smp-bg': 'rgba(58,170,224,0.12)',
             '--si-morph-bg': 'rgba(80,216,144,0.12)', '--si-shapes-bg': 'rgba(224,90,64,0.12)',
+
+            // LINK
+            '--link-color': '#D4A840',
+            '--si-link-bg': 'color-mix(in srgb, #D4A840 14%, transparent)',
+            '--lk-link-track': '#201A0C', '--lk-link-value': '#D4A840', '--lk-link-dot': '#E8C060',
 
             '--fire-text': '#111110',
             '--fire-active-bg': '#D4A840',
@@ -910,6 +940,11 @@ var THEMES = {
             '--si-morph-bg': 'rgba(160,200,64,0.12)',
             '--si-shapes-bg': 'rgba(212,96,80,0.12)',
 
+            // LINK
+            '--link-color': '#C8781E',
+            '--si-link-bg': 'color-mix(in srgb, #C8781E 14%, transparent)',
+            '--lk-link-track': '#201408', '--lk-link-value': '#C8781E', '--lk-link-dot': '#E09840',
+
             '--fire-text': '#100C06',
             '--fire-active-bg': '#C8781E',
 
@@ -954,189 +989,6 @@ var THEMES = {
         swatches: ['#120E08', '#252018', '#F0E8C8', '#C8781E', '#D4A030'],
     },
 
-    win98: {
-        name: 'Win 98',
-        vars: {
-            // ── BACKGROUNDS ──────────────────────────────────────────
-            // The classic silver-grey desktop and raised panel look.
-            '--bg-app': '#C0C0C0',
-            '--bg-panel': '#D4D0C8',
-            '--bg-cell': '#FFFFFF',
-            '--bg-cell-hover': '#E8E4DC',
-            '--bg-inset': '#404040',
-
-            // ── BORDERS ───────────────────────────────────────────────
-            // The iconic beveled 3D look — dark bottom-right, light top-left.
-            '--border': '#888888',
-            '--border-strong': '#404040',
-            '--border-focus': '#000080',  // navy focus — just like a selected title bar
-
-            // ── TEXT ──────────────────────────────────────────────────
-            '--text-primary': '#000000',
-            '--text-secondary': '#303030',
-            '--text-muted': '#606060',
-            '--input-text': '#000000',
-
-            // ── ACCENT ────────────────────────────────────────────────
-            // The unmistakable navy-blue of a selected title bar / highlighted menu item.
-            '--accent': '#000080',
-            '--accent-hover': '#0000AA',
-            '--accent-light': 'rgba(0,0,128,0.12)',
-            '--accent-border': 'rgba(0,0,128,0.40)',
-
-            // ── STATUS ────────────────────────────────────────────────
-            '--midi-dot': '#008000',  // classic Windows green
-
-            '--locked-bg': 'rgba(192,0,0,0.12)',
-            '--locked-border': 'rgba(192,0,0,0.40)',
-            '--locked-icon': '#C00000',
-
-            '--auto-lock-bg': 'rgba(128,128,0,0.12)',
-            '--auto-lock-border': 'rgba(128,128,0,0.30)',
-
-            // ── MODE COLORS ───────────────────────────────────────────
-            // The Windows 16-color palette — unapologetically 4-bit.
-            '--rand-color': '#0000DD',   // darker blue visible on light bg
-            '--env-color': '#CC6600',    // dark orange visible on light bg
-            '--sample-color': '#006600', // dark green visible on light bg
-            '--morph-color': '#006666',  // dark teal
-            '--shapes-color': '#AA0000', // dark red
-
-            '--thumb-color': '#606060',
-
-            // ── KNOBS ─────────────────────────────────────────────────
-            '--knob-track': '#A0A0A0',
-            '--knob-value': '#000080',   // navy sweep
-            '--knob-dot': '#000000',
-
-            // ── PLUGIN CARD ───────────────────────────────────────────
-            '--pf-bg': '#D4D0C8',
-            '--pf-border': '#707070',
-            '--pf-text': '#303030',
-
-            '--ph-bg': '#000080',        // title bar blue
-            '--ph-border': '#404040',
-            '--ph-text': '#FFFFFF',      // white text on blue title bar
-
-            // ── LINKED KNOBS (mode-tinted light bg) ──────────────────
-            '--lk-rand-track': '#C8C8E8', '--lk-rand-value': '#0000DD', '--lk-rand-dot': '#0000AA',
-            '--lk-env-track': '#E8D8C0', '--lk-env-value': '#CC6600', '--lk-env-dot': '#AA5500',
-            '--lk-smp-track': '#C0DCC0', '--lk-smp-value': '#006600', '--lk-smp-dot': '#005500',
-            '--lk-morph-track': '#C0DCD8', '--lk-morph-value': '#006666', '--lk-morph-dot': '#005555',
-            '--lk-shapes-track': '#DCC0C0', '--lk-shapes-value': '#AA0000', '--lk-shapes-dot': '#880000',
-
-            // ── SOURCE INDICATORS ─────────────────────────────────────
-            '--si-rand-bg': 'rgba(0,0,255,0.10)',
-            '--si-env-bg': 'rgba(255,128,0,0.10)',
-            '--si-smp-bg': 'rgba(0,128,0,0.10)',
-            '--si-morph-bg': 'rgba(0,128,128,0.10)',
-            '--si-shapes-bg': 'rgba(192,0,0,0.10)',
-
-            // ── FIRE BUTTON ───────────────────────────────────────────
-            '--fire-text': '#FFFFFF',
-            '--fire-active-bg': '#000080',
-
-            // ── ARC / RANGE ───────────────────────────────────────────
-
-
-            // ── SLIDER ────────────────────────────────────────────────
-            '--slider-track': '#707070',
-            '--slider-thumb': '#E8E4DC',
-
-            // ── PARAM BAR ─────────────────────────────────────────────
-            '--bar-track': '#A0A0A0',
-            '--bar-fill': '#000080',
-
-            // ── CARD BUTTONS ──────────────────────────────────────────
-            '--card-btn-bg': '#D4D0C8',
-            '--card-btn-border': '#707070',
-            '--card-btn-text': '#000000',
-            '--card-btn-hover': '#E8E4DC',
-
-            // ── SNAP RING ─────────────────────────────────────────────
-            '--snap-ring-color': '#000080',
-            '--snap-ring-opacity': '0.60',
-
-            // ── LANE / AUTOMATION ─────────────────────────────────────
-            '--lane-color': '#4444FF',
-            // Lane grid overrides for dark canvas bg
-            '--lane-grid': 'rgba(255,255,255,0.07)',
-            '--lane-grid-label': 'rgba(255,255,255,0.22)',
-            '--lane-playhead': 'rgba(255,255,255,0.70)',
-            '--lane-active': '#00CC00',
-
-            // ── RANGE ARC ─────────────────────────────────────────────
-            '--range-arc': '#0000FF',
-
-            // ── SCROLLBAR ─────────────────────────────────────────────
-            '--scrollbar-thumb': '#A0A0A0',
-            '--scrollbar-track': '#D4D0C8',
-
-            // ── BUS CONTROLS ──────────────────────────────────────────
-            '--bus-mute-bg': '#C00000', '--bus-mute-text': '#FFFFFF',
-            '--bus-solo-bg': '#C0C000', '--bus-solo-text': '#000000',
-            '--bus-group-tint': '8%',
-            '--bus-header-tint': '15%',
-            '--bus-badge-text': '#FFFFFF',
-
-            // ── TOASTS ────────────────────────────────────────────────
-            '--toast-success-bg': 'linear-gradient(135deg,#D4E8D4,#C8DCC8)',
-            '--toast-success-border': '#008000',
-            '--toast-error-bg': 'linear-gradient(135deg,#E8D0D0,#DCC4C4)',
-            '--toast-error-border': '#C00000',
-            '--toast-info-bg': 'linear-gradient(135deg,#D4D0C8,#C8C4BC)',
-            '--toast-info-border': '#000080',
-            '--toast-text': '#000000',
-
-            '--preset-flash-color': '#000080',
-            '--preset-flash-glow': 'rgba(0,0,128,0.35)',
-
-            // ── CANVAS OVERRIDE (keep canvases dark in light theme) ──
-            '--canvas-bg': '#1A1A2C',
-            '--canvas-text': '#B0B0CC',
-            '--canvas-grid': 'rgba(255,255,255,0.08)',
-            '--canvas-grid-label': 'rgba(255,255,255,0.22)',
-
-            // ── WRONGEQ OVERRIDES (dark panels in light theme) ──
-            '--weq-panel-bg': '#1C1C2A',
-            '--weq-panel-border': '#3A3A58',
-            '--weq-panel-text': '#C0C0D8',
-            '--weq-panel-muted': '#808098',
-            '--weq-side-bg': '#12121E',
-            '--weq-cell-bg': '#282840',
-            '--weq-cell-hover': '#34344C'
-        },
-
-        bcolors: [
-            '#000080',  // navy — primary
-            '#0000DD',  // blue — rand
-            '#CC6600',  // dark orange — env
-            '#006600',  // dark green — sample
-            '#006666',  // dark teal — morph
-            '#AA0000',  // dark red — shapes
-            '#800080',  // purple
-            '#808000',  // olive
-        ],
-
-        busColors: [
-            '#000080',
-            '#800080',
-            '#0000FF',
-            '#CC6600',
-            '#006600',
-            '#006666',
-            '#AA0000',
-            '#808000',
-        ],
-
-        swatches: ['#C0C0C0', '#D4D0C8', '#000080', '#006600', '#AA0000'],
-    },
-
-    // ─────────────────────────────────────────────────────────────────
-    // WARM TAPE
-    // Analog tape / Neve / SSL mastering suite.
-    // Dark mahogany panels, warm ivory text, VU yellow accent.
-    // ─────────────────────────────────────────────────────────────────
     warm_tape: {
         name: 'Warm Tape',
         vars: {
@@ -1201,6 +1053,11 @@ var THEMES = {
             '--si-morph-bg': 'rgba(152,208,88,0.12)',
             '--si-shapes-bg': 'rgba(216,104,72,0.12)',
 
+            // LINK
+            '--link-color': '#E8C040',
+            '--si-link-bg': 'color-mix(in srgb, #E8C040 14%, transparent)',
+            '--lk-link-track': '#201C0C', '--lk-link-value': '#E8C040', '--lk-link-dot': '#F0D868',
+
             '--fire-text': '#120A04',
             '--fire-active-bg': '#E8C040',
 
@@ -1244,39 +1101,6 @@ var THEMES = {
         busColors: ['#40341A', '#E8C040', '#E06828', '#60B8D8', '#98D058', '#D86848', '#88CC44', '#C0A870'],
         swatches: ['#160E06', '#2C2418', '#F4ECD8', '#E8C040', '#E06828'],
     },
-    // ─────────────────────────────────────────────────────────────────
-    // DEEP SPACE
-    //
-    // Concept: the inside of a precision scientific instrument.
-    // Particle physics control room. Telescope array ops.
-    // The kind of screen where the data IS the aesthetic.
-    //
-    // Design principles:
-    //   1. Chrome recedes. Content comes forward.
-    //   2. One warm color in a cold environment commands attention.
-    //   3. Structure comes from elevation, not borders.
-    //   4. Mode colors are a language — five distinct hue families,
-    //      one meaning each, nothing shared.
-    //   5. The playhead is the brightest thing on screen when playing.
-    //
-    // Layer model:
-    //   L0  #0D1117  outer shell — nearly black, slight blue cast
-    //   L1  #161B22  panel surfaces — plugin blocks, section headers
-    //   L2  #1C2333  content areas — canvas, param lists, inset cards
-    //   L3  #222D3F  interactive rows — hovered cells, active states
-    //   L4  #090D12  sunken wells — inset boxes, below-surface
-    //
-    // Color language:
-    //   #E8D9A0  desaturated gold  → accent / primary action / transport
-    //   #00B4D8  ice blue          → rand / probability / cold chance
-    //   #E06C1A  burn orange       → envelope / attack / energy
-    //   #2CB67D  terminal green    → sample / playback / data stream
-    //   #40B8CC  bright teal       → morph / transformation / spectrum
-    //   #E8553A  warm vermilion    → shapes / geometric / precision
-    //   #3DD68C  signal green      → status ok / running / active handle
-    //   #F85149  alert red         → error / locked / danger
-    //   #D4A500  caution amber     → solo / warning
-    // ─────────────────────────────────────────────────────────────────
 
     deep_space: {
         name: 'Deep Space',
@@ -1357,6 +1181,11 @@ var THEMES = {
             '--si-smp-bg': 'rgba(44,182,125,0.12)',
             '--si-morph-bg': 'rgba(64,184,204,0.12)',
             '--si-shapes-bg': 'rgba(255,107,157,0.12)',
+
+            // ── LINK ──────────────────────────────────────────────────
+            '--link-color': '#E8D9A0',
+            '--si-link-bg': 'color-mix(in srgb, #E8D9A0 14%, transparent)',
+            '--lk-link-track': '#1C1A10', '--lk-link-value': '#E8D9A0', '--lk-link-dot': '#F0E8C0',
 
             // ── FIRE BUTTON ───────────────────────────────────────────
             '--fire-text': '#0D1117',  // 13.39:1 on gold ✅
@@ -1524,6 +1353,11 @@ var THEMES = {
             '--si-morph-bg': 'rgba(0,204,170,0.12)',
             '--si-shapes-bg': 'rgba(255,34,102,0.12)',
 
+            // ── LINK ──────────────────────────────────────────────────
+            '--link-color': '#FFFFFF',
+            '--si-link-bg': 'color-mix(in srgb, #FFFFFF 14%, transparent)',
+            '--lk-link-track': '#222222', '--lk-link-value': '#FFFFFF', '--lk-link-dot': '#E0E0E0',
+
             // ── FIRE BUTTON ───────────────────────────────────────────
             '--fire-text': '#000000',
             '--fire-active-bg': '#FFFFFF',
@@ -1609,340 +1443,6 @@ var THEMES = {
         ],
 
         swatches: ['#000000', '#1A1A1A', '#FFFFFF', '#00AAFF', '#FF4400'],
-    },
-    obsidian: {
-        name: 'Obsidian',
-        vars: {
-            // ── BACKGROUNDS ──────────────────────────────────────────
-            // Ultra-dark with the faintest violet undertone — reads as premium
-            // without looking "themed". Think iZotope, FabFilter, Arturia.
-            '--bg-app': '#0A0A10',
-            '--bg-panel': '#121218',
-            '--bg-cell': '#1A1A22',
-            '--bg-cell-hover': '#22222C',
-            '--bg-inset': '#06060A',
-            '--canvas-bg': '#080808',
-
-            // ── BORDERS ───────────────────────────────────────────────
-            // Barely-there edges — structure comes from elevation, not lines.
-            '--border': '#28283A',
-            '--border-strong': '#383850',
-            '--border-focus': '#8070FF',  // violet focus ring — instant premium signal
-
-            // ── TEXT ──────────────────────────────────────────────────
-            '--text-primary': '#ECEAF4',  // cool white with a hint of lavender
-            '--text-secondary': '#8884A0',
-            '--text-muted': '#6A6680',
-            '--input-text': '#ECEAF4',
-
-            // ── ACCENT ────────────────────────────────────────────────
-            // Electric violet — the color that screams "this plugin costs $200".
-            // Sits between FabFilter's orange and iZotope's blue — owns its lane.
-            '--accent': '#8070FF',
-            '--accent-hover': '#9688FF',
-            '--accent-light': 'rgba(128,112,255,0.08)',
-            '--accent-border': 'rgba(128,112,255,0.28)',
-
-            // ── STATUS ────────────────────────────────────────────────
-            '--midi-dot': '#50E880',  // clean bright green — unmistakable signal
-
-            '--locked-bg': 'rgba(255,56,80,0.10)',
-            '--locked-border': 'rgba(255,56,80,0.30)',
-            '--locked-icon': '#FF3850',
-
-            '--auto-lock-bg': 'rgba(255,190,40,0.08)',
-            '--auto-lock-border': 'rgba(255,190,40,0.24)',
-
-            // ── MODE COLORS ───────────────────────────────────────────
-            // Luminous, slightly neon — pop hard on the dark base but stay
-            // refined because the base is near-black, not mid-grey.
-            '--rand-color': '#4CB0FF',   // crisp sky blue
-            '--env-color': '#FF9030',    // warm amber-orange
-            '--sample-color': '#50E880', // vivid green
-            '--morph-color': '#30D8C0',  // electric cyan-mint
-            '--shapes-color': '#FF4060', // hot pink-red — the "danger" color
-
-            '--thumb-color': '#8884A0',
-
-            // ── KNOBS ─────────────────────────────────────────────────
-            '--knob-track': '#1A1A22',
-            '--knob-value': '#8070FF',   // violet arc — the hero element
-            '--knob-dot': '#ECEAF4',
-
-            // ── PLUGIN CARD ───────────────────────────────────────────
-            '--pf-bg': '#0A0A10',
-            '--pf-border': '#28283A',
-            '--pf-text': '#6A6680',
-
-            '--ph-bg': '#0A0A10',
-            '--ph-border': '#28283A',
-            '--ph-text': '#ECEAF4',
-
-            // ── LINKED KNOBS (mode-tinted dark bg) ───────────────────
-            '--lk-rand-track': '#0C1420', '--lk-rand-value': '#4CB0FF', '--lk-rand-dot': '#70C2FF',
-            '--lk-env-track': '#1C1208', '--lk-env-value': '#FF9030', '--lk-env-dot': '#FFA858',
-            '--lk-smp-track': '#0A1C10', '--lk-smp-value': '#50E880', '--lk-smp-dot': '#70F098',
-            '--lk-morph-track': '#081C1A', '--lk-morph-value': '#30D8C0', '--lk-morph-dot': '#58E4D0',
-            '--lk-shapes-track': '#1C0810', '--lk-shapes-value': '#FF4060', '--lk-shapes-dot': '#FF6880',
-
-            // ── SOURCE INDICATORS ─────────────────────────────────────
-            '--si-rand-bg': 'rgba(76,176,255,0.10)',
-            '--si-env-bg': 'rgba(255,144,48,0.10)',
-            '--si-smp-bg': 'rgba(80,232,128,0.10)',
-            '--si-morph-bg': 'rgba(48,216,192,0.10)',
-            '--si-shapes-bg': 'rgba(255,64,96,0.10)',
-
-            // ── FIRE BUTTON ───────────────────────────────────────────
-            '--fire-text': '#FFFFFF',
-            '--fire-active-bg': '#8070FF',
-
-            // ── ARC / RANGE ───────────────────────────────────────────
-
-
-            // ── SLIDER ────────────────────────────────────────────────
-            '--slider-track': '#28283A',
-            '--slider-thumb': '#8070FF',
-
-            // ── PARAM BAR ─────────────────────────────────────────────
-            '--bar-track': '#0A0A10',
-            '--bar-fill': '#8070FF',
-
-            // ── CARD BUTTONS ──────────────────────────────────────────
-            '--card-btn-bg': '#0A0A10',
-            '--card-btn-border': '#28283A',
-            '--card-btn-text': '#6A6680',
-            '--card-btn-hover': '#121218',
-
-            // ── SNAP RING ─────────────────────────────────────────────
-            '--snap-ring-color': '#8070FF',
-            '--snap-ring-opacity': '0.55',
-
-            // ── LANE / AUTOMATION ─────────────────────────────────────
-            '--lane-color': '#8070FF',                    // violet curve — looks incredible on dark bg
-            '--lane-grid': 'rgba(236,234,244,0.04)',
-            '--lane-grid-label': 'rgba(236,234,244,0.16)',
-            '--lane-playhead': 'rgba(236,234,244,0.85)',
-            '--lane-active': '#50E880',                   // green handle pops against violet
-
-            // ── RANGE ARC ─────────────────────────────────────────────
-            '--range-arc': '#4CB0FF',
-
-            // ── SCROLLBAR ─────────────────────────────────────────────
-            '--scrollbar-thumb': '#383850',
-            '--scrollbar-track': 'transparent',
-
-            // ── BUS CONTROLS ──────────────────────────────────────────
-            '--bus-mute-bg': '#D02040', '--bus-mute-text': '#FFFFFF',
-            '--bus-solo-bg': '#D8AE20', '--bus-solo-text': '#000000',
-            '--bus-group-tint': '10%',
-            '--bus-header-tint': '18%',
-            '--bus-badge-text': '#000000',
-
-            // ── TOASTS ────────────────────────────────────────────────
-            '--toast-success-bg': 'linear-gradient(135deg,#081C10,#040E08)',
-            '--toast-success-border': '#50E880',
-            '--toast-error-bg': 'linear-gradient(135deg,#1C080C,#100406)',
-            '--toast-error-border': '#FF4060',
-            '--toast-info-bg': 'linear-gradient(135deg,#0E0E18,#08080E)',
-            '--toast-info-border': '#8070FF',
-            '--toast-text': '#ECEAF4',
-
-            '--preset-flash-color': '#8070FF',
-            '--preset-flash-glow': 'rgba(128,112,255,0.45)',
-        },
-
-        bcolors: [
-            '#ECEAF4',  // cool white — primary
-            '#4CB0FF',  // sky blue — rand
-            '#FF9030',  // amber — env
-            '#50E880',  // vivid green — sample
-            '#30D8C0',  // cyan-mint — morph
-            '#FF4060',  // hot pink-red — shapes
-            '#6A6680',  // muted lavender-grey
-            '#383850',  // deep slate
-        ],
-
-        busColors: [
-            '#7060CC',
-            '#ECEAF4',
-            '#4CB0FF',
-            '#FF9030',
-            '#50E880',
-            '#30D8C0',
-            '#FF4060',
-            '#B080E0',
-        ],
-
-        swatches: ['#0A0A10', '#1A1A22', '#8070FF', '#50E880', '#FF4060'],
-    },
-    deep_forest: {
-        name: 'Deep Forest',
-        vars: {
-            // ── BACKGROUNDS ──────────────────────────────────────────
-            '--bg-app': '#080F0A',  // L0 — near black, strong green cast
-            '--bg-panel': '#101A12',  // L1 — first visible green
-            '--bg-cell': '#162214',  // L2 — clearly dark green
-            '--bg-cell-hover': '#1C2C1E',  // L3 — perceptibly lighter
-            '--bg-inset': '#050A06',  // L4
-            '--canvas-bg': '#080808',
-
-
-            // ── BORDERS ───────────────────────────────────────────────
-            // Structure comes from elevation, not drawn lines.
-            '--border': '#1A2A1C',  // subtle green-tinted edge
-            '--border-strong': '#2E4830',  // emphasized separators
-            '--border-focus': '#D4B86A',  // gold focus ring
-
-            // ── TEXT ──────────────────────────────────────────────────
-            '--text-primary': '#E8F0E8',  // 15.32:1 on panel ✅ — slightly green-white
-            '--text-secondary': '#7A9E7E',  //  5.96:1 on panel ✅ — muted forest green
-            '--text-muted': '#6E9472',  //  5.21:1 panel, 4.82:1 cell ✅
-            '--input-text': '#E8F0E8',
-
-            // ── ACCENT ────────────────────────────────────────────────
-            // Warm gold — the only warm color on a cold green surface.
-            // Draws the eye exactly as a VU needle does on a dark panel.
-            '--accent': '#D4B86A',  // 9.22:1 ✅
-            '--accent-hover': '#E8CC88',
-            '--accent-light': 'rgba(212,184,106,0.12)',
-            '--accent-border': 'rgba(212,184,106,0.32)',
-
-            // ── STATUS ────────────────────────────────────────────────
-            '--midi-dot': '#44DD88',  // bright signal green — 10.13:1 ✅
-
-            '--locked-bg': 'rgba(255,68,68,0.12)',
-            '--locked-border': 'rgba(255,68,68,0.32)',
-            '--locked-icon': '#FF4444',  // 5.23:1 ✅
-
-            '--auto-lock-bg': 'rgba(212,165,0,0.10)',
-            '--auto-lock-border': 'rgba(212,165,0,0.28)',
-
-            // ── MODE COLORS ───────────────────────────────────────────
-            // Five hues chosen to be distinct from each other AND
-            // from the dark green surfaces. No green mode color —
-            // the entire UI is green.
-            '--rand-color': '#44AAFF',  // 7.16:1 — electric blue (clearly non-green)
-            '--env-color': '#E87020',  // 5.74:1 — burn orange
-            '--sample-color': '#2ECCAA',  // 8.77:1 — seafoam (green-shifted, data family)
-            '--morph-color': '#44CCAA',  // 8.77:1 — seafoam teal
-            '--shapes-color': '#E85030',  // 5.54:1 — warm red
-
-            '--thumb-color': '#7A9E7E',
-
-            // ── KNOBS ─────────────────────────────────────────────────
-            '--knob-track': '#162214',  // matches bg_cell — sunken
-            '--knob-value': '#D4B86A',  // gold arc
-            '--knob-dot': '#E8CC88',  // bright gold tip
-
-            // ── PLUGIN CARD ───────────────────────────────────────────
-            '--pf-bg': '#080F0A',  // card chrome = L0, recedes maximally
-            '--pf-border': '#1A2A1C',
-            '--pf-text': '#7A9E7E',  // 6.48:1 on pf-bg ✅
-
-            '--ph-bg': '#080F0A',
-            '--ph-border': '#1A2A1C',
-            '--ph-text': '#E8F0E8',  // 16.59:1 ✅
-
-            // ── LINKED KNOBS (mode-tinted dark green bg) ─────────────
-            '--lk-rand-track': '#10242C', '--lk-rand-value': '#44AAFF', '--lk-rand-dot': '#6DBCFF',
-            '--lk-env-track': '#271C0D', '--lk-env-value': '#E87020', '--lk-env-dot': '#ED8F51',
-            '--lk-smp-track': '#0D2920', '--lk-smp-value': '#2ECCAA', '--lk-smp-dot': '#5BD7BC',
-            '--lk-morph-track': '#0D2920', '--lk-morph-value': '#44CCAA', '--lk-morph-dot': '#66DDBB',
-            '--lk-shapes-track': '#2A1008', '--lk-shapes-value': '#E85030', '--lk-shapes-dot': '#F07850',
-
-            // ── SOURCE INDICATORS ─────────────────────────────────────
-            '--si-rand-bg': 'rgba(68,170,255,0.14)',
-            '--si-env-bg': 'rgba(232,112,32,0.14)',
-            '--si-smp-bg': 'rgba(46,204,170,0.14)',
-            '--si-morph-bg': 'rgba(68,204,170,0.14)',
-            '--si-shapes-bg': 'rgba(255,85,128,0.14)',
-
-            // ── FIRE BUTTON ───────────────────────────────────────────
-            '--fire-text': '#080F0A',  // 10.03:1 on gold ✅
-            '--fire-active-bg': '#D4B86A',
-
-            // ── ARC / RANGE ───────────────────────────────────────────
-
-
-            // ── SLIDER ────────────────────────────────────────────────
-            '--slider-track': '#1C2C1E',
-            '--slider-thumb': '#7A9E7E',
-
-            // ── PARAM BAR ─────────────────────────────────────────────
-            '--bar-track': '#080F0A',
-            '--bar-fill': '#B89A50',  // slightly deeper gold
-
-            // ── CARD BUTTONS ──────────────────────────────────────────
-            '--card-btn-bg': '#080F0A',
-            '--card-btn-border': '#1A2A1C',
-            '--card-btn-text': '#6E9472',
-            '--card-btn-hover': '#101A12',
-
-            // ── SNAP RING ─────────────────────────────────────────────
-            '--snap-ring-color': '#D4B86A',
-            '--snap-ring-opacity': '0.50',
-
-            // ── LANE / AUTOMATION ─────────────────────────────────────
-            // Canvas bg is bg_cell — dark green content area.
-            // Lane curve: warm gold so it reads as the actively drawn data,
-            // distinct from the green surface. Playhead: near-white max brightness.
-            '--lane-color': '#D4B86A',               // gold curve — data on green
-            '--lane-grid': 'rgba(232,240,232,0.05)',
-            '--lane-grid-label': 'rgba(232,240,232,0.20)',
-            '--lane-playhead': 'rgba(255,255,255,0.88)', // brightest element when playing
-            '--lane-active': '#44DD88',                // bright green handle — status color
-
-            // ── RANGE ARC ─────────────────────────────────────────────
-            '--range-arc': '#44AAFF',
-
-            // ── SCROLLBAR ─────────────────────────────────────────────
-            '--scrollbar-thumb': '#2E4830',
-            '--scrollbar-track': 'transparent',
-
-            // ── BUS CONTROLS ──────────────────────────────────────────
-            '--bus-mute-bg': '#C62828', '--bus-mute-text': '#FFFFFF',  // 5.62:1 ✅
-            '--bus-solo-bg': '#D4A500', '--bus-solo-text': '#000000',  // 9.18:1 ✅
-            '--bus-group-tint': '12%',
-            '--bus-header-tint': '20%',
-            '--bus-badge-text': '#080F0A',
-
-            // ── TOASTS ────────────────────────────────────────────────
-            '--toast-success-bg': 'linear-gradient(135deg,#0A1E0E,#060E08)',
-            '--toast-success-border': '#44DD88',
-            '--toast-error-bg': 'linear-gradient(135deg,#240808,#140404)',
-            '--toast-error-border': '#FF4444',
-            '--toast-info-bg': 'linear-gradient(135deg,#0E1A10,#080F0A)',
-            '--toast-info-border': '#D4B86A',
-            '--toast-text': '#E8F0E8',
-
-            '--preset-flash-color': '#44DD88',
-            '--preset-flash-glow': 'rgba(68,221,136,0.40)',
-            '--drag-highlight': '#44DD88',
-        },
-
-        bcolors: [
-            '#D4B86A',  // gold    — accent
-            '#44AAFF',  // blue    — rand
-            '#E87020',  // orange  — env
-            '#2ECCAA',  // mint    — sample
-            '#44CCAA',  // teal   — morph
-            '#E85030',  // red    — shapes
-            '#44DD88',  // green   — active/status
-            '#7A9E7E',  // muted   — neutral
-        ],
-
-        busColors: [
-            '#2E4830',  // dark green neutral
-            '#D4B86A',  // gold
-            '#44AAFF',  // blue
-            '#E87020',  // orange
-            '#2ECCAA',  // mint
-            '#44CCAA',  // teal
-            '#E85030',  // red
-            '#44DD88',  // bright green
-        ],
-
-        swatches: ['#080F0A', '#162214', '#E8F0E8', '#D4B86A', '#44AAFF'],
     }
 };
 

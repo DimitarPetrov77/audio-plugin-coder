@@ -46,41 +46,66 @@ function ensureLanes(b) {
         if (!b.lanes[i]._overlayLanes) b.lanes[i]._overlayLanes = [];
     }
 
-    // Find PIDs not yet in any lane — batch into ONE auto-lane (not one per PID!)
+    // Find PIDs not yet in any lane
     var assignedPids = {};
     b.lanes.forEach(function (l) {
         l.pids.forEach(function (pid) { assignedPids[pid] = true; });
     });
     var unassigned = tArr.filter(function (pid) { return !assignedPids[pid]; });
     if (unassigned.length > 0) {
-        b.lanes.push({
-            pids: unassigned,
-            color: LANE_COLORS[b.lanes.length % LANE_COLORS.length],
-            pts: [{ x: 0, y: 0.5 }, { x: 1, y: 0.5 }],
-            loopLen: '1/1',
-            freeSecs: 4,
-            depth: 100,
-            drift: 0,
-            driftRange: 5,
-            driftScale: '1/1',
-            warp: 0,
-            steps: 0,
+        // If a morph lane exists, route unassigned PIDs into it instead of creating a new curve lane
+        var morphLane = null;
+        for (var mi = 0; mi < b.lanes.length; mi++) {
+            if (b.lanes[mi].morphMode) { morphLane = b.lanes[mi]; break; }
+        }
+        if (morphLane) {
+            unassigned.forEach(function (pid) {
+                if (morphLane.pids.indexOf(pid) < 0) morphLane.pids.push(pid);
+            });
+            // Auto-set _captureSource to the plugin owning the new params
+            if (!morphLane._captureSource && typeof pluginBlocks !== 'undefined') {
+                var firstPid = unassigned[0];
+                var fp = PMap[firstPid];
+                if (fp) {
+                    for (var pi = 0; pi < pluginBlocks.length; pi++) {
+                        if (pluginBlocks[pi].hostId === fp.hostId) {
+                            morphLane._captureSource = pluginBlocks[pi].id;
+                            break;
+                        }
+                    }
+                }
+            }
+        } else {
+            // No morph lane — batch into one auto curve lane
+            b.lanes.push({
+                pids: unassigned,
+                color: LANE_COLORS[b.lanes.length % LANE_COLORS.length],
+                pts: [{ x: 0, y: 0.5 }, { x: 1, y: 0.5 }],
+                loopLen: '1/1',
+                freeSecs: 4,
+                depth: 100,
+                drift: 0,
+                driftRange: 5,
+                driftScale: '1/1',
+                warp: 0,
+                steps: 0,
 
-            interp: 'smooth',
-            playMode: 'forward',
-            synced: true,
-            muted: false,
-            collapsed: false,
-            trigMode: 'loop',
-            trigSource: 'manual',
-            trigMidiNote: -1,
-            trigMidiCh: 0,
-            trigThreshold: -12,
-            trigAudioSrc: 'main',
-            trigRetrigger: true,
-            trigHold: false,
-            _overlayLanes: []
-        });
+                interp: 'smooth',
+                playMode: 'forward',
+                synced: true,
+                muted: false,
+                collapsed: false,
+                trigMode: 'loop',
+                trigSource: 'manual',
+                trigMidiNote: -1,
+                trigMidiCh: 0,
+                trigThreshold: -12,
+                trigAudioSrc: 'main',
+                trigRetrigger: true,
+                trigHold: false,
+                _overlayLanes: []
+            });
+        }
     }
 }
 
@@ -581,6 +606,7 @@ function laneCanvasSetup(b) {
             var li = parseInt(laneEl.dataset.li);
             var lane = b.lanes[li];
             if (!lane) return;
+            pushUndoSnapshot();
             pids.forEach(function (pid) {
                 var pp = PMap[pid];
                 if (pp && !pp.lk) {

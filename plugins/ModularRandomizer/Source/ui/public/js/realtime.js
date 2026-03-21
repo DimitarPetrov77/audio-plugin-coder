@@ -30,30 +30,51 @@ function processRealTimeData() {
             for (var lii = 0; lii < blk.lanes.length; lii++) {
                 var ln = blk.lanes[lii];
                 if (!ln || !ln.pids || ln.collapsed) continue;
-                if (!ln.morphMode) {
-                    // Curve lane: only update the selected param's live badge
-                    if (ln._selectedParamIdx != null && ln._selectedParamIdx >= 0 && ln.pids[ln._selectedParamIdx]) {
-                        var cp = PMap[ln.pids[ln._selectedParamIdx]];
-                        var ctxt = cp && cp.disp ? cp.disp : (cp ? (cp.v * 100).toFixed(0) + '%' : '');
-                        var cbdg = document.getElementById('cpvb-' + blk.id + '-' + lii);
-                        if (cbdg && cbdg.textContent !== ctxt) cbdg.textContent = ctxt;
+                if (ln._selectedParamIdx == null || ln._selectedParamIdx < 0) continue;
+                var selPid = ln.pids[ln._selectedParamIdx];
+                if (!selPid) continue;
+                var cp = PMap[selPid];
+                var ctxt = cp && cp.disp ? cp.disp : (cp ? (cp.v * 100).toFixed(0) + '%' : '');
+                var prefix = ln.morphMode ? 'mpvb-' : 'cpvb-';
+                var cbdg = document.getElementById(prefix + blk.id + '-' + lii);
+                if (cbdg && cbdg.textContent !== ctxt) cbdg.textContent = ctxt;
+            }
+        }
+        // Link block source sliders: sync slider position from PMap
+        for (var lbi = 0; lbi < blocks.length; lbi++) {
+            var lb = blocks[lbi];
+            if (!lb || lb.mode !== 'link' || !lb.expanded) continue;
+            // Source sliders
+            if (lb.linkSources) {
+                for (var lsi = 0; lsi < lb.linkSources.length; lsi++) {
+                    var ls = lb.linkSources[lsi];
+                    if (ls.pluginId < 0) continue; // skip macro sources
+                    var lsPid = ls.pluginId + ':' + ls.paramIndex;
+                    var lsP = PMap[lsPid];
+                    if (!lsP) continue;
+                    var lsSl = document.getElementById('linkSrcSlider-' + lb.id + '-' + lsi);
+                    if (lsSl && !lsSl._dragging) {
+                        var newPct = Math.round(lsP.v * 100);
+                        if (parseInt(lsSl.value) !== newPct) lsSl.value = newPct;
+                    }
+                    var lsVl = document.getElementById('linkSrcVal-' + lb.id + '-' + lsi);
+                    if (lsVl) {
+                        var lsTxt = lsP.disp || (Math.round(lsP.v * 100) + '%');
+                        if (lsVl.textContent !== lsTxt) lsVl.textContent = lsTxt;
                     }
                 }
             }
-        }
-        // Morph lanes: same pattern — only update the selected param's live badge
-        for (var mbi = 0; mbi < blocks.length; mbi++) {
-            var mb = blocks[mbi];
-            if (!mb || mb.mode !== 'lane' || !mb.lanes) continue;
-            for (var mli = 0; mli < mb.lanes.length; mli++) {
-                var ml = mb.lanes[mli];
-                if (!ml || !ml.morphMode || !ml.pids || ml.collapsed) continue;
-                if (ml._selectedParamIdx != null && ml._selectedParamIdx >= 0 && ml.pids[ml._selectedParamIdx]) {
-                    var mp = PMap[ml.pids[ml._selectedParamIdx]];
-                    var mt = mp && mp.disp ? mp.disp : (mp ? (mp.v * 100).toFixed(0) + '%' : '');
-                    var mbd = document.getElementById('mpvb-' + mb.id + '-' + mli);
-                    if (mbd && mbd.textContent !== mt) mbd.textContent = mt;
-                }
+            // Target live value badges
+            if (lb.targets) {
+                lb.targets.forEach(function (ltPid) {
+                    var ltP = PMap[ltPid];
+                    if (!ltP) return;
+                    var ltEl = document.getElementById('linkTgtLive-' + lb.id + '-' + ltPid.replace(':', '_'));
+                    if (ltEl) {
+                        var ltTxt = ltP.disp || Math.round((ltP.v || 0) * 100) + '%';
+                        if (ltEl.textContent !== ltTxt) ltEl.textContent = ltTxt;
+                    }
+                });
             }
         }
     }
@@ -168,11 +189,22 @@ function refreshParamDisplay() {
             if (ve) ve.textContent = p.disp || ((p.v * 100).toFixed(0) + '%');
         }
 
-        // Update knob SVG — always, even during drag of modulated params
+        // Update knob SVG — skip if nothing visual changed (cache key check)
         var knobEl = row.querySelector('.pr-knob');
         if (knobEl && typeof buildParamKnob === 'function') {
             var knobVal = (ri && ri.base !== undefined) ? ri.base : p.v;
-            knobEl.innerHTML = buildParamKnob(knobVal, 30, ri);
+            // Build a cheap cache key from ALL values that affect the SVG output
+            var knobKey = knobVal.toFixed(4) + '|' + p.v.toFixed(4);
+            if (ri) {
+                knobKey += '|' + (ri.range || 0).toFixed(3)
+                         + '|' + (ri.current !== undefined ? ri.current.toFixed(3) : 'x')
+                         + '|' + (ri.color || '')
+                         + '|' + (ri.polarity || '');
+            }
+            if (knobEl._knobKey !== knobKey) {
+                knobEl._knobKey = knobKey;
+                knobEl.innerHTML = buildParamKnob(knobVal, 30, ri);
+            }
         }
 
         // Update bar (skip for modulated during drag)
@@ -215,6 +247,19 @@ function setupRtDataListener() {
                             eb.envModOutput = cl;
                             // Mark targets dirty so arcs keep animating
                             if (eb.targets && eb.targets.size > 0) _modDirty = true;
+                        }
+                        // Link blocks also report via envLevels — store source value for arc animation
+                        if (eb && eb.mode === 'link') {
+                            eb.linkSourceValue = cl;
+                            if (!eb.linkModOutputs) eb.linkModOutputs = {};
+                            if (eb.targets && eb.targets.size > 0) {
+                                // Store the source value per target (unipolar 0..1)
+                                // The arc system uses this + depth (half-range) to draw offset from base
+                                eb.targets.forEach(function (pid) {
+                                    eb.linkModOutputs[pid] = cl;
+                                });
+                                _modDirty = true;
+                            }
                         }
                         // Fill bar — direct set, no CSS transition
                         var fl = document.getElementById('envFill-' + en.id);
@@ -480,7 +525,7 @@ function setupRtDataListener() {
                             }
                         }
                         // Store readback on block for arc animation (per-PID)
-                        var lnb = findBlock(lh.id);
+                        var lnb = lnbChk || findBlock(lh.id);
                         if (lnb && lnb.mode === 'lane' && lnb.lanes && lnb.lanes[lh.li]) {
                             var lane = lnb.lanes[lh.li];
                             // Store playhead position for overlay dynamic window

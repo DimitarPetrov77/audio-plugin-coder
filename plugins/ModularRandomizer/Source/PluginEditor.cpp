@@ -1008,6 +1008,23 @@ HostesaAudioProcessorEditor::HostesaAudioProcessorEditor (
                 }
             )
             .withNativeFunction (
+                "setEqPointFast",
+                [this] (const juce::Array<juce::var>& args,
+                        juce::WebBrowserComponent::NativeFunctionCompletion completion)
+                {
+                    // Fast path: setEqPointFast(pointIndex, field, value)
+                    // No JSON — direct atomic write to eqPoints[]
+                    if (args.size() >= 3)
+                    {
+                        int idx = (int) args[0];
+                        auto field = args[1].toString();
+                        double val = (double) args[2];
+                        audioProcessor.setEqPointFast (idx, field, val);
+                    }
+                    completion (juce::var ("ok"));
+                }
+            )
+            .withNativeFunction (
                 "setPluginBus",
                 [this] (const juce::Array<juce::var>& args,
                         juce::WebBrowserComponent::NativeFunctionCompletion completion)
@@ -1448,10 +1465,24 @@ void HostesaAudioProcessorEditor::timerCallback()
                     auto* pObj = new juce::DynamicObject();
                     pObj->setProperty ("id", juce::String (key));
                     pObj->setProperty ("v", (double) val);
-                    // Always send display text — plugin is source of truth
-                    auto disp = audioProcessor.getParamDisplayTextFast (
-                        idIt->second.pluginId, idIt->second.paramIndex);
-                    pObj->setProperty ("disp", disp);
+
+                    // Display text cache: only call the expensive getText() virtual
+                    // when the value has moved enough that the string would change.
+                    // Most plugins format to 1-2 decimal places, so 0.3% delta covers it.
+                    auto& dtc = dispTextCache[key];
+                    if (dtc.lastCalledAt < 0.0f
+                        || std::abs (val - dtc.lastCalledAt) > 0.003f)
+                    {
+                        auto newText = audioProcessor.getParamDisplayTextFast (
+                            idIt->second.pluginId, idIt->second.paramIndex);
+                        if (newText != dtc.text)
+                        {
+                            dtc.text = newText;
+                            pObj->setProperty ("disp", dtc.text);
+                        }
+                        dtc.lastCalledAt = val;
+                    }
+
                     paramUpdates.add (juce::var (pObj));
 
                     // Keep recently-changed alive while still changing
@@ -1548,9 +1579,22 @@ void HostesaAudioProcessorEditor::timerCallback()
                         auto* pObj = new juce::DynamicObject();
                         pObj->setProperty ("id", juce::String (key));
                         pObj->setProperty ("v", (double) val);
-                        // Only call getText for params that actually changed — not all idle params
-                        auto disp = audioProcessor.getParamDisplayTextFast (ident.pluginId, ident.paramIndex);
-                        pObj->setProperty ("disp", disp);
+
+                        // Display text cache: same optimization as Tier 1
+                        auto& dtc = dispTextCache[key];
+                        if (dtc.lastCalledAt < 0.0f
+                            || std::abs (val - dtc.lastCalledAt) > 0.003f)
+                        {
+                            auto newText = audioProcessor.getParamDisplayTextFast (
+                                ident.pluginId, ident.paramIndex);
+                            if (newText != dtc.text)
+                            {
+                                dtc.text = newText;
+                                pObj->setProperty ("disp", dtc.text);
+                            }
+                            dtc.lastCalledAt = val;
+                        }
+
                         paramUpdates.add (juce::var (pObj));
 
                         // Promote to fast poll — user is actively interacting
@@ -1571,6 +1615,19 @@ void HostesaAudioProcessorEditor::timerCallback()
                 }
 
                 tier2ScanOffset += BATCH_SIZE;
+
+                // Periodic cache cleanup (every ~10s): remove entries for params
+                // that no longer exist (plugin removed, etc.)
+                if (timerTickCount % 600 == 0 && dispTextCache.size() > paramIdentCache.size() * 2)
+                {
+                    for (auto it = dispTextCache.begin(); it != dispTextCache.end(); )
+                    {
+                        if (paramIdentCache.count (it->first) == 0)
+                            it = dispTextCache.erase (it);
+                        else
+                            ++it;
+                    }
+                }
             }
         }
 

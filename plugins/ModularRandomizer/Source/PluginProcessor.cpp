@@ -33,6 +33,8 @@ P::BlockMode P::parseBlockMode(const juce::String &s) {
     return BlockMode::ShapesRange;
   if (s == "lane")
     return BlockMode::Lane;
+  if (s == "link")
+    return BlockMode::Link;
   return BlockMode::Unknown;
 }
 P::TriggerType P::parseTriggerType(const juce::String &s) {
@@ -272,8 +274,12 @@ HostesaAudioProcessor::HostesaAudioProcessor()
   getSnapshotsDir().createDirectory();
   getImportDir().createDirectory();
 
-  // One-time migration from old flat ? new organized structure
+  // One-time migration from old flat → new organized structure
   migrateOldPresets();
+
+  // Pre-compute Hann window coefficients (used by FFT spectrum analyzer)
+  for (int i = 0; i < fftCurrentSize; ++i)
+      hannWindow[i] = 0.5f * (1.0f - std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) (fftCurrentSize - 1)));
 }
 
 HostesaAudioProcessor::~HostesaAudioProcessor() {
@@ -395,10 +401,10 @@ void HostesaAudioProcessor::prepareToPlay(double sampleRate,
           (juce::uint32)numCh, (juce::uint32)order,
           juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, false);
       eqOversampler->initProcessing((size_t)samplesPerBlock);
-      eqOversamplerReady = true;
+      eqOversamplerReady.store(true, std::memory_order_release);
     } else {
       eqOversampler.reset();
-      eqOversamplerReady = false;
+      eqOversamplerReady.store(false, std::memory_order_release);
     }
   }
 
@@ -899,6 +905,61 @@ void HostesaAudioProcessor::updateLogicBlocks(const juce::String &jsonData) {
       }
     }
 
+    // ── Link Block fields ──
+    // Parse multi-source array
+    auto linkSourcesVar = obj->getProperty("linkSources");
+    if (linkSourcesVar.isArray()) {
+      for (int lsi = 0; lsi < linkSourcesVar.size(); ++lsi) {
+        if (auto *lsObj = linkSourcesVar[lsi].getDynamicObject()) {
+          LogicBlock::LinkSource ls;
+          ls.pluginId = (int)lsObj->getProperty("pluginId");
+          ls.paramIndex = (int)lsObj->getProperty("paramIndex");
+          if (ls.pluginId == -2) {
+            // Macro source — read macroValue (0..100 from JS → 0..1)
+            ls.macroValue = lsObj->hasProperty("macroValue")
+                                ? (float)(double)lsObj->getProperty("macroValue") / 100.0f
+                                : 0.5f;
+            lb.linkSources.push_back(ls);
+          } else if (ls.pluginId >= 0 && ls.paramIndex >= 0) {
+            lb.linkSources.push_back(ls);
+          }
+        }
+      }
+    } else {
+      // Backward compat: single source fields
+      int oldPid = obj->hasProperty("linkSourcePluginId")
+                       ? (int)obj->getProperty("linkSourcePluginId")
+                       : -1;
+      int oldIdx = obj->hasProperty("linkSourceParamIndex")
+                       ? (int)obj->getProperty("linkSourceParamIndex")
+                       : -1;
+      if (oldPid >= 0 && oldIdx >= 0) {
+        LogicBlock::LinkSource ls;
+        ls.pluginId = oldPid;
+        ls.paramIndex = oldIdx;
+        lb.linkSources.push_back(ls);
+      }
+    }
+    lb.linkSmoothMs = obj->hasProperty("linkSmoothMs")
+                          ? (float)(double)obj->getProperty("linkSmoothMs")
+                          : 0.0f;
+    auto lMinVar = obj->getProperty("linkMin");
+    if (lMinVar.isArray()) {
+      for (int ri = 0; ri < lMinVar.size(); ++ri)
+        lb.linkMin.push_back((float)(double)lMinVar[ri]);
+    }
+    auto lMaxVar = obj->getProperty("linkMax");
+    if (lMaxVar.isArray()) {
+      for (int ri = 0; ri < lMaxVar.size(); ++ri)
+        lb.linkMax.push_back((float)(double)lMaxVar[ri]);
+    }
+    // Per-target base positions for base-relative modulation
+    auto lBasesVar = obj->getProperty("linkBases");
+    if (lBasesVar.isArray()) {
+      for (int ri = 0; ri < lBasesVar.size(); ++ri)
+        lb.linkBases.push_back((float)(double)lBasesVar[ri]);
+    }
+
     // Parse snapshots array
     auto snapsVar = obj->getProperty("snapshots");
     if (snapsVar.isArray()) {
@@ -1014,6 +1075,9 @@ void HostesaAudioProcessor::updateLogicBlocks(const juce::String &jsonData) {
           }
         }
 
+        // Preserve link runtime state
+        lb.linkSmoothedValue = existing.linkSmoothedValue;
+
         // Force prevApplied to match morphSmooth so the block rebuild
         // doesn't trigger a spurious IDW re-application (which would
         // overwrite any manual parameter tweaks the user has made).
@@ -1099,7 +1163,7 @@ void HostesaAudioProcessor::updateLogicBlocks(const juce::String &jsonData) {
         (old.modeE == BlockMode::Envelope || old.modeE == BlockMode::Shapes ||
          old.modeE == BlockMode::ShapesRange ||
          old.modeE == BlockMode::MorphPad || old.modeE == BlockMode::Sample ||
-         old.modeE == BlockMode::Lane);
+         old.modeE == BlockMode::Lane || old.modeE == BlockMode::Link);
 
     if (!wasModulating)
       continue;
@@ -1229,10 +1293,9 @@ int HostesaAudioProcessor::getSpectrumBins(float *outBins, int maxBins) {
   fftReady.store(false);
 
   // Perform FFT (on message thread � safe, no audio thread overhead)
-  juce::dsp::FFT fft(fftOrder);
-  fft.performRealOnlyForwardTransform(fftWorkBuffer, true);
+  fftInstance.performRealOnlyForwardTransform(fftWorkBuffer, true);
 
-  int halfSize = fftSize / 2;
+  int halfSize = fftCurrentSize / 2;
   int numBins = juce::jmin(spectrumBinCount, maxBins);
 
   // Map to log-spaced frequency bins (20Hz - 20kHz)
@@ -1245,27 +1308,30 @@ int HostesaAudioProcessor::getSpectrumBins(float *outBins, int maxBins) {
     sr = 44100.0f;
 
   for (int b = 0; b < numBins; ++b) {
-    // Frequency at this bin position
-    float t = (float)b / (float)(numBins - 1);
-    float freq = std::pow(10.0f, logMin + t * (logMax - logMin));
+    // Frequency edges for this log-spaced output bin
+    float t0 = (b > 0) ? ((float)(b - 0.5f) / (float)(numBins - 1)) : 0.0f;
+    float t1 = (b < numBins - 1) ? ((float)(b + 0.5f) / (float)(numBins - 1)) : 1.0f;
+    float freqLo = std::pow(10.0f, logMin + t0 * (logMax - logMin));
+    float freqHi = std::pow(10.0f, logMin + t1 * (logMax - logMin));
 
-    // Map frequency to FFT bin index
-    int fftBin =
-        juce::jlimit(0, halfSize - 1, (int)(freq * (float)fftSize / sr));
+    // Map to FFT bin range
+    int lo = juce::jlimit(0, halfSize - 1, (int)(freqLo * (float)fftCurrentSize / sr));
+    int hi = juce::jlimit(0, halfSize - 1, (int)(freqHi * (float)fftCurrentSize / sr));
+    if (hi < lo) hi = lo;
 
-    // Average a small range of bins for smoother display
-    int lo = juce::jmax(0, fftBin - 1);
-    int hi = juce::jmin(halfSize - 1, fftBin + 1);
-    float mag = 0.0f;
+    // RMS energy (power spectral density): sum squared magnitudes, then sqrt
+    // This is what professional analyzers (SPAN, Pro-Q) use for accurate energy representation
+    float energy = 0.0f;
+    int binCount = hi - lo + 1;
     for (int i = lo; i <= hi; ++i) {
       float re = fftWorkBuffer[i * 2];
       float im = fftWorkBuffer[i * 2 + 1];
-      mag += std::sqrt(re * re + im * im);
+      energy += re * re + im * im;
     }
-    mag /= (float)(hi - lo + 1);
+    float rms = std::sqrt(energy / (float) binCount);
 
-    // Convert to dB
-    float db = mag > 0.0f ? 20.0f * std::log10(mag / (float)fftSize) : -100.0f;
+    // Convert to dB (normalize by FFT size)
+    float db = rms > 0.0f ? 20.0f * std::log10(rms / (float)fftCurrentSize) : -100.0f;
     outBins[b] = juce::jlimit(-100.0f, 20.0f, db);
   }
 
@@ -1480,8 +1546,7 @@ float HostesaAudioProcessor::getParamValue(int pluginId, int paramIndex) const {
 void HostesaAudioProcessor::randomizeParams(
     int pluginId, const std::vector<int> &paramIndices, float minVal,
     float maxVal) {
-  // Persistent RNG � avoids identical sequences when called rapidly (M2 fix)
-  static juce::Random messageThreadRng;
+  // Per-instance RNG (member messageRandom) — avoids cross-instance sequence overlap
 
   // No mutex needed � hostedPlugins is structurally stable, setValue() is
   // atomic
@@ -1491,7 +1556,7 @@ void HostesaAudioProcessor::randomizeParams(
 
       for (int idx : paramIndices) {
         if (idx >= 0 && idx < params.size()) {
-          float val = minVal + messageThreadRng.nextFloat() * (maxVal - minVal);
+          float val = minVal + messageRandom.nextFloat() * (maxVal - minVal);
           params[idx]->setValue(juce::jlimit(0.0f, 1.0f, val));
           recordSelfWrite(pluginId, idx);
         }
@@ -1631,15 +1696,21 @@ void HostesaAudioProcessor::setEqCurve(const juce::String &jsonData) {
       int numCh = getTotalNumOutputChannels();
       int order = (newOS >= 4) ? 2 : (newOS >= 2) ? 1 : 0;
       eqOversampleOrder = order;
+
+      // CRITICAL: gate audio thread BEFORE any destruction/creation.
+      // Audio thread checks eqOversamplerReady with acquire; this release
+      // ensures it sees false before we touch the unique_ptr.
+      eqOversamplerReady.store(false, std::memory_order_release);
+
       if (order > 0) {
         eqOversampler = std::make_unique<juce::dsp::Oversampling<float>>(
             (juce::uint32)numCh, (juce::uint32)order,
             juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, false);
         eqOversampler->initProcessing((size_t)currentBlockSize);
-        eqOversamplerReady = true;
+        eqOversamplerReady.store(true, std::memory_order_release);
       } else {
+        // Off: flag is already false above, safe to destroy now
         eqOversampler.reset();
-        eqOversamplerReady = false;
       }
     }
   }
@@ -1649,6 +1720,17 @@ void HostesaAudioProcessor::setEqCurve(const juce::String &jsonData) {
   if (obj->hasProperty("dbRange")) {
     float dbr = (float)(double)obj->getProperty("dbRange");
     eqDbRange.store(juce::jlimit(6.0f, 48.0f, dbr));
+  }
+  // FFT block size for spectrum analyzer (1024, 2048, 4096, 8192)
+  if (obj->hasProperty("specBlock")) {
+    int blockSize = (int) obj->getProperty("specBlock");
+    // Convert block size to FFT order: 1024=10, 2048=11, 4096=12, 8192=13
+    int order = 11;
+    if (blockSize >= 8192) order = 13;
+    else if (blockSize >= 4096) order = 12;
+    else if (blockSize >= 2048) order = 11;
+    else order = 10;
+    setFftOrder(order);
   }
   // Snapshot old global values to detect changes
   float oldDepth = eqGlobalDepth.load();
@@ -1825,6 +1907,63 @@ void HostesaAudioProcessor::setEqCurve(const juce::String &jsonData) {
     if (pointDataChanged)
       eqDirty.store(true, std::memory_order_release);
   }
+}
+
+// ── Fast path: update a single EQ point field (no JSON, no alloc) ──
+// Called from JS during drags to avoid the full setEqCurve() pipeline.
+// Only freq/gain/q/type/slope changes set eqDirty (biquad recalc needed).
+void HostesaAudioProcessor::setEqPointFast(int pointIndex,
+                                            const juce::String &field,
+                                            double value) {
+  if (pointIndex < 0 || pointIndex >= numEqPoints.load())
+    return;
+
+  float maxDB = eqDbRange.load();
+  bool needsDirty = false;
+
+  if (field == "freq") {
+    float hz = juce::jlimit(20.0f, 20000.0f, (float)value);
+    if (std::abs(eqPoints[pointIndex].freqHz.load() - hz) > 0.5f) {
+      eqPoints[pointIndex].freqHz.store(hz);
+      needsDirty = true;
+    }
+  } else if (field == "gain") {
+    float db = juce::jlimit(-maxDB, maxDB, (float)value);
+    if (std::abs(eqPoints[pointIndex].gainDB.load() - db) > 0.05f) {
+      eqPoints[pointIndex].gainDB.store(db);
+      needsDirty = true;
+    }
+  } else if (field == "q") {
+    float q = juce::jlimit(0.025f, 40.0f, (float)value);
+    if (std::abs(eqPoints[pointIndex].q.load() - q) > 0.01f) {
+      eqPoints[pointIndex].q.store(q);
+      needsDirty = true;
+    }
+  } else if (field == "solo") {
+    eqPoints[pointIndex].solo.store(value > 0.5);
+  } else if (field == "mute") {
+    eqPoints[pointIndex].mute.store(value > 0.5);
+  } else if (field == "type") {
+    int ft = juce::jlimit(0, 5, (int)value);
+    if (eqPoints[pointIndex].filterType.load() != ft) {
+      eqPoints[pointIndex].filterType.store(ft);
+      needsDirty = true;
+    }
+  } else if (field == "slope") {
+    int sl = (int)value;
+    if (sl != 1 && sl != 2 && sl != 4) sl = 1;
+    if (eqPoints[pointIndex].slope.load() != sl) {
+      eqPoints[pointIndex].slope.store(sl);
+      needsDirty = true;
+    }
+  } else if (field == "drift") {
+    eqPoints[pointIndex].driftPct.store(juce::jlimit(0.0f, 100.0f, (float)value));
+  } else if (field == "stereo") {
+    eqPoints[pointIndex].stereoMode.store(juce::jlimit(0, 2, (int)value));
+  }
+
+  if (needsDirty)
+    eqDirty.store(true, std::memory_order_release);
 }
 
 //==============================================================================

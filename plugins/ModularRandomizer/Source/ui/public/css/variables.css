@@ -93,6 +93,10 @@
     --lane-playhead: rgba(255, 255, 255, 0.65);
     --lane-active: #5ED45E;
 
+    /* Link */
+    --link-color: var(--accent, #E8A840);
+    --si-link-bg: color-mix(in srgb, var(--link-color) 18%, transparent);
+
     /* Misc */
     --range-arc: #ff8c42;
     --scrollbar-thumb: rgba(255, 255, 255, 0.2);

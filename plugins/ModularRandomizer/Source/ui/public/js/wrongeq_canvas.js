@@ -197,6 +197,7 @@ var weqFocusBand = -1; // which band row is focused/highlighted on canvas (-1 = 
 var weqDBRangeMax = 24; // max dB for canvas display/limits: 6, 12, 18, 24, 36, 48
 var weqSplitMode = false; // Split mode: show visible band zones on canvas with draggable crossover dividers
 var weqOversample = 1;    // EQ oversampling: 1=off, 2=2×, 4=4×
+var weqMouseNormX = -1, weqMouseNormY = -1; // normalized mouse position for crosshair (-1 = offscreen)
 var _weqSplitSavedGains = null; // Saved gains before entering split mode (for undo-like restore)
 
 // ── EQ Undo/Redo System ──
@@ -206,9 +207,13 @@ var _weqRedoStack = [];
 var _weqMaxUndo = 40;
 
 function _weqSnapshotState() {
+    var isAnim = weqAnimRafId != null;
     return {
-        points: wrongEqPoints.map(function (p) {
-            return { uid: p.uid, x: p.x, y: p.y, q: p.q, type: p.type, solo: p.solo, mute: p.mute, drift: p.drift, preEq: p.preEq, stereoMode: p.stereoMode, slope: p.slope || 1, pluginIds: (p.pluginIds || []).slice(), seg: p.seg };
+        points: wrongEqPoints.map(function (p, i) {
+            var sx = (isAnim && i < weqAnimBaseX.length) ? weqAnimBaseX[i] : p.x;
+            var sy = (isAnim && i < weqAnimBaseY.length) ? weqAnimBaseY[i] : p.y;
+            var sq = (isAnim && i < weqAnimBaseQ.length) ? weqAnimBaseQ[i] : p.q;
+            return { uid: p.uid, x: sx, y: sy, q: sq, type: p.type, solo: p.solo, mute: p.mute, drift: p.drift, preEq: p.preEq, stereoMode: p.stereoMode, slope: p.slope || 1, modExclude: p.modExclude || 0, modGainDepth: p.modGainDepth, modQDepth: p.modQDepth, modDriftDepth: p.modDriftDepth, pluginIds: (p.pluginIds || []).slice(), seg: p.seg };
         }),
         splitMode: weqSplitMode,
         depth: weqGlobalDepth,
@@ -222,7 +227,7 @@ function _weqSnapshotState() {
 
 function _weqRestoreSnapshot(snap) {
     wrongEqPoints = snap.points.map(function (p) {
-        return { uid: p.uid, x: p.x, y: p.y, q: p.q, type: p.type, solo: p.solo || false, mute: p.mute || false, drift: p.drift || 0, preEq: p.preEq !== false, stereoMode: p.stereoMode || 0, slope: p.slope || 1, pluginIds: (p.pluginIds || []).slice(), seg: p.seg || null };
+        return { uid: p.uid, x: p.x, y: p.y, q: p.q, type: p.type, solo: p.solo || false, mute: p.mute || false, drift: p.drift || 0, preEq: p.preEq !== false, stereoMode: p.stereoMode || 0, slope: p.slope || 1, modExclude: p.modExclude || 0, modGainDepth: p.modGainDepth, modQDepth: p.modQDepth, modDriftDepth: p.modDriftDepth, pluginIds: (p.pluginIds || []).slice(), seg: p.seg || null };
     });
     // Sync uid counter
     var maxUid = 0;
@@ -235,9 +240,10 @@ function _weqRestoreSnapshot(snap) {
     if (snap.tilt != null) weqGlobalTilt = snap.tilt;
     if (snap.bypass != null) weqGlobalBypass = snap.bypass;
     if (snap.dbRange != null) weqDBRangeMax = snap.dbRange;
-    // Update animation bases
+    // Update animation bases (snapshot contains unmodulated values)
     weqAnimBaseY = wrongEqPoints.map(function (p) { return p.y; });
     weqAnimBaseX = wrongEqPoints.map(function (p) { return p.x; });
+    weqAnimBaseQ = wrongEqPoints.map(function (p) { return p.q || 0.707; });
     _weqSyncPluginBusIds();
     weqRenderPanel();
     weqSyncToHost();
@@ -324,23 +330,138 @@ function _weqBandColor(bandIdx, sortedPts) {
 // ── Spectrum analyzer ──
 var weqSpectrumBins = null;   // Float32Array of dB values (log-spaced bins 20-20kHz)
 var weqSpectrumSmooth = null; // smoothed version for drawing
+var weqSpectrumPeaks = null;  // peak-hold envelope (decays slowly)
+var _weqSpecRafPending = false; // coalesce spectrum-driven repaints
+var _weqSpecLastTime = 0;     // timestamp for peak decay rate
+
+// ── Spectrum Parameters (SPAN-style) ──
+var weqSpecSpeed   = 2;     // 0=very slow, 1=slow, 2=medium, 3=fast, 4=very fast
+var weqSpecSlope   = 0;     // dB/octave tilt compensation (0, 3, 4.5, 6)
+var weqSpecFloor   = -80;   // display floor in dB (-120, -100, -80, -60, -40)
+var weqSpecCeil    = 0;     // display ceiling in dB (always 0 dBFS)
+var weqSpecFreeze  = false; // freeze spectrum display
+var weqSpecPeakHold = true; // show peak-hold line
+var weqSpecVisible = true;  // show/hide spectrum entirely
+var weqSpecBlock   = 2048;  // FFT block size: 1024, 2048, 4096, 8192
+
+// Speed presets: [attackCoeff, releaseCoeff]
+// Attack is deliberately slow to prevent visual jitter from frame-to-frame FFT variance.
+// Release is always slower so the spectrum decays gracefully.
+var _weqSpeedPresets = [
+    [0.06, 0.015],  // 0: Very Slow — ultra-smooth, almost RTA hold
+    [0.12, 0.04],   // 1: Slow — smooth ballistics
+    [0.25, 0.08],   // 2: Medium (default)
+    [0.45, 0.15],   // 3: Fast
+    [0.7,  0.35],   // 4: Very Fast
+];
 
 // Called from C++ to provide FFT data: array of dB values mapped to log-spaced freq bins
 function weqSetSpectrum(binArray) {
     if (!binArray || binArray.length === 0) return;
+    if (weqSpecFreeze) {
+        // Frozen: still schedule repaint but don't update smoothed values
+        if (!weqAnimRafId && !_weqSpecRafPending) {
+            var overlay = document.getElementById('weqOverlay');
+            if (overlay && overlay.classList.contains('visible')) {
+                _weqSpecRafPending = true;
+                requestAnimationFrame(function () { _weqSpecRafPending = false; weqDrawCanvas(); });
+            }
+        }
+        return;
+    }
+
+    var now = performance.now();
+    var dt = _weqSpecLastTime > 0 ? (now - _weqSpecLastTime) * 0.001 : 0.016;
+    dt = Math.min(dt, 0.1); // clamp to prevent huge jumps after tab-away
+    _weqSpecLastTime = now;
+    var peakDecay = 15.0 * dt; // 15 dB/sec — frame-rate independent
+
+    // Get speed coefficients from preset
+    var speedIdx = Math.max(0, Math.min(4, weqSpecSpeed));
+    var atkBase = _weqSpeedPresets[speedIdx][0];
+    var relBase = _weqSpeedPresets[speedIdx][1];
+
+    // Frame-rate-independent smoothing: coeff_dt = 1 - (1 - coeff)^(dt * targetFps)
+    // This ensures identical visual behavior at 30, 60, or 144 Hz refresh rates
+    var targetFps = 60;
+    var atkCoeff = 1 - Math.pow(1 - atkBase, dt * targetFps);
+    var relCoeff = 1 - Math.pow(1 - relBase, dt * targetFps);
+
+    // Pre-compute slope tilt values (dB offset per bin, relative to 1kHz reference)
+    // log2(freq/1000) * slope dB/oct — positive slope boosts highs, compensates pink noise
+    var slopeCompensation = null;
+    if (weqSpecSlope !== 0) {
+        slopeCompensation = new Float32Array(binArray.length);
+        var logMin = Math.log10(20), logMax = Math.log10(20000);
+        for (var si = 0; si < binArray.length; si++) {
+            var t = si / (binArray.length - 1);
+            var freq = Math.pow(10, logMin + t * (logMax - logMin));
+            slopeCompensation[si] = Math.log2(freq / 1000) * weqSpecSlope;
+        }
+    }
+
     if (!weqSpectrumBins || weqSpectrumBins.length !== binArray.length) {
-        weqSpectrumBins = new Float32Array(binArray);
-        weqSpectrumSmooth = new Float32Array(binArray);
+        weqSpectrumBins = new Float32Array(binArray.length);
+        weqSpectrumSmooth = new Float32Array(binArray.length);
+        weqSpectrumPeaks = new Float32Array(binArray.length);
+        _weqSpecSpatialBuf = new Float32Array(binArray.length);
+        for (var j = 0; j < binArray.length; j++) {
+            var raw = binArray[j] + (slopeCompensation ? slopeCompensation[j] : 0);
+            weqSpectrumBins[j] = raw;
+            weqSpectrumSmooth[j] = raw;
+            weqSpectrumPeaks[j] = raw;
+        }
     } else {
         for (var i = 0; i < binArray.length; i++) {
-            weqSpectrumBins[i] = binArray[i];
-            // Exponential smoothing (fall slower than rise)
-            var target = binArray[i];
+            var target = binArray[i] + (slopeCompensation ? slopeCompensation[i] : 0);
+            weqSpectrumBins[i] = target;
+            // Frame-rate-independent smoothing
             var curr = weqSpectrumSmooth[i];
-            weqSpectrumSmooth[i] = target > curr ? curr + (target - curr) * 0.6 : curr + (target - curr) * 0.15;
+            weqSpectrumSmooth[i] = target > curr
+                ? curr + (target - curr) * atkCoeff
+                : curr + (target - curr) * relCoeff;
+            // Peak-hold: instant rise, slow linear decay (frame-rate independent)
+            if (weqSpecPeakHold) {
+                if (weqSpectrumSmooth[i] > weqSpectrumPeaks[i])
+                    weqSpectrumPeaks[i] = weqSpectrumSmooth[i];
+                else
+                    weqSpectrumPeaks[i] -= peakDecay;
+            }
+        }
+    }
+    // ── Spatial smoothing pass (5-tap triangular kernel: 1-2-3-2-1) ──
+    // Eliminates bin-to-bin noise without losing overall shape.
+    // Works in-place using a temp buffer. Applied to the temporally smoothed data.
+    var sLen = weqSpectrumSmooth.length;
+    if (sLen > 4) {
+        if (!_weqSpecSpatialBuf || _weqSpecSpatialBuf.length !== sLen)
+            _weqSpecSpatialBuf = new Float32Array(sLen);
+        var sb = _weqSpecSpatialBuf;
+        sb[0] = weqSpectrumSmooth[0];
+        sb[1] = (weqSpectrumSmooth[0] + weqSpectrumSmooth[1] * 2 + weqSpectrumSmooth[2]) / 4;
+        for (var si = 2; si < sLen - 2; si++) {
+            sb[si] = (weqSpectrumSmooth[si - 2]
+                    + weqSpectrumSmooth[si - 1] * 2
+                    + weqSpectrumSmooth[si] * 3
+                    + weqSpectrumSmooth[si + 1] * 2
+                    + weqSpectrumSmooth[si + 2]) / 9;
+        }
+        sb[sLen - 2] = (weqSpectrumSmooth[sLen - 3] + weqSpectrumSmooth[sLen - 2] * 2 + weqSpectrumSmooth[sLen - 1]) / 4;
+        sb[sLen - 1] = weqSpectrumSmooth[sLen - 1];
+        // Copy back
+        weqSpectrumSmooth.set(sb);
+    }
+
+    // If the animation loop is NOT running, schedule a standalone canvas repaint
+    if (!weqAnimRafId && !_weqSpecRafPending) {
+        var overlay = document.getElementById('weqOverlay');
+        if (overlay && overlay.classList.contains('visible')) {
+            _weqSpecRafPending = true;
+            requestAnimationFrame(function () { _weqSpecRafPending = false; weqDrawCanvas(); });
         }
     }
 }
+var _weqSpecSpatialBuf = null; // temp buffer for spatial smoothing
 // ── Animation state ──
 var weqAnimSpeed = 0;       // Hz — 0 = static, >0 = animate curve
 var weqAnimDepth = 6;       // dB modulation depth (how much gains oscillate)
@@ -349,6 +470,59 @@ var weqAnimRafId = null;    // requestAnimationFrame ID
 var weqAnimLastTime = 0;    // last frame timestamp
 var weqAnimBaseY = [];      // snapshot of base Y values (user-drawn positions)
 var weqAnimShape = 'sine';  // LFO waveform shape
+var weqAnimSpread = 0;      // 0-100% per-point phase spread (0 = sync, 100 = max cascade)
+
+// ── Tempo Sync ──
+var weqGainSync = false;        // Gain LFO: use tempo-synced rate?
+var weqGainSyncDiv = '1/4';     // Gain LFO: musical division when synced
+var weqQSync = false;           // Q Mod: use tempo-synced rate?
+var weqQSyncDiv = '1/4';        // Q Mod: musical division when synced
+var weqSyncSource = 'daw';      // 'daw' = host tempo, 'internal' = plugin internal BPM
+
+// Beat division options (shared by Gain sync, Q sync)
+var WEQ_SYNC_DIVS = ['1/16', '1/8', '1/4', '1/2', '1/1', '2/1', '4/1', '8/1'];
+var WEQ_SYNC_DIV_LABELS = { '1/1': '1 bar', '2/1': '2 bars', '4/1': '4 bars', '8/1': '8 bars' };
+
+// Get effective BPM based on sync source
+function _weqSyncBpm() {
+    if (weqSyncSource === 'internal') {
+        return (typeof internalBpm !== 'undefined' && internalBpm > 0) ? internalBpm : 120;
+    }
+    return (typeof rtData !== 'undefined' && rtData.bpm > 0) ? rtData.bpm : 120;
+}
+
+// Convert a musical division string to Hz given the current BPM
+function _weqSyncDivToHz(div) {
+    var bpm = _weqSyncBpm();
+    var beatsPerSec = bpm / 60;
+    var BEAT_MAP = { '1/16': 0.25, '1/8': 0.5, '1/4': 1, '1/2': 2, '1/1': 4, '2/1': 8, '4/1': 16, '8/1': 32 };
+    var beats = BEAT_MAP[div] || 1;
+    return beatsPerSec / beats; // Hz = cycles per second
+}
+function _weqFmtSyncDiv(div) {
+    return WEQ_SYNC_DIV_LABELS[div] || div;
+}
+// Get effective Gain LFO rate (Hz) considering sync
+function _weqEffGainRate() {
+    if (weqGainSync) return _weqSyncDivToHz(weqGainSyncDiv);
+    return weqAnimSpeed;
+}
+// Get effective Q Mod rate (Hz) considering sync
+function _weqEffQRate() {
+    if (weqQSync) return _weqSyncDivToHz(weqQSyncDiv);
+    return weqQModSpeed;
+}
+var weqModEnabled = true;   // Master toggle: enable/disable all WrongEQ modulation
+
+// Per-point modulation exclusion bitmask
+// Each point can opt out of specific modulation types via pt.modExclude
+var WEQ_MOD_GAIN  = 1;  // bit 0: Gain Mod (LFO)
+var WEQ_MOD_QMOD  = 2;  // bit 1: Q Mod
+var WEQ_MOD_DRIFT = 4;  // bit 2: Drift (frequency sweep)
+
+// Per-point depth defaults (0-100%). Read from pt.modGainDepth etc.
+// If property is missing, defaults to 100 (full global depth).
+function _weqPtDepth(pt, key) { var v = pt[key]; return v == null ? 100 : v; }
 
 // ── LFO Shape Definitions ──
 // Each shape takes phase (0-1) and returns bipolar value (-1 to +1)
@@ -424,6 +598,23 @@ var weqDriftScale = '1/1';  // musical period for one drift cycle
 var weqDriftContinuous = false; // continuous mode: also modulate gain with cursed noise
 var weqDriftMode = 'independent'; // 'independent' = each point has own noise (kept for compat)
 
+// Compute the actual drift sweep rate in Hz for display
+function _weqDriftHz() {
+    if (weqDrift === 0) return 0;
+    var driftAmt = Math.abs(weqDrift) / 50;
+    var DS_BEAT_MAP = { '1/16': 0.25, '1/8': 0.5, '1/4': 1, '1/2': 2, '1/1': 4, '2/1': 8, '4/1': 16, '8/1': 32, '16/1': 64, '32/1': 128 };
+    var driftScaleBeats = DS_BEAT_MAP[weqDriftScale || '1/1'] || 4;
+    var driftPeriodSec = driftScaleBeats * 0.5;
+    return (0.05 + driftAmt * 1.95) / driftPeriodSec;
+}
+function _weqFmtDriftHz() {
+    var hz = _weqDriftHz();
+    if (hz === 0) return 'Off';
+    if (hz < 0.1) return hz.toFixed(3) + 'Hz';
+    if (hz < 1) return hz.toFixed(2) + 'Hz';
+    return hz.toFixed(1) + 'Hz';
+}
+
 // ── Modulation Zone (separate frequency limits for gain LFO vs drift) ──
 var weqGainLoCut = 20;       // Hz — LFO gain: no modulation below this
 var weqGainHiCut = 20000;    // Hz — LFO gain: no modulation above this
@@ -448,11 +639,15 @@ function _weqDriftZoneScale(pointX) {
 
 // ── Q Modulation ──
 var weqQModSpeed = 0;        // Hz (0 = off)
-var weqQModDepth = 50;       // 0..100 — how much Q changes
+var weqQModDepth = 30;       // 0..200 — Q modulation depth (displayed as multiplier)
 var weqQModShape = 'sine';   // shape key
 var weqQLoCut = 20;          // Hz — Q mod low cut
 var weqQHiCut = 20000;       // Hz — Q mod high cut
+var weqQModSpread = 0;       // 0-100% per-point Q mod phase spread
 var weqAnimBaseQ = [];       // snapshot of base Q values
+
+// ── Section collapse state ──
+var _weqCollapsed = {};      // { sectionName: true/false }
 
 var WEQ_QMOD_SHAPES = {
     sine: { label: 'Sine', fn: function (p) { return Math.sin(p * Math.PI * 2); } },
@@ -502,10 +697,63 @@ var _weqDriftRangePreview = false; // true while dragging drift range knob — s
 
 // Single source of truth: does any modulation source need the animation loop?
 function _weqNeedsAnim() {
-    return weqAnimSpeed > 0
+    if (!weqModEnabled) return false;
+    var gainActive = weqAnimSpeed > 0 || (weqGainSync && weqAnimDepth > 0);
+    var qActive = (weqQModSpeed > 0 || weqQSync) && weqQModDepth > 0;
+    return gainActive
         || (Math.abs(weqDrift) > 0 && weqDriftRange > 0)
         || (weqDriftContinuous && weqDriftRange > 0)
-        || (weqQModSpeed > 0 && weqQModDepth > 0);
+        || qActive;
+}
+
+// Build mini SVG waveform preview for a shape (used by Gain Mod & Q Mod panels)
+// Optional wrapperId: if provided, wraps the SVG in a <div id="wrapperId"> for in-place updates
+function _weqBuildShapeSvg(shapeMap, selectedKey, wrapperId) {
+    var shapeDef = shapeMap[selectedKey];
+    if (!shapeDef || !shapeDef.fn) {
+        return wrapperId ? '<div id="' + wrapperId + '"></div>' : '';
+    }
+    var W = 180, H = 28, PAD = 2;
+    var plotW = W - PAD * 2, plotH = H - PAD * 2;
+    var N = 60;
+    var pts = [];
+    var maxV = 0;
+    // Sample the function to find normalization range
+    var samples = [];
+    for (var i = 0; i <= N; i++) {
+        var p = i / N;
+        var v = shapeDef.fn(p, 0);
+        samples.push(v);
+        if (Math.abs(v) > maxV) maxV = Math.abs(v);
+    }
+    if (maxV < 0.001) maxV = 1;
+    for (var i = 0; i <= N; i++) {
+        var x = PAD + (i / N) * plotW;
+        var y = PAD + plotH * 0.5 - (samples[i] / maxV) * plotH * 0.45;
+        pts.push(x.toFixed(1) + ',' + y.toFixed(1));
+    }
+    var svg = '<svg class="weq-shape-svg" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none">';
+    // Zero line
+    var midY = PAD + plotH * 0.5;
+    svg += '<line x1="' + PAD + '" y1="' + midY.toFixed(1) + '" x2="' + (W - PAD) + '" y2="' + midY.toFixed(1) + '" stroke="var(--border)" stroke-opacity="0.4" stroke-width="0.5"/>';
+    // Filled area
+    svg += '<polygon points="' + (PAD + ',' + midY.toFixed(1)) + ' ' + pts.join(' ') + ' ' + ((W - PAD) + ',' + midY.toFixed(1)) + '" fill="var(--accent)" fill-opacity="0.08"/>';
+    // Line
+    svg += '<polyline points="' + pts.join(' ') + '" fill="none" stroke="var(--accent)" stroke-width="1.2" stroke-opacity="0.7" vector-effect="non-scaling-stroke"/>';
+    svg += '</svg>';
+    if (wrapperId) return '<div id="' + wrapperId + '">' + svg + '</div>';
+    return svg;
+}
+
+// Refresh a shape SVG preview in-place (no full panel rebuild needed)
+function _weqRefreshShapeSvg(wrapperId, shapeMap, selectedKey) {
+    var el = document.getElementById(wrapperId);
+    if (!el) return;
+    var shapeDef = shapeMap[selectedKey];
+    if (!shapeDef || !shapeDef.fn) { el.innerHTML = ''; return; }
+    // Reuse the builder without wrapper
+    var svg = _weqBuildShapeSvg(shapeMap, selectedKey);
+    el.innerHTML = svg;
 }
 
 function weqAnimStart() {
@@ -540,12 +788,12 @@ var _weqAnimSyncCounter = 0;
 var _weqDriftTimeAccum = 0; // accumulated drift time in seconds
 function weqAnimTick(now) {
     try {
-        var hasSine = weqAnimSpeed > 0;
+        var hasSine = weqAnimSpeed > 0 || (weqGainSync && weqAnimDepth > 0);
         var driftAmt = Math.abs(weqDrift) / 50;
         var driftRangeNorm = weqDriftRange / 100;
         var hasDrift = driftAmt > 0.001 && driftRangeNorm > 0.001;
         var hasContinuous = weqDriftContinuous && driftRangeNorm > 0.001;
-        var hasQMod = weqQModSpeed > 0 && weqQModDepth > 0;
+        var hasQMod = (weqQModSpeed > 0 || weqQSync) && weqQModDepth > 0;
 
         if (!hasSine && !hasDrift && !hasContinuous && !hasQMod) { weqAnimStop(); return; }
 
@@ -555,7 +803,8 @@ function weqAnimTick(now) {
 
         // Advance sine phase
         if (hasSine) {
-            weqAnimPhase += dt * weqAnimSpeed;
+            var _gainRate = _weqEffGainRate();
+            weqAnimPhase += dt * _gainRate;
             if (weqAnimPhase > 1) weqAnimPhase -= Math.floor(weqAnimPhase);
         }
 
@@ -566,6 +815,14 @@ function weqAnimTick(now) {
         if (nPts === 0) { weqAnimRafId = requestAnimationFrame(weqAnimTick); return; }
 
         if (weqAnimBaseY.length !== nPts || weqAnimBaseX.length !== nPts || weqAnimBaseQ.length !== nPts) {
+            // Restore existing points to their base values before re-snapshotting,
+            // so modulated values don't get baked in as new bases.
+            var oldLen = Math.min(weqAnimBaseY.length, weqAnimBaseX.length, weqAnimBaseQ.length);
+            for (var ri = 0; ri < Math.min(oldLen, nPts); ri++) {
+                wrongEqPoints[ri].y = weqAnimBaseY[ri];
+                wrongEqPoints[ri].x = weqAnimBaseX[ri];
+                wrongEqPoints[ri].q = weqAnimBaseQ[ri];
+            }
             weqAnimBaseY = wrongEqPoints.map(function (p) { return p.y; });
             weqAnimBaseX = wrongEqPoints.map(function (p) { return p.x; });
             weqAnimBaseQ = wrongEqPoints.map(function (p) { return p.q || 0.707; });
@@ -591,25 +848,31 @@ function weqAnimTick(now) {
             var baseX = weqAnimBaseX[i];
             var totalModDB = 0;
 
+            // Per-point modulation exclusion bitmask
+            var ptExcl = wrongEqPoints[i].modExclude || 0;
+
             // Separate zone scales: gain (vertical) vs drift (horizontal)
             var gainZone = _weqGainZoneScale(baseX);
             var driftZone = _weqDriftZoneScale(baseX);
 
-            if (hasSine && gainZone > 0) {
-                var phaseOffset = nPts > 1 ? (i / (nPts - 1)) * 0.5 : 0;
+            // 1) Gain LFO modulation (skipped if point excludes WEQ_MOD_GAIN)
+            if (hasSine && gainZone > 0 && !(ptExcl & WEQ_MOD_GAIN)) {
+                var phaseOffset = nPts > 1 ? (i / (nPts - 1)) * (weqAnimSpread / 100) * 0.5 : 0;
                 var shapeFn = (WEQ_LFO_SHAPES[weqAnimShape] || WEQ_LFO_SHAPES.sine).fn;
-                totalModDB += shapeFn(weqAnimPhase + phaseOffset) * weqAnimDepth;
+                var gainPtDepth = _weqPtDepth(wrongEqPoints[i], 'modGainDepth') / 100;
+                totalModDB += shapeFn(weqAnimPhase + phaseOffset) * weqAnimDepth * gainPtDepth;
             }
 
-            // 2a) Drift = frequency sweep LFO (modulates X position)
-            if (hasDrift && driftZone > 0) {
+            // 2a) Drift = frequency sweep LFO (skipped if point excludes WEQ_MOD_DRIFT)
+            if (hasDrift && driftZone > 0 && !(ptExcl & WEQ_MOD_DRIFT)) {
+                var driftPtDepth = _weqPtDepth(wrongEqPoints[i], 'modDriftDepth') / 100;
                 var ptPhaseOff = _weqHashI(i * 73 + 11) * 0.5;
                 var sweepPhase = _weqDriftTimeAccum * driftSweepRate + ptPhaseOff;
 
                 var sweep = _weqDriftEval(weqDriftTexture, sweepPhase, i * 73 + 11);
 
                 var baseFreq = weqXToFreq(baseX);
-                var sweepOctaves = sweep * driftSweepWidth;
+                var sweepOctaves = sweep * driftSweepWidth * driftPtDepth;
                 var newFreq = baseFreq * Math.pow(2, sweepOctaves);
                 // Clamp to drift zone boundaries so points can't escape the lo/hi cut range
                 var driftFloor = weqDriftLoCut > 20 ? weqDriftLoCut : WEQ_MIN_FREQ;
@@ -620,8 +883,9 @@ function weqAnimTick(now) {
                 wrongEqPoints[i].x = baseX;
             }
 
-            // 2b) Continuous = gain noise (modulates Y) — uses gain zone
-            if (hasContinuous && gainZone > 0) {
+            // 2b) Continuous = gain noise (skipped if point excludes WEQ_MOD_GAIN)
+            if (hasContinuous && gainZone > 0 && !(ptExcl & WEQ_MOD_GAIN)) {
+                var contPtDepth = _weqPtDepth(wrongEqPoints[i], 'modGainDepth') / 100;
                 var gainRate = hasDrift ? driftSweepRate : 0.15;
                 var gainSeed = i * 137 + 47;
                 var gainPhaseOff = _weqHashI(gainSeed) * 0.7;
@@ -633,7 +897,7 @@ function weqAnimTick(now) {
                     + _weqSmoothNoise(gainPhase * 6.28 + _weqHashI(gainSeed + 3) * 13.0) * 0.20
                     + _weqSmoothNoise(gainPhase * 13.7 + _weqHashI(gainSeed + 4) * 19.0) * 0.15;
 
-                var gainModDB = gainNoise * (weqDriftRange / 50) * 18.0;
+                var gainModDB = gainNoise * (weqDriftRange / 50) * 18.0 * contPtDepth;
                 if (hasDrift) gainModDB *= driftAmt;
                 totalModDB += gainModDB;
             }
@@ -641,16 +905,19 @@ function weqAnimTick(now) {
             var newDB = Math.max(-weqDBRangeMax, Math.min(weqDBRangeMax, baseDB + totalModDB));
             wrongEqPoints[i].y = weqDBtoY(newDB);
 
-            // 3) Q modulation
-            if (hasQMod && _weqQZoneScale(baseX) > 0) {
+            // 3) Q modulation (skipped if point excludes WEQ_MOD_QMOD)
+            if (hasQMod && _weqQZoneScale(baseX) > 0 && !(ptExcl & WEQ_MOD_QMOD)) {
+                var qPtDepth = _weqPtDepth(wrongEqPoints[i], 'modQDepth') / 100;
                 var baseQ = weqAnimBaseQ[i];
                 var qSeed = i * 211 + 59;
-                var qPhaseOff = nPts > 1 ? (i / (nPts - 1)) * 0.3 : 0;
-                var qPhase = _weqDriftTimeAccum * weqQModSpeed + qPhaseOff;
+                var qPhaseOff = nPts > 1 ? (i / (nPts - 1)) * (weqQModSpread / 100) * 0.5 : 0;
+                var _qRate = _weqEffQRate();
+                var qPhase = _weqDriftTimeAccum * _qRate + qPhaseOff;
                 var qShapeFn = (WEQ_QMOD_SHAPES[weqQModShape] || WEQ_QMOD_SHAPES.sine).fn;
                 var qMod = qShapeFn(qPhase, qSeed);
-                var qDepthMul = weqQModDepth / 100;
-                var qMultiplier = Math.pow(2, qMod * qDepthMul * 2);
+                var qDepthMul = (weqQModDepth / 100) * qPtDepth;
+                // Linear depth mapping: depth 100 = ±1 octave of Q, 200 = ±2 octaves
+                var qMultiplier = Math.pow(2, qMod * qDepthMul);
                 var newQ = Math.max(0.1, Math.min(30, baseQ * qMultiplier));
                 wrongEqPoints[i].q = newQ;
             } else if (hasQMod) {
@@ -711,6 +978,7 @@ function weqRenderPanel() {
     h += '<span class="weq-title">WRONG<span style="color:var(--accent)">EQ</span></span>';
     h += '<span class="weq-subtitle">' + wrongEqPoints.length + ' points</span>';
     h += '<button class="weq-hdr-btn' + (weqGlobalBypass ? ' on weq-bypass-on' : '') + '" id="weqBypass" title="Bypass all EQ processing">⊘ Bypass</button>';
+    h += '<button class="weq-hdr-btn' + (weqModEnabled ? ' on' : '') + '" id="weqModToggle" title="Enable/disable all modulation (Gain Mod, Q Mod, Drift)">∿ Animate</button>';
     h += '</div>';
     h += '<div class="weq-preset-strip">';
     h += '<button class="weq-preset-nav" id="weqPresetPrev" title="Previous preset">◄</button>';
@@ -740,6 +1008,12 @@ function weqRenderPanel() {
     var splitLabel = '⫿ Split';
     if (weqSplitMode && wrongEqPoints.length > 0) splitLabel += ' ×' + (wrongEqPoints.length + 1);
     h += '<button class="weq-ft-btn' + (weqSplitMode ? ' on' : '') + '" id="weqSplitBtn" title="Split mode — divide spectrum into bands for per-band plugin routing (Ctrl+Z to undo)">' + splitLabel + '</button>';
+    // Crossover presets (only visible in split mode)
+    if (weqSplitMode) {
+        h += '<button class="weq-ft-btn weq-xover-btn" data-xover="2" title="2-way crossover at ~2kHz">2-way</button>';
+        h += '<button class="weq-ft-btn weq-xover-btn" data-xover="3" title="3-way crossover at ~500Hz / 4kHz">3-way</button>';
+        h += '<button class="weq-ft-btn weq-xover-btn" data-xover="4" title="4-way crossover at ~200Hz / 1kHz / 5kHz">4-way</button>';
+    }
     h += '<button class="weq-ft-btn" id="weqShapes">∿ Shape ▾</button>';
     h += '</div>';
 
@@ -752,6 +1026,65 @@ function weqRenderPanel() {
     h += '<canvas id="weqCanvas"></canvas>';
     h += '</div>';
     h += '</div>'; // end weq-canvas-area
+
+    // ── Spectrum toolbar (SPAN-style controls) ──
+    var _speedLabels = ['V.Slow', 'Slow', 'Med', 'Fast', 'V.Fast'];
+    var _slopeLabels = [
+        { val: 0,   label: '0' },
+        { val: 3,   label: '+3' },
+        { val: 4.5, label: '+4.5' },
+        { val: 6,   label: '+6' },
+    ];
+    var _rangeLabels = [
+        { val: -120, label: '120' },
+        { val: -100, label: '100' },
+        { val: -80,  label: '80' },
+        { val: -60,  label: '60' },
+        { val: -40,  label: '40' },
+    ];
+    h += '<div class="weq-spec-toolbar" id="weqSpecToolbar">';
+    // Show/Hide
+    h += '<button class="weq-spec-btn' + (weqSpecVisible ? ' on' : '') + '" id="weqSpecShowBtn" title="Show/hide spectrum analyzer">Spec</button>';
+    h += '<span class="weq-spec-sep">│</span>';
+    // Speed
+    h += '<span class="weq-spec-lbl">Spd</span>';
+    h += '<select class="weq-spec-sel" id="weqSpecSpeedSel" title="Smoothing speed">';
+    for (var spi = 0; spi < _speedLabels.length; spi++) {
+        h += '<option value="' + spi + '"' + (weqSpecSpeed === spi ? ' selected' : '') + '>' + _speedLabels[spi] + '</option>';
+    }
+    h += '</select>';
+    // Slope
+    h += '<span class="weq-spec-lbl">Slope</span>';
+    h += '<select class="weq-spec-sel" id="weqSpecSlopeSel" title="Tilt compensation (dB/oct, relative to 1kHz — compensates pink noise)">';
+    for (var sli = 0; sli < _slopeLabels.length; sli++) {
+        h += '<option value="' + _slopeLabels[sli].val + '"' + (weqSpecSlope === _slopeLabels[sli].val ? ' selected' : '') + '>' + _slopeLabels[sli].label + '</option>';
+    }
+    h += '</select>';
+    // Range
+    h += '<span class="weq-spec-lbl">Range</span>';
+    h += '<select class="weq-spec-sel" id="weqSpecRangeSel" title="Display dynamic range (dB)">';
+    for (var ri = 0; ri < _rangeLabels.length; ri++) {
+        h += '<option value="' + _rangeLabels[ri].val + '"' + (weqSpecFloor === _rangeLabels[ri].val ? ' selected' : '') + '>' + _rangeLabels[ri].label + '</option>';
+    }
+    h += '</select>';
+    // Block size
+    var _blockLabels = [1024, 2048, 4096, 8192];
+    h += '<span class="weq-spec-lbl">Block</span>';
+    h += '<select class="weq-spec-sel" id="weqSpecBlockSel" title="FFT block size (larger = better frequency resolution, slower response)">';
+    for (var bsi = 0; bsi < _blockLabels.length; bsi++) {
+        h += '<option value="' + _blockLabels[bsi] + '"' + (weqSpecBlock === _blockLabels[bsi] ? ' selected' : '') + '>' + _blockLabels[bsi] + '</option>';
+    }
+    h += '</select>';
+    h += '<span class="weq-spec-sep">│</span>';
+    // Freeze
+    h += '<button class="weq-spec-btn' + (weqSpecFreeze ? ' on' : '') + '" id="weqSpecFreezeBtn" title="Freeze spectrum">❄</button>';
+    // Peak hold
+    h += '<button class="weq-spec-btn' + (weqSpecPeakHold ? ' on' : '') + '" id="weqSpecPeakBtn" title="Peak hold overlay">Peak</button>';
+    // Reset peaks (only useful when peak hold is on)
+    if (weqSpecPeakHold) {
+        h += '<button class="weq-spec-btn" id="weqSpecResetPeaksBtn" title="Reset peak-hold line">↺</button>';
+    }
+    h += '</div>';
 
     // Band legend — Q-based ranges matching C++ crossover splits
     if (wrongEqPoints.length > 0) {
@@ -809,21 +1142,28 @@ function weqRenderPanel() {
     h += '<div class="weq-side-panel" id="weqSidePanel">';
 
     // ─── CURVE section ───
-    h += '<div class="weq-sp-section">';
-    h += '<div class="weq-sp-title">Curve</div>';
+    var _curveActive = weqGlobalDepth !== 100 || weqGlobalWarp !== 0 || weqGlobalSteps > 0 || weqGlobalTilt !== 0;
+    h += '<div class="weq-sp-section' + (_weqCollapsed.curve ? ' collapsed' : '') + '">';
+    h += '<div class="weq-sp-title" data-collapse="curve">Curve' + (_curveActive ? '<span class="weq-sp-dot active"></span>' : '') + '</div>';
+    h += '<div class="weq-sp-body">';
     h += '<div class="weq-sp-row"><span class="weq-sp-label">Depth</span><span class="weq-sp-knob" data-wk="depth" title="Depth — scales all band gains, dbl-click reset">' + weqGlobalDepth + '%</span></div>';
     h += '<div class="weq-sp-row"><span class="weq-sp-label">Warp</span><span class="weq-sp-knob" data-wk="warp" title="Warp — S-curve contrast, dbl-click reset">' + (weqGlobalWarp >= 0 ? '+' : '') + weqGlobalWarp + '</span></div>';
     h += '<div class="weq-sp-row"><span class="weq-sp-label">Steps</span><span class="weq-sp-knob" data-wk="steps" title="Steps — quantize gain levels, dbl-click reset">' + (weqGlobalSteps || 'Off') + '</span></div>';
     h += '<div class="weq-sp-row"><span class="weq-sp-label">Tilt</span><span class="weq-sp-knob" data-wk="tilt" title="Tilt — tilt spectrum (+ highs / − lows), dbl-click reset">' + (weqGlobalTilt >= 0 ? '+' : '') + weqGlobalTilt + '</span></div>';
-    h += '</div>';
+    h += '</div></div>';
 
 
 
     // ─── DRIFT section (freq sweep only — independent operation) ───
     var driftActive = Math.abs(weqDrift) > 0 && weqDriftRange > 0;
-    h += '<div class="weq-sp-section">';
-    h += '<div class="weq-sp-title">Drift</div>';
-    h += '<div class="weq-sp-row"><span class="weq-sp-label">Speed</span><span class="weq-sp-knob' + (driftActive ? ' weq-anim-on' : '') + '" data-wk="drift" title="Drift — freq sweep speed (+smooth / −jitter), dbl-click reset">' + (weqDrift >= 0 ? '+' : '') + weqDrift + '</span></div>';
+    var _driftAffected = 0;
+    for (var _di = 0; _di < wrongEqPoints.length; _di++) { if (_weqDriftZoneScale(wrongEqPoints[_di].x) > 0) _driftAffected++; }
+    var _driftCutActive = weqDriftLoCut > 20 || weqDriftHiCut < 20000;
+    var _driftCountLabel = _driftCutActive && wrongEqPoints.length > 0 ? ' · ' + _driftAffected + '/' + wrongEqPoints.length : '';
+    h += '<div class="weq-sp-section' + (_weqCollapsed.drift ? ' collapsed' : '') + '">';
+    h += '<div class="weq-sp-title" data-collapse="drift">Drift<span class="weq-sp-count">' + _driftCountLabel + '</span>' + (driftActive || weqDriftContinuous ? '<span class="weq-sp-dot active"></span>' : '') + '</div>';
+    h += '<div class="weq-sp-body">';
+    h += '<div class="weq-sp-row"><span class="weq-sp-label">Speed</span><span class="weq-sp-knob' + (driftActive ? ' weq-anim-on' : '') + '" data-wk="drift" title="Drift — freq sweep speed, dbl-click reset">' + _weqFmtDriftHz() + '</span></div>';
     h += '<div class="weq-sp-row"><span class="weq-sp-label">Range</span><span class="weq-sp-knob' + (driftActive ? ' weq-anim-on' : '') + '" data-wk="driftRange" title="Drift Range — sweep width 0-4 oct, dbl-click reset">' + weqDriftRange + '%</span></div>';
     h += '<div class="weq-sp-row"><span class="weq-sp-label">Scale</span><select class="weq-sp-sel" data-wf="driftScale" title="Drift Scale — musical period">';
     var DS_WEQ_OPTS = ['1/16', '1/8', '1/4', '1/2', '1/1', '2/1', '4/1', '8/1', '16/1', '32/1'];
@@ -842,50 +1182,95 @@ function weqRenderPanel() {
     h += '</div>';
     h += '<div class="weq-sp-row"><span class="weq-sp-label">Lo Cut</span><span class="weq-sp-knob' + (weqDriftLoCut > 20 ? ' weq-anim-on' : '') + '" data-wk="driftLo" title="Drift low cut, dbl-click reset">' + (weqDriftLoCut > 20 ? weqFmtFreq(weqDriftLoCut) : 'Off') + '</span></div>';
     h += '<div class="weq-sp-row"><span class="weq-sp-label">Hi Cut</span><span class="weq-sp-knob' + (weqDriftHiCut < 20000 ? ' weq-anim-on' : '') + '" data-wk="driftHi" title="Drift high cut, dbl-click reset">' + (weqDriftHiCut < 20000 ? weqFmtFreq(weqDriftHiCut) : 'Off') + '</span></div>';
-    h += '</div>';
+    h += '</div></div>';
 
     // ─── LFO section ───
-    h += '<div class="weq-sp-section">';
-    h += '<div class="weq-sp-title">Gain Mod</div>';
-    var _spdDisp = weqAnimSpeed > 0 ? (weqAnimSpeed < 1 ? weqAnimSpeed.toFixed(2) + 'Hz' : weqAnimSpeed.toFixed(1) + 'Hz') : 'Off';
-    h += '<div class="weq-sp-row"><span class="weq-sp-label">Rate</span><span class="weq-sp-knob' + (weqAnimSpeed > 0 ? ' weq-anim-on' : '') + '" data-wk="speed" title="LFO rate (Hz), dbl-click to stop">' + _spdDisp + '</span></div>';
-    h += '<div class="weq-sp-row"><span class="weq-sp-label">Depth</span><span class="weq-sp-knob' + (weqAnimDepth > 0 && weqAnimSpeed > 0 ? ' weq-anim-on' : '') + '" data-wk="mod" title="LFO depth (dB), dbl-click reset">' + weqAnimDepth + 'dB</span></div>';
+    var _lfoActive = weqAnimSpeed > 0 || (weqGainSync && weqAnimDepth > 0);
+    // Count affected bands
+    var _lfoAffected = 0;
+    for (var _li = 0; _li < wrongEqPoints.length; _li++) { if (_weqGainZoneScale(wrongEqPoints[_li].x) > 0) _lfoAffected++; }
+    var _lfoCutActive = weqGainLoCut > 20 || weqGainHiCut < 20000;
+    var _lfoCountLabel = _lfoCutActive && wrongEqPoints.length > 0 ? ' · ' + _lfoAffected + '/' + wrongEqPoints.length : '';
+    h += '<div class="weq-sp-section' + (_weqCollapsed.gainMod ? ' collapsed' : '') + '">';
+    h += '<div class="weq-sp-title" data-collapse="gainMod">Gain Mod<span class="weq-sp-count">' + _lfoCountLabel + '</span>' + (_lfoActive ? '<span class="weq-sp-dot active pulse"></span>' : '') + '</div>';
+    h += '<div class="weq-sp-body">';
+    h += _weqBuildShapeSvg(WEQ_LFO_SHAPES, weqAnimShape, 'weqLfoShapeSvg');
+    // Sync toggle + Rate/Division
+    h += '<div class="weq-sp-row"><button class="weq-sp-sync' + (weqGainSync ? ' on' : '') + '" data-wsync="gain" title="Tempo Sync">\u23f1</button>';
+    if (weqGainSync) {
+        h += '<span class="weq-sp-label">Div</span><select class="weq-sp-sel weq-sp-sel-sm" data-wf="gainSyncDiv" title="Gain LFO beat division">';
+        WEQ_SYNC_DIVS.forEach(function (d) {
+            h += '<option value="' + d + '"' + (weqGainSyncDiv === d ? ' selected' : '') + '>' + _weqFmtSyncDiv(d) + '</option>';
+        });
+        h += '</select>';
+        h += '<div class="weq-sp-src" data-wsrc="gain"><button class="' + (weqSyncSource === 'daw' ? 'on' : '') + '" data-v="daw">DAW</button><button class="' + (weqSyncSource === 'internal' ? 'on' : '') + '" data-v="internal">Int</button></div>';
+        h += '<span class="weq-sp-bpm">' + Math.round(_weqSyncBpm()) + '</span>';
+    } else {
+        var _spdDisp = weqAnimSpeed > 0 ? (weqAnimSpeed < 1 ? weqAnimSpeed.toFixed(2) + 'Hz' : weqAnimSpeed.toFixed(1) + 'Hz') : 'Off';
+        h += '<span class="weq-sp-label">Rate</span><span class="weq-sp-knob' + (weqAnimSpeed > 0 ? ' weq-anim-on' : '') + '" data-wk="speed" title="LFO rate (Hz), dbl-click to stop">' + _spdDisp + '</span>';
+    }
+    h += '</div>';
+    h += '<div class="weq-sp-row"><span class="weq-sp-label">Depth</span><span class="weq-sp-knob' + (weqAnimDepth > 0 && _lfoActive ? ' weq-anim-on' : '') + '" data-wk="mod" title="LFO depth (dB), dbl-click reset">' + weqAnimDepth + 'dB</span></div>';
     h += '<div class="weq-sp-row"><span class="weq-sp-label">Shape</span><select class="weq-sp-sel" data-wf="lfoShape" title="LFO waveform shape">';
     WEQ_LFO_SHAPE_KEYS.forEach(function (sk) {
         var sh = WEQ_LFO_SHAPES[sk];
         h += '<option value="' + sk + '"' + (weqAnimShape === sk ? ' selected' : '') + '>' + sh.icon + ' ' + sh.label + '</option>';
     });
     h += '</select></div>';
+    h += '<div class="weq-sp-row"><span class="weq-sp-label">Spread</span><span class="weq-sp-knob' + (weqAnimSpread > 0 && _lfoActive ? ' weq-anim-on' : '') + '" data-wk="spread" title="Per-point phase spread — creates cascading wave effects, dbl-click reset">' + weqAnimSpread + '%</span></div>';
     h += '<div class="weq-sp-row"><span class="weq-sp-label">Lo Cut</span><span class="weq-sp-knob' + (weqGainLoCut > 20 ? ' weq-anim-on' : '') + '" data-wk="gainLo" title="Gain LFO low cut, dbl-click reset">' + (weqGainLoCut > 20 ? weqFmtFreq(weqGainLoCut) : 'Off') + '</span></div>';
     h += '<div class="weq-sp-row"><span class="weq-sp-label">Hi Cut</span><span class="weq-sp-knob' + (weqGainHiCut < 20000 ? ' weq-anim-on' : '') + '" data-wk="gainHi" title="Gain LFO high cut, dbl-click reset">' + (weqGainHiCut < 20000 ? weqFmtFreq(weqGainHiCut) : 'Off') + '</span></div>';
-    h += '</div>';
+    h += '</div></div>';
 
     // ─── Q MOD section ───
-    var qModActive = weqQModSpeed > 0 && weqQModDepth > 0;
-    h += '<div class="weq-sp-section">';
-    h += '<div class="weq-sp-title">Q Mod</div>';
-    var _qSpdDisp = weqQModSpeed > 0 ? (weqQModSpeed < 1 ? weqQModSpeed.toFixed(2) + 'Hz' : weqQModSpeed.toFixed(1) + 'Hz') : 'Off';
-    h += '<div class="weq-sp-row"><span class="weq-sp-label">Rate</span><span class="weq-sp-knob' + (qModActive ? ' weq-anim-on' : '') + '" data-wk="qSpeed" title="Q modulation rate (Hz), dbl-click to stop">' + _qSpdDisp + '</span></div>';
-    h += '<div class="weq-sp-row"><span class="weq-sp-label">Depth</span><span class="weq-sp-knob' + (qModActive ? ' weq-anim-on' : '') + '" data-wk="qDepth" title="Q modulation depth (%), dbl-click reset">' + weqQModDepth + '%</span></div>';
+    var qModActive = (weqQModSpeed > 0 || weqQSync) && weqQModDepth > 0;
+    // Count affected bands
+    var _qAffected = 0;
+    for (var _qi = 0; _qi < wrongEqPoints.length; _qi++) { if (_weqQZoneScale(wrongEqPoints[_qi].x) > 0) _qAffected++; }
+    var _qCutActive = weqQLoCut > 20 || weqQHiCut < 20000;
+    var _qCountLabel = _qCutActive && wrongEqPoints.length > 0 ? ' · ' + _qAffected + '/' + wrongEqPoints.length : '';
+    h += '<div class="weq-sp-section' + (_weqCollapsed.qMod ? ' collapsed' : '') + '">';
+    h += '<div class="weq-sp-title" data-collapse="qMod">Q Mod<span class="weq-sp-count">' + _qCountLabel + '</span>' + (qModActive ? '<span class="weq-sp-dot active pulse"></span>' : '') + '</div>';
+    h += '<div class="weq-sp-body">';
+    h += _weqBuildShapeSvg(WEQ_QMOD_SHAPES, weqQModShape, 'weqQModShapeSvg');
+    // Sync toggle + Rate/Division
+    h += '<div class="weq-sp-row"><button class="weq-sp-sync' + (weqQSync ? ' on' : '') + '" data-wsync="q" title="Tempo Sync">⏱</button>';
+    if (weqQSync) {
+        h += '<span class="weq-sp-label">Div</span><select class="weq-sp-sel weq-sp-sel-sm" data-wf="qSyncDiv" title="Q Mod beat division">';
+        WEQ_SYNC_DIVS.forEach(function (d) {
+            h += '<option value="' + d + '"' + (weqQSyncDiv === d ? ' selected' : '') + '>' + _weqFmtSyncDiv(d) + '</option>';
+        });
+        h += '</select>';
+        h += '<div class="weq-sp-src" data-wsrc="q"><button class="' + (weqSyncSource === 'daw' ? 'on' : '') + '" data-v="daw">DAW</button><button class="' + (weqSyncSource === 'internal' ? 'on' : '') + '" data-v="internal">Int</button></div>';
+        h += '<span class="weq-sp-bpm">' + Math.round(_weqSyncBpm()) + '</span>';
+    } else {
+        var _qSpdDisp = weqQModSpeed > 0 ? (weqQModSpeed < 1 ? weqQModSpeed.toFixed(2) + 'Hz' : weqQModSpeed.toFixed(1) + 'Hz') : 'Off';
+        h += '<span class="weq-sp-label">Rate</span><span class="weq-sp-knob' + (qModActive ? ' weq-anim-on' : '') + '" data-wk="qSpeed" title="Q modulation rate (Hz), dbl-click to stop">' + _qSpdDisp + '</span>';
+    }
+    h += '</div>';
+    var _qDepLabel = weqQModDepth > 0 ? '×' + Math.pow(2, weqQModDepth / 100).toFixed(1) : 'Off';
+    h += '<div class="weq-sp-row"><span class="weq-sp-label">Depth</span><span class="weq-sp-knob' + (qModActive ? ' weq-anim-on' : '') + '" data-wk="qDepth" title="Q modulation range (max multiplier), dbl-click reset">' + _qDepLabel + '</span></div>';
     h += '<div class="weq-sp-row"><span class="weq-sp-label">Shape</span><select class="weq-sp-sel" data-wf="qShape" title="Q modulation waveform">';
     WEQ_QMOD_SHAPE_KEYS.forEach(function (qk) {
         var qs = WEQ_QMOD_SHAPES[qk];
         h += '<option value="' + qk + '"' + (weqQModShape === qk ? ' selected' : '') + '>' + qs.label + '</option>';
     });
     h += '</select></div>';
+    h += '<div class="weq-sp-row"><span class="weq-sp-label">Spread</span><span class="weq-sp-knob' + (weqQModSpread > 0 && qModActive ? ' weq-anim-on' : '') + '" data-wk="qSpread" title="Per-point Q phase spread — creates cascading Q effects, dbl-click reset">' + weqQModSpread + '%</span></div>';
     h += '<div class="weq-sp-row"><span class="weq-sp-label">Lo Cut</span><span class="weq-sp-knob' + (weqQLoCut > 20 ? ' weq-anim-on' : '') + '" data-wk="qLo" title="Q mod low cut, dbl-click reset">' + (weqQLoCut > 20 ? weqFmtFreq(weqQLoCut) : 'Off') + '</span></div>';
     h += '<div class="weq-sp-row"><span class="weq-sp-label">Hi Cut</span><span class="weq-sp-knob' + (weqQHiCut < 20000 ? ' weq-anim-on' : '') + '" data-wk="qHi" title="Q mod high cut, dbl-click reset">' + (weqQHiCut < 20000 ? weqFmtFreq(weqQHiCut) : 'Off') + '</span></div>';
-    h += '</div>';
+    h += '</div></div>';
 
     // ─── RANGE section ───
-    h += '<div class="weq-sp-section">';
-    h += '<div class="weq-sp-title">Range</div>';
+    h += '<div class="weq-sp-section' + (_weqCollapsed.range ? ' collapsed' : '') + '">';
+    h += '<div class="weq-sp-title" data-collapse="range">Range</div>';
+    h += '<div class="weq-sp-body">';
     h += '<div class="weq-sp-row"><span class="weq-sp-label">dB</span><select class="weq-sp-sel" data-wf="dbRange" title="dB range for the canvas">';
     [6, 12, 18, 24, 36, 48].forEach(function (r) {
         h += '<option value="' + r + '"' + (weqDBRangeMax === r ? ' selected' : '') + '>±' + r + ' dB</option>';
     });
     h += '</select></div>';
-    h += '</div>';
+    h += '</div></div>';
 
     h += '</div>'; // end weq-side-panel
     h += '</div>'; // end weq-body-wrap
@@ -1006,6 +1391,26 @@ function weqRenderPanel() {
             h += '<div class="weq-band-unit">';
             h += '<div class="' + classes + '" data-bandidx="' + ri + '" style="--band-color:' + col + '">';
 
+            // ── Mod exclusion sidebar (G / Q / D vertical strip on left) ──
+            {
+                var ptExcl = pt.modExclude || 0;
+                var gainOn = !(ptExcl & WEQ_MOD_GAIN);
+                var qOn    = !(ptExcl & WEQ_MOD_QMOD);
+                var driftOn = !(ptExcl & WEQ_MOD_DRIFT);
+                var gDepth = _weqPtDepth(pt, 'modGainDepth');
+                var qDepth = _weqPtDepth(pt, 'modQDepth');
+                var dDepth = _weqPtDepth(pt, 'modDriftDepth');
+                h += '<div class="weq-card-mod-sidebar">';
+                // Each button gets a fill bar (height=depth%) and data-depth for drag
+                h += '<button class="weq-mod-excl' + (gainOn ? ' active' : '') + '" data-weqmodexcl="' + ri + ':' + WEQ_MOD_GAIN + '" data-depthkey="modGainDepth" title="Gain Mod: ' + (gainOn ? gDepth + '%' : 'Off') + ' (drag to set depth)"><span class="weq-mod-fill" style="height:' + (gainOn ? gDepth : 0) + '%"></span>G</button>';
+                h += '<button class="weq-mod-excl' + (qOn ? ' active' : '') + '" data-weqmodexcl="' + ri + ':' + WEQ_MOD_QMOD + '" data-depthkey="modQDepth" title="Q Mod: ' + (qOn ? qDepth + '%' : 'Off') + ' (drag to set depth)"><span class="weq-mod-fill" style="height:' + (qOn ? qDepth : 0) + '%"></span>Q</button>';
+                h += '<button class="weq-mod-excl' + (driftOn ? ' active' : '') + '" data-weqmodexcl="' + ri + ':' + WEQ_MOD_DRIFT + '" data-depthkey="modDriftDepth" title="Drift: ' + (driftOn ? dDepth + '%' : 'Off') + ' (drag to set depth)"><span class="weq-mod-fill" style="height:' + (driftOn ? dDepth : 0) + '%"></span>D</button>';
+                h += '</div>';
+            }
+
+            // ── Main card content column ──
+            h += '<div class="weq-card-main">';
+
             // ── Top accent bar ──
             h += '<div class="weq-card-accent" style="background:' + col + '"></div>';
 
@@ -1019,24 +1424,28 @@ function weqRenderPanel() {
             h += '</div>';
 
             // ── Type selector ──
-            var types = ['LP', 'HP', 'Bell', 'Notch', 'LS', 'HS'];
-            var typeMap = { 'LP': 'LP', 'HP': 'HP', 'Bell': 'Bell', 'Notch': 'Notch', 'LS': 'LShf', 'HS': 'HShf' };
-            h += '<div class="weq-card-types">';
-            for (var ti = 0; ti < types.length; ti++) {
-                var tLabel = types[ti];
-                var tVal = typeMap[tLabel];
-                var isActive = (rType === tVal) ? ' active' : '';
-                h += '<button class="weq-type-btn' + isActive + '" data-weqtypeset="' + ri + ':' + tVal + '" title="' + tVal + '">' + tLabel + '</button>';
+            {
+                var types = ['LP', 'HP', 'Bell', 'Notch', 'LS', 'HS'];
+                var typeMap = { 'LP': 'LP', 'HP': 'HP', 'Bell': 'Bell', 'Notch': 'Notch', 'LS': 'LShf', 'HS': 'HShf' };
+                h += '<div class="weq-card-types">';
+                for (var ti = 0; ti < types.length; ti++) {
+                    var tLabel = types[ti];
+                    var tVal = typeMap[tLabel];
+                    var isActive = (rType === tVal) ? ' active' : '';
+                    h += '<button class="weq-type-btn' + isActive + '" data-weqtypeset="' + ri + ':' + tVal + '" title="' + tVal + '">' + tLabel + '</button>';
+                }
+                h += '</div>';
             }
-            h += '</div>';
 
-            // ── Slope selector (12/24/48 dB/oct) ──
-            var ptSlope = pt.slope || 1;
-            h += '<div class="weq-card-types weq-card-slope">';
-            h += '<button class="weq-type-btn' + (ptSlope === 1 ? ' active' : '') + '" data-weqslope="' + ri + ':1" title="12 dB/oct">12</button>';
-            h += '<button class="weq-type-btn' + (ptSlope === 2 ? ' active' : '') + '" data-weqslope="' + ri + ':2" title="24 dB/oct">24</button>';
-            h += '<button class="weq-type-btn' + (ptSlope === 4 ? ' active' : '') + '" data-weqslope="' + ri + ':4" title="48 dB/oct">48</button>';
-            h += '</div>';
+            // ── Slope selector ──
+            {
+                var ptSlope = pt.slope || 1;
+                h += '<div class="weq-card-types weq-card-slope">';
+                h += '<button class="weq-type-btn' + (ptSlope === 1 ? ' active' : '') + '" data-weqslope="' + ri + ':1" title="12 dB/oct">12</button>';
+                h += '<button class="weq-type-btn' + (ptSlope === 2 ? ' active' : '') + '" data-weqslope="' + ri + ':2" title="24 dB/oct">24</button>';
+                h += '<button class="weq-type-btn' + (ptSlope === 4 ? ' active' : '') + '" data-weqslope="' + ri + ':4" title="48 dB/oct">48</button>';
+                h += '</div>';
+            }
 
             // ── Divider: slope → values ──
             h += '<div class="weq-card-divider"></div>';
@@ -1049,7 +1458,11 @@ function weqRenderPanel() {
 
             // ── Gain + Q — labeled param boxes ──
             h += '<div class="weq-card-params">';
-            if (rType === 'LP' || rType === 'HP') {
+            if (weqSplitMode) {
+                // In split mode: show per-band level (draggable)
+                var gCls = rGain > 0.1 ? ' boost' : (rGain < -0.1 ? ' cut' : '');
+                h += '<div class="weq-card-param-box"><span class="weq-card-plbl">LEVEL</span><span class="weq-card-pval' + gCls + '" data-weqgain="' + ri + '" title="Drag \u2195 band level">' + weqFmtDB(rGain) + '</span></div>';
+            } else if (rType === 'LP' || rType === 'HP') {
                 var slopeDB = (ptSlope || 1) * 12;
                 h += '<div class="weq-card-param-box"><span class="weq-card-plbl">GAIN</span><span class="weq-card-pval slope">' + slopeDB + 'dB/o</span></div>';
             } else {
@@ -1061,15 +1474,19 @@ function weqRenderPanel() {
             h += '</div>'; // end weq-card-value-block
 
             // ── Stereo + Mode row ──
-            h += '<div class="weq-card-mode-row">';
-            var sm = pt.stereoMode || 0;
-            h += '<div class="weq-card-stereo">';
-            h += '<button class="weq-ms-btn' + (sm === 0 ? ' active' : '') + '" data-weqstereo="' + ri + ':0" title="Stereo">LR</button>';
-            h += '<button class="weq-ms-btn' + (sm === 1 ? ' active' : '') + '" data-weqstereo="' + ri + ':1" title="Mid">M</button>';
-            h += '<button class="weq-ms-btn' + (sm === 2 ? ' active' : '') + '" data-weqstereo="' + ri + ':2" title="Side">S</button>';
-            h += '</div>';
-            h += '<button class="weq-card-mode' + (ptPreEq ? ' on' : '') + '" data-weqpointpreq="' + ri + '" title="Toggle Post-EQ / Split">' + (ptPreEq ? 'EQ' : 'SPL') + '</button>';
-            h += '</div>'; // end weq-card-mode-row
+            {
+                h += '<div class="weq-card-mode-row">';
+                var sm = pt.stereoMode || 0;
+                h += '<div class="weq-card-stereo">';
+                h += '<button class="weq-ms-btn' + (sm === 0 ? ' active' : '') + '" data-weqstereo="' + ri + ':0" title="Stereo">LR</button>';
+                h += '<button class="weq-ms-btn' + (sm === 1 ? ' active' : '') + '" data-weqstereo="' + ri + ':1" title="Mid">M</button>';
+                h += '<button class="weq-ms-btn' + (sm === 2 ? ' active' : '') + '" data-weqstereo="' + ri + ':2" title="Side">S</button>';
+                h += '</div>';
+                h += '<button class="weq-card-mode' + (ptPreEq ? ' on' : '') + '" data-weqpointpreq="' + ri + '" title="Toggle Post-EQ / Split">' + (ptPreEq ? 'EQ' : 'SPL') + '</button>';
+                h += '</div>';
+            }
+
+            h += '</div>'; // end weq-card-main
 
             h += '</div>'; // end card
 
@@ -1386,40 +1803,139 @@ function weqDrawCanvas() {
         }
 
         // ── Spectrum analyzer (behind everything) ──
-        if (weqSpectrumSmooth && weqSpectrumSmooth.length > 0) {
+        // Uses independent dB scale: 0dB (full scale) → top, floor → bottom
+        if (weqSpecVisible && weqSpectrumSmooth && weqSpectrumSmooth.length > 0) {
             var specBins = weqSpectrumSmooth.length;
-            var zeroY = (1 - (0 - (-weqDBRangeMax)) / (weqDBRangeMax * 2)) * H;
+            var specFloor = weqSpecFloor;      // configurable noise floor
+            var specCeil  = weqSpecCeil;        // 0 dBFS = top of display
+            var specRange = specCeil - specFloor;
+
+            // Map spectrum dB to canvas Y (0dBFS → top, floor → bottom)
+            var specY = function(db) {
+                var clamped = Math.max(specFloor, Math.min(specCeil, db));
+                return (1 - (clamped - specFloor) / specRange) * H;
+            };
+
+            // ── Build spectrum Path2D once, draw multi-layer glow from it ──
+            // Downsample 256 bins to ~128 display points (max-pool to preserve peaks)
+            var dispN = Math.min(specBins, Math.max(64, Math.ceil(W / 5)));
+            var dispData = new Float32Array(dispN);
+            var ratio = specBins / dispN;
+            for (var di = 0; di < dispN; di++) {
+                var lo = Math.floor(di * ratio);
+                var hi = Math.min(specBins - 1, Math.floor((di + 1) * ratio));
+                var mx = weqSpectrumSmooth[lo];
+                for (var bi = lo + 1; bi <= hi; bi++) {
+                    if (weqSpectrumSmooth[bi] > mx) mx = weqSpectrumSmooth[bi];
+                }
+                dispData[di] = mx;
+            }
+
+            // Catmull-Rom spline → Path2D (built once, stroked/filled multiple times)
+            var _specBuildPath2D = function(data, n, xScale, yFn) {
+                var p2d = new Path2D();
+                p2d.moveTo(0, yFn(data[0]));
+                for (var i = 1; i < n; i++) {
+                    var x1 = (i / (n - 1)) * xScale;
+                    var y1 = yFn(data[i]);
+                    var iPrev = Math.max(0, i - 1);
+                    var iNext = Math.min(n - 1, i + 1);
+                    var xPrev = (iPrev / (n - 1)) * xScale;
+                    var yPrev = yFn(data[iPrev]);
+                    var xNext = (iNext / (n - 1)) * xScale;
+                    var yNext = yFn(data[iNext]);
+                    var x0c = ((i - 1) / (n - 1)) * xScale;
+                    var y0c = yFn(data[i - 1]);
+                    var t = 0.5; // Catmull-Rom tension
+                    var cp1x = x0c + (x1 - xPrev) * t;
+                    var cp1y = y0c + (y1 - yPrev) * t;
+                    var cp2x = x1 - (xNext - x0c) * t;
+                    var cp2y = y1 - (yNext - y0c) * t;
+                    p2d.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, x1, y1);
+                }
+                return p2d;
+            };
+
+            var specPath = _specBuildPath2D(dispData, dispN, W, specY);
+
+            // ── Filled area ──
             ctx.save();
             ctx.beginPath();
-            ctx.moveTo(0, H);
-            for (var si = 0; si < specBins; si++) {
-                var sx = (si / (specBins - 1)) * W;
-                var sdb = Math.max(-weqDBRangeMax, Math.min(weqDBRangeMax, weqSpectrumSmooth[si]));
-                var sy = (1 - (sdb - (-weqDBRangeMax)) / (weqDBRangeMax * 2)) * H;
-                if (si === 0) ctx.moveTo(sx, sy);
-                else ctx.lineTo(sx, sy);
-            }
-            ctx.lineTo(W, H);
-            ctx.lineTo(0, H);
-            ctx.closePath();
+            var fillPath = new Path2D(specPath);
+            fillPath.lineTo(W, H);
+            fillPath.lineTo(0, H);
+            fillPath.closePath();
             var specGrad = ctx.createLinearGradient(0, 0, 0, H);
-            specGrad.addColorStop(0, 'rgba(60, 180, 200, 0.15)');
-            specGrad.addColorStop(0.5, 'rgba(40, 120, 160, 0.08)');
-            specGrad.addColorStop(1, 'rgba(20, 60, 100, 0.03)');
+            specGrad.addColorStop(0,   'rgba(60, 220, 240, 0.22)');
+            specGrad.addColorStop(0.15,'rgba(50, 180, 210, 0.15)');
+            specGrad.addColorStop(0.4, 'rgba(35, 120, 170, 0.08)');
+            specGrad.addColorStop(0.7, 'rgba(25, 70, 120, 0.04)');
+            specGrad.addColorStop(1,   'rgba(15, 40, 70, 0.01)');
             ctx.fillStyle = specGrad;
-            ctx.fill();
-            // Spectrum line
-            ctx.beginPath();
-            for (var si2 = 0; si2 < specBins; si2++) {
-                var sx2 = (si2 / (specBins - 1)) * W;
-                var sdb2 = Math.max(-weqDBRangeMax, Math.min(weqDBRangeMax, weqSpectrumSmooth[si2]));
-                var sy2 = (1 - (sdb2 - (-weqDBRangeMax)) / (weqDBRangeMax * 2)) * H;
-                if (si2 === 0) ctx.moveTo(sx2, sy2);
-                else ctx.lineTo(sx2, sy2);
+            ctx.fill(fillPath);
+
+            // ── Multi-layer glow strokes (reuse same Path2D) ──
+            ctx.lineJoin = 'round';
+            // Layer 1: Diffuse glow
+            ctx.strokeStyle = 'rgba(60, 200, 230, 0.08)';
+            ctx.lineWidth = 4;
+            ctx.stroke(specPath);
+            // Layer 2: Medium glow
+            ctx.strokeStyle = 'rgba(70, 210, 235, 0.15)';
+            ctx.lineWidth = 2;
+            ctx.stroke(specPath);
+            // Layer 3: Crisp bright line
+            ctx.strokeStyle = 'rgba(100, 225, 245, 0.45)';
+            ctx.lineWidth = 1.2;
+            ctx.stroke(specPath);
+
+            // ── Peak-hold line (build separate Path2D, reuse for 2 layers) ──
+            if (weqSpecPeakHold && weqSpectrumPeaks && weqSpectrumPeaks.length === specBins) {
+                // Downsample peaks with same max-pool
+                var peakDisp = new Float32Array(dispN);
+                for (var pdi = 0; pdi < dispN; pdi++) {
+                    var plo = Math.floor(pdi * ratio);
+                    var phi = Math.min(specBins - 1, Math.floor((pdi + 1) * ratio));
+                    var pmx = Math.max(specFloor + 3, weqSpectrumPeaks[plo]);
+                    for (var pbi = plo + 1; pbi <= phi; pbi++) {
+                        var pv = Math.max(specFloor + 3, weqSpectrumPeaks[pbi]);
+                        if (pv > pmx) pmx = pv;
+                    }
+                    peakDisp[pdi] = pmx;
+                }
+                var peakPath = _specBuildPath2D(peakDisp, dispN, W, specY);
+                // Glow layer
+                ctx.strokeStyle = 'rgba(140, 240, 255, 0.12)';
+                ctx.lineWidth = 2.5;
+                ctx.stroke(peakPath);
+                // Crisp line
+                ctx.strokeStyle = 'rgba(150, 240, 255, 0.55)';
+                ctx.lineWidth = 0.7;
+                ctx.stroke(peakPath);
             }
-            ctx.strokeStyle = 'rgba(80, 200, 220, 0.25)';
-            ctx.lineWidth = 1;
-            ctx.stroke();
+
+            // ── Spectrum dB scale markers (right edge) ──
+            ctx.save();
+            ctx.font = '9px "Share Tech Mono", monospace';
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = 'rgba(80, 200, 220, 0.35)';
+            // Pick appropriate dB steps based on range
+            var specDbStep = specRange >= 100 ? 20 : (specRange >= 60 ? 20 : 10);
+            for (var sdbi = specFloor; sdbi <= specCeil; sdbi += specDbStep) {
+                var sdy = specY(sdbi);
+                if (sdy < 10 || sdy > H - 10) continue;
+                ctx.fillText(sdbi + '', W - 3, sdy);
+                // Subtle tick line
+                ctx.beginPath();
+                ctx.moveTo(W - 22, sdy);
+                ctx.lineTo(W - 1, sdy);
+                ctx.strokeStyle = 'rgba(80, 200, 220, 0.08)';
+                ctx.lineWidth = 0.5;
+                ctx.stroke();
+            }
+            ctx.restore();
+
             ctx.restore();
         }
 
@@ -1676,6 +2192,28 @@ function weqDrawCanvas() {
         });
         ctx.restore();
 
+        // ── Crosshair lines (SPAN-style) — drawn when mouse is over canvas ──
+        if (weqMouseNormX >= 0 && weqMouseNormX <= 1 && weqMouseNormY >= 0 && weqMouseNormY <= 1) {
+            var chX = weqMouseNormX * W;
+            var chY = weqMouseNormY * H;
+            ctx.save();
+            ctx.setLineDash([3, 4]);
+            ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+            ctx.lineWidth = 0.5;
+            // Vertical line
+            ctx.beginPath();
+            ctx.moveTo(chX, 0);
+            ctx.lineTo(chX, H);
+            ctx.stroke();
+            // Horizontal line
+            ctx.beginPath();
+            ctx.moveTo(0, chY);
+            ctx.lineTo(W, chY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.restore();
+        }
+
         // ── Draw per-band individual curves (ghost) ──
         if (sorted.length > 0) {
             // Use lower resolution during animation for performance
@@ -1724,16 +2262,36 @@ function weqDrawCanvas() {
                 curveY[px] = weqYtoCanvas(weqDBtoY(db), H);
             }
 
-            // ── Draw total EQ curve (from cache) ──
-            ctx.lineWidth = 2.5;
+            // ── Draw total EQ curve (from cache) — multi-layer glow ──
+            var accentCol = weqCssVar('--accent', '#2D6B3F');
             ctx.lineJoin = 'round';
             ctx.lineCap = 'round';
-            ctx.strokeStyle = weqCssVar('--accent', '#2D6B3F');
+            // Layer 1: Diffuse glow
+            ctx.beginPath();
+            for (var cg1 = 0; cg1 <= resolution; cg1++) {
+                if (cg1 === 0) ctx.moveTo(curveX[cg1], curveY[cg1]);
+                else ctx.lineTo(curveX[cg1], curveY[cg1]);
+            }
+            ctx.lineWidth = 5;
+            ctx.strokeStyle = weqHexRgba(accentCol, 0.08);
+            ctx.stroke();
+            // Layer 2: Medium glow
+            ctx.beginPath();
+            for (var cg2 = 0; cg2 <= resolution; cg2++) {
+                if (cg2 === 0) ctx.moveTo(curveX[cg2], curveY[cg2]);
+                else ctx.lineTo(curveX[cg2], curveY[cg2]);
+            }
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = weqHexRgba(accentCol, 0.20);
+            ctx.stroke();
+            // Layer 3: Crisp main line
             ctx.beginPath();
             for (var cx = 0; cx <= resolution; cx++) {
                 if (cx === 0) ctx.moveTo(curveX[cx], curveY[cx]);
                 else ctx.lineTo(curveX[cx], curveY[cx]);
             }
+            ctx.lineWidth = 2.5;
+            ctx.strokeStyle = accentCol;
             ctx.stroke();
 
             // Filled area under/over 0dB (reuse cached curve)
@@ -1750,6 +2308,100 @@ function weqDrawCanvas() {
             ctx.fillStyle = weqCssVar('--accent', '#2D6B3F');
             ctx.fill();
             ctx.globalAlpha = 1;
+
+            // ── Ghosted modulation range lines ──
+            // Show ± modulation envelope when any modulation is active.
+            // Gain mod: shift curve ±depth dB. Drift: shift curve ±octaves horizontally.
+            var hasGainMod = weqAnimSpeed > 0 && weqAnimDepth > 0;
+            var hasDriftMod = Math.abs(weqDrift) > 0 && weqDriftRange > 0;
+            var hasContMod = weqDriftContinuous && weqDriftRange > 0;
+            if ((hasGainMod || hasDriftMod || hasContMod) && !isAnimating) {
+                // Compute max per-point gain depth scale
+                var ghostDepthDB = 0;
+                if (hasGainMod) ghostDepthDB = weqAnimDepth;
+                if (hasContMod) ghostDepthDB = Math.max(ghostDepthDB, (weqDriftRange / 50) * 18.0);
+
+                // Compute max per-point drift range in octaves
+                var ghostDriftOct = hasDriftMod ? (weqDriftRange / 50) * 4.0 : 0;
+
+                if (ghostDepthDB > 0 || ghostDriftOct > 0) {
+                    ctx.save();
+                    ctx.setLineDash([3, 5]);
+                    ctx.lineWidth = 1;
+                    ctx.lineJoin = 'round';
+                    ctx.lineCap = 'round';
+                    var ghostAlpha = 0.18;
+                    var ghostCol = weqHexRgba(accentCol, ghostAlpha);
+                    ctx.strokeStyle = ghostCol;
+
+                    // Draw two ghost curves: +envelope and -envelope
+                    for (var sign = -1; sign <= 1; sign += 2) {
+                        ctx.beginPath();
+                        var ghostRes = Math.max(80, Math.floor(W / 3));
+                        for (var gx = 0; gx <= ghostRes; gx++) {
+                            var gxN = gx / ghostRes;
+                            // Shift frequency by drift
+                            var shiftedX = gxN;
+                            if (ghostDriftOct > 0) {
+                                var gFreq = weqXToFreq(gxN);
+                                gFreq *= Math.pow(2, sign * ghostDriftOct);
+                                shiftedX = weqFreqToX(gFreq);
+                            }
+                            var gdb = weqEvalAtX(shiftedX);
+                            // Shift gain by mod depth
+                            if (ghostDepthDB > 0) {
+                                gdb += sign * ghostDepthDB;
+                            }
+                            gdb = Math.max(-weqDBRangeMax, Math.min(weqDBRangeMax, gdb));
+                            var gy = weqYtoCanvas(weqDBtoY(gdb), H);
+                            if (gx === 0) ctx.moveTo(gxN * W, gy);
+                            else ctx.lineTo(gxN * W, gy);
+                        }
+                        ctx.stroke();
+                    }
+
+                    // Fill between the two ghost curves
+                    ctx.beginPath();
+                    var fillRes = ghostRes;
+                    // Top envelope (positive shift)
+                    for (var ft = 0; ft <= fillRes; ft++) {
+                        var ftxN = ft / fillRes;
+                        var ftShiftX = ftxN;
+                        if (ghostDriftOct > 0) {
+                            var ftFreq = weqXToFreq(ftxN);
+                            ftFreq *= Math.pow(2, ghostDriftOct);
+                            ftShiftX = weqFreqToX(ftFreq);
+                        }
+                        var ftdb = weqEvalAtX(ftShiftX);
+                        if (ghostDepthDB > 0) ftdb += ghostDepthDB;
+                        ftdb = Math.max(-weqDBRangeMax, Math.min(weqDBRangeMax, ftdb));
+                        var fty = weqYtoCanvas(weqDBtoY(ftdb), H);
+                        if (ft === 0) ctx.moveTo(ftxN * W, fty);
+                        else ctx.lineTo(ftxN * W, fty);
+                    }
+                    // Bottom envelope (negative shift, reverse)
+                    for (var fb = fillRes; fb >= 0; fb--) {
+                        var fbxN = fb / fillRes;
+                        var fbShiftX = fbxN;
+                        if (ghostDriftOct > 0) {
+                            var fbFreq = weqXToFreq(fbxN);
+                            fbFreq *= Math.pow(2, -ghostDriftOct);
+                            fbShiftX = weqFreqToX(fbFreq);
+                        }
+                        var fbdb = weqEvalAtX(fbShiftX);
+                        if (ghostDepthDB > 0) fbdb -= ghostDepthDB;
+                        fbdb = Math.max(-weqDBRangeMax, Math.min(weqDBRangeMax, fbdb));
+                        var fby = weqYtoCanvas(weqDBtoY(fbdb), H);
+                        ctx.lineTo(fbxN * W, fby);
+                    }
+                    ctx.closePath();
+                    ctx.fillStyle = weqHexRgba(accentCol, 0.04);
+                    ctx.fill();
+
+                    ctx.setLineDash([]);
+                    ctx.restore();
+                }
+            }
 
             // biquad contributions. What you see IS what you hear — WYSIWYG.
         } else {
@@ -2214,6 +2866,73 @@ function weqSetupEvents() {
         weqSyncToHost();
     };
 
+    // Master modulation toggle
+    var modToggleBtn = document.getElementById('weqModToggle');
+    if (modToggleBtn) modToggleBtn.onclick = function () {
+        weqModEnabled = !weqModEnabled;
+        modToggleBtn.classList.toggle('on', weqModEnabled);
+        if (!weqModEnabled && weqAnimRafId) {
+            weqAnimStop(); // restores base positions
+        } else if (weqModEnabled && _weqNeedsAnim() && !weqAnimRafId) {
+            weqAnimStart();
+        }
+        weqSyncToHost();
+        if (typeof markStateDirty === 'function') markStateDirty();
+    };
+
+    // Per-point modulation exclusion toggles + depth drag (G / Q / D buttons)
+    document.querySelectorAll('[data-weqmodexcl]').forEach(function (btn) {
+        var parts = btn.dataset.weqmodexcl.split(':');
+        var idx = parseInt(parts[0]);
+        var bit = parseInt(parts[1]);
+        var depthKey = btn.dataset.depthkey; // 'modGainDepth', 'modQDepth', 'modDriftDepth'
+
+        btn.addEventListener('mousedown', function (e) {
+            e.stopPropagation();
+            e.preventDefault();
+            if (idx < 0 || idx >= wrongEqPoints.length) return;
+            var pt = wrongEqPoints[idx];
+            var startY = e.clientY;
+            var startDepth = _weqPtDepth(pt, depthKey);
+            var dragged = false;
+            var fillEl = btn.querySelector('.weq-mod-fill');
+
+            var onMove = function (me) {
+                var dy = startY - me.clientY; // up = positive = increase
+                if (!dragged && Math.abs(dy) < 4) return; // dead zone
+                dragged = true;
+                // Scale: 100px drag = 100% change
+                var newDepth = Math.max(0, Math.min(100, Math.round(startDepth + dy)));
+                pt[depthKey] = newDepth;
+                // Update fill bar live
+                if (fillEl) fillEl.style.height = newDepth + '%';
+                btn.title = depthKey.replace('mod', '').replace('Depth', '') + ' Mod: ' + newDepth + '%';
+            };
+            var onUp = function () {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                if (!dragged) {
+                    // Short click = toggle exclude
+                    pt.modExclude = (pt.modExclude || 0) ^ bit;
+                    btn.classList.toggle('active', !(pt.modExclude & bit));
+                    // Update fill bar on toggle
+                    var isOn = !(pt.modExclude & bit);
+                    if (fillEl) fillEl.style.height = (isOn ? _weqPtDepth(pt, depthKey) : 0) + '%';
+                } else {
+                    // After drag, if depth > 0, ensure the mod type is enabled
+                    if (pt[depthKey] > 0) {
+                        pt.modExclude = (pt.modExclude || 0) & ~bit; // clear exclude bit
+                        btn.classList.add('active');
+                    }
+                }
+                weqSyncToHost();
+                if (typeof markStateDirty === 'function') markStateDirty();
+            };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        });
+    });
+
     // Continuous drift toggle
     var contBtn = document.getElementById('weqContinuous');
     if (contBtn) contBtn.onclick = function () {
@@ -2513,7 +3232,7 @@ function weqSetupEvents() {
                     el.textContent = weqFmtDB(newDB);
                     el.className = 'weq-card-pval' + (newDB > 0.1 ? ' boost' : (newDB < -0.1 ? ' cut' : ''));
                     weqDrawCanvas();
-                    weqSyncToHost(); // real-time sync
+                    weqSyncPointFast(idx, { gain: newDB }); // fast-path: gain only
                 }
             }
             function onUp() {
@@ -2554,7 +3273,7 @@ function weqSetupEvents() {
                     if (weqAnimRafId && weqAnimBaseX[idx] != null) weqAnimBaseX[idx] = wrongEqPoints[idx].x;
                     el.textContent = weqFmtFreq(newFreq);
                     weqDrawCanvas();
-                    weqSyncToHost();
+                    weqSyncPointFast(idx, { freq: newFreq }); // fast-path: freq only
                 }
             }
             function onUp() {
@@ -2605,7 +3324,7 @@ function weqSetupEvents() {
                     el.textContent = newQ.toFixed(2);
                     weqDrawCanvas();
                     _weqUpdateLegendRanges();
-                    weqSyncToHost();
+                    weqSyncPointFast(idx, { q: newQ }); // fast-path: Q only
                 }
             }
             function onUp() {
@@ -2770,7 +3489,7 @@ function weqSetupEvents() {
             else if (key === 'steps') { weqGlobalSteps = 0; knob.textContent = 'Off'; }
             else if (key === 'tilt') { weqGlobalTilt = 0; knob.textContent = '+0'; }
 
-            else if (key === 'drift') { weqDrift = 0; knob.textContent = '+0'; knob.classList.remove('weq-anim-on'); }
+            else if (key === 'drift') { weqDrift = 0; knob.textContent = 'Off'; knob.classList.remove('weq-anim-on'); }
             else if (key === 'driftRange') { weqDriftRange = 5; knob.textContent = '5%'; }
             else if (key === 'speed') { weqAnimSpeed = 0; knob.textContent = 'Off'; knob.classList.remove('weq-anim-on'); }
             else if (key === 'mod') { weqAnimDepth = 6; knob.textContent = '6dB'; }
@@ -2779,9 +3498,11 @@ function weqSetupEvents() {
             else if (key === 'driftLo') { weqDriftLoCut = 20; knob.textContent = 'Off'; knob.classList.remove('weq-anim-on'); }
             else if (key === 'driftHi') { weqDriftHiCut = 20000; knob.textContent = 'Off'; knob.classList.remove('weq-anim-on'); }
             else if (key === 'qSpeed') { weqQModSpeed = 0; knob.textContent = 'Off'; knob.classList.remove('weq-anim-on'); }
-            else if (key === 'qDepth') { weqQModDepth = 50; knob.textContent = '50%'; }
+            else if (key === 'qDepth') { weqQModDepth = 30; knob.textContent = '×' + Math.pow(2, 30/100).toFixed(1); }
             else if (key === 'qLo') { weqQLoCut = 20; knob.textContent = 'Off'; knob.classList.remove('weq-anim-on'); }
             else if (key === 'qHi') { weqQHiCut = 20000; knob.textContent = 'Off'; knob.classList.remove('weq-anim-on'); }
+            else if (key === 'spread') { weqAnimSpread = 0; knob.textContent = '0%'; knob.classList.remove('weq-anim-on'); }
+            else if (key === 'qSpread') { weqQModSpread = 0; knob.textContent = '0%'; knob.classList.remove('weq-anim-on'); }
 
             // Always check: if no modulation is needed, restore base positions
             if (!_weqNeedsAnim()) weqAnimStop();
@@ -2811,6 +3532,8 @@ function weqSetupEvents() {
             else if (key === 'qDepth') startVal = weqQModDepth;
             else if (key === 'qLo') startVal = Math.log(weqQLoCut / 20) / Math.log(20000 / 20);
             else if (key === 'qHi') startVal = Math.log(weqQHiCut / 20) / Math.log(20000 / 20);
+            else if (key === 'spread') startVal = weqAnimSpread;
+            else if (key === 'qSpread') startVal = weqQModSpread;
 
 
 
@@ -2834,7 +3557,8 @@ function weqSetupEvents() {
             }
 
             function onMove(ev) {
-                var dy = startY - ev.clientY;
+                var rawDy = startY - ev.clientY;
+                var dy = ev.shiftKey ? rawDy * 0.2 : rawDy; // Shift = fine control (5x slower)
                 if (key === 'depth') {
                     weqGlobalDepth = Math.max(0, Math.min(200, startVal + dy));
                     knob.textContent = weqGlobalDepth + '%';
@@ -2849,7 +3573,7 @@ function weqSetupEvents() {
                     knob.textContent = (weqGlobalTilt >= 0 ? '+' : '') + weqGlobalTilt;
                 } else if (key === 'drift') {
                     weqDrift = Math.max(-50, Math.min(50, Math.round(startVal + dy * 0.5)));
-                    knob.textContent = (weqDrift >= 0 ? '+' : '') + weqDrift;
+                    knob.textContent = _weqFmtDriftHz();
                     knob.classList.toggle('weq-anim-on', Math.abs(weqDrift) > 0 && weqDriftRange > 0);
                     var nl = _weqNeedsAnim();
                     if (nl && !weqAnimRafId) weqAnimStart();
@@ -2915,8 +3639,8 @@ function weqSetupEvents() {
                     if (nlq && !weqAnimRafId) weqAnimStart();
                     else if (!nlq && weqAnimRafId) weqAnimStop();
                 } else if (key === 'qDepth') {
-                    weqQModDepth = Math.max(0, Math.min(100, Math.round(startVal + dy * 0.5)));
-                    knob.textContent = weqQModDepth + '%';
+                    weqQModDepth = Math.max(0, Math.min(200, Math.round(startVal + dy * 0.8)));
+                    knob.textContent = weqQModDepth > 0 ? '×' + Math.pow(2, weqQModDepth / 100).toFixed(1) : 'Off';
                     knob.classList.toggle('weq-anim-on', weqQModSpeed > 0 && weqQModDepth > 0);
                     var nlqd = _weqNeedsAnim();
                     if (nlqd && !weqAnimRafId) weqAnimStart();
@@ -2933,6 +3657,14 @@ function weqSetupEvents() {
                     if (weqQHiCut <= weqQLoCut) weqQHiCut = weqQLoCut + 1;
                     knob.textContent = weqQHiCut < 20000 ? weqFmtFreq(weqQHiCut) : 'Off';
                     knob.classList.toggle('weq-anim-on', weqQHiCut < 20000);
+                } else if (key === 'spread') {
+                    weqAnimSpread = Math.max(0, Math.min(100, Math.round(startVal + dy * 0.5)));
+                    knob.textContent = weqAnimSpread + '%';
+                    knob.classList.toggle('weq-anim-on', weqAnimSpread > 0 && weqAnimSpeed > 0);
+                } else if (key === 'qSpread') {
+                    weqQModSpread = Math.max(0, Math.min(100, Math.round(startVal + dy * 0.5)));
+                    knob.textContent = weqQModSpread + '%';
+                    knob.classList.toggle('weq-anim-on', weqQModSpread > 0 && weqQModSpeed > 0 && weqQModDepth > 0);
                 }
                 weqDrawCanvas();
                 weqSyncToHost(); // real-time sync during drag
@@ -2962,6 +3694,18 @@ function weqSetupEvents() {
         };
     });
 
+    // Section collapse/expand
+    document.querySelectorAll('[data-collapse]').forEach(function (title) {
+        title.onclick = function (e) {
+            // Don't collapse if clicking a knob inside the title
+            if (e.target.closest('[data-wk]')) return;
+            var sectionKey = title.dataset.collapse;
+            _weqCollapsed[sectionKey] = !_weqCollapsed[sectionKey];
+            var section = title.closest('.weq-sp-section');
+            if (section) section.classList.toggle('collapsed', _weqCollapsed[sectionKey]);
+        };
+    });
+
     // Drift Scale dropdown
     document.querySelectorAll('[data-wf="driftScale"]').forEach(function (sel) {
         sel.onchange = function () {
@@ -2984,6 +3728,7 @@ function weqSetupEvents() {
     document.querySelectorAll('[data-wf="lfoShape"]').forEach(function (sel) {
         sel.onchange = function () {
             weqAnimShape = sel.value;
+            _weqRefreshShapeSvg('weqLfoShapeSvg', WEQ_LFO_SHAPES, weqAnimShape);
             weqSyncToHost();
             if (typeof markStateDirty === 'function') markStateDirty();
         };
@@ -2991,6 +3736,7 @@ function weqSetupEvents() {
     document.querySelectorAll('[data-wf="qShape"]').forEach(function (sel) {
         sel.onchange = function () {
             weqQModShape = sel.value;
+            _weqRefreshShapeSvg('weqQModShapeSvg', WEQ_QMOD_SHAPES, weqQModShape);
             weqSyncToHost();
             if (typeof markStateDirty === 'function') markStateDirty();
         };
@@ -3005,6 +3751,116 @@ function weqSetupEvents() {
             if (typeof markStateDirty === 'function') markStateDirty();
         };
     });
+
+    // Sync toggle buttons (Gain / Q)
+    document.querySelectorAll('[data-wsync]').forEach(function (btn) {
+        btn.onclick = function (e) {
+            e.stopPropagation();
+            var which = btn.dataset.wsync;
+            if (which === 'gain') {
+                weqGainSync = !weqGainSync;
+            } else if (which === 'q') {
+                weqQSync = !weqQSync;
+            }
+            weqRenderPanel();
+            var nl = _weqNeedsAnim();
+            if (nl && !weqAnimRafId) weqAnimStart();
+            else if (!nl && weqAnimRafId) weqAnimStop();
+            weqSyncToHost();
+            if (typeof markStateDirty === 'function') markStateDirty();
+        };
+    });
+
+    // Gain sync division
+    document.querySelectorAll('[data-wf="gainSyncDiv"]').forEach(function (sel) {
+        sel.onchange = function () {
+            weqGainSyncDiv = sel.value;
+            weqSyncToHost();
+            if (typeof markStateDirty === 'function') markStateDirty();
+        };
+    });
+
+    // Q sync division
+    document.querySelectorAll('[data-wf="qSyncDiv"]').forEach(function (sel) {
+        sel.onchange = function () {
+            weqQSyncDiv = sel.value;
+            weqSyncToHost();
+            if (typeof markStateDirty === 'function') markStateDirty();
+        };
+    });
+
+    // Sync source toggle (DAW / Internal)
+    document.querySelectorAll('[data-wsrc]').forEach(function (grp) {
+        grp.querySelectorAll('button').forEach(function (btn) {
+            btn.onclick = function (e) {
+                e.stopPropagation();
+                weqSyncSource = btn.dataset.v;
+                weqRenderPanel();
+                weqSyncToHost();
+                if (typeof markStateDirty === 'function') markStateDirty();
+            };
+        });
+    });
+
+    // ── Spectrum toolbar event handlers ──
+    var specShowBtn = document.getElementById('weqSpecShowBtn');
+    if (specShowBtn) specShowBtn.onclick = function () {
+        weqSpecVisible = !weqSpecVisible;
+        specShowBtn.classList.toggle('on', weqSpecVisible);
+        weqDrawCanvas();
+        if (typeof markStateDirty === 'function') markStateDirty();
+    };
+    var specSpeedSel = document.getElementById('weqSpecSpeedSel');
+    if (specSpeedSel) specSpeedSel.onchange = function () {
+        weqSpecSpeed = parseInt(specSpeedSel.value);
+        if (typeof markStateDirty === 'function') markStateDirty();
+    };
+    var specSlopeSel = document.getElementById('weqSpecSlopeSel');
+    if (specSlopeSel) specSlopeSel.onchange = function () {
+        weqSpecSlope = parseFloat(specSlopeSel.value);
+        // Reset smoothed/peak arrays so tilt takes effect immediately
+        weqSpectrumSmooth = null; weqSpectrumPeaks = null; _weqSpecSpatialBuf = null;
+        if (typeof markStateDirty === 'function') markStateDirty();
+    };
+    var specRangeSel = document.getElementById('weqSpecRangeSel');
+    if (specRangeSel) specRangeSel.onchange = function () {
+        weqSpecFloor = parseInt(specRangeSel.value);
+        weqDrawCanvas();
+        if (typeof markStateDirty === 'function') markStateDirty();
+    };
+    var specFreezeBtn = document.getElementById('weqSpecFreezeBtn');
+    if (specFreezeBtn) specFreezeBtn.onclick = function () {
+        weqSpecFreeze = !weqSpecFreeze;
+        specFreezeBtn.classList.toggle('on', weqSpecFreeze);
+        if (typeof markStateDirty === 'function') markStateDirty();
+    };
+    var specPeakBtn = document.getElementById('weqSpecPeakBtn');
+    if (specPeakBtn) specPeakBtn.onclick = function () {
+        weqSpecPeakHold = !weqSpecPeakHold;
+        specPeakBtn.classList.toggle('on', weqSpecPeakHold);
+        if (!weqSpecPeakHold && weqSpectrumPeaks) {
+            // Clear peaks when turning off
+            weqSpectrumPeaks.fill(-100);
+        }
+        weqDrawCanvas();
+        if (typeof markStateDirty === 'function') markStateDirty();
+        weqRenderPanel(); // re-render to show/hide reset peaks button
+    };
+    var specResetPeaksBtn = document.getElementById('weqSpecResetPeaksBtn');
+    if (specResetPeaksBtn) specResetPeaksBtn.onclick = function () {
+        if (weqSpectrumPeaks) {
+            weqSpectrumPeaks.fill(-100);
+            weqDrawCanvas();
+        }
+    };
+    var specBlockSel = document.getElementById('weqSpecBlockSel');
+    if (specBlockSel) specBlockSel.onchange = function () {
+        weqSpecBlock = parseInt(specBlockSel.value);
+        // Reset spectrum arrays for new FFT resolution
+        weqSpectrumSmooth = null; weqSpectrumPeaks = null; weqSpectrumBins = null; _weqSpecSpatialBuf = null;
+        weqSyncToHost(); // tell C++ about new block size
+        if (typeof markStateDirty === 'function') markStateDirty();
+    };
 
     // Split mode toggle
     var splitBtn = document.getElementById('weqSplitBtn');
@@ -3061,15 +3917,56 @@ function weqSetupEvents() {
             _weqSplitSavedGains = null;
         }
 
+        // Restore base values before re-snapshotting, so modulated values don't leak
+        if (weqAnimRafId || weqAnimBaseY.length > 0) {
+            for (var bi = 0; bi < wrongEqPoints.length; bi++) {
+                if (bi < weqAnimBaseY.length) wrongEqPoints[bi].y = weqAnimBaseY[bi];
+                if (bi < weqAnimBaseX.length) wrongEqPoints[bi].x = weqAnimBaseX[bi];
+                if (bi < weqAnimBaseQ.length) wrongEqPoints[bi].q = weqAnimBaseQ[bi];
+            }
+        }
         // Update animation bases
         weqAnimBaseY = wrongEqPoints.map(function (p) { return p.y; });
         weqAnimBaseX = wrongEqPoints.map(function (p) { return p.x; });
+        weqAnimBaseQ = wrongEqPoints.map(function (p) { return p.q || 0.707; });
 
         weqSyncToHost();
         markStateDirty();
         weqRenderPanel();
         weqDrawCanvas();
     };
+
+    // Crossover preset buttons
+    var XOVER_FREQS = {
+        '2': [2000],                  // 2-way: low / high at 2kHz
+        '3': [500, 4000],             // 3-way: low / mid / high
+        '4': [200, 1000, 5000]        // 4-way: sub / low-mid / hi-mid / air
+    };
+    document.querySelectorAll('[data-xover]').forEach(function (btn) {
+        btn.onclick = function () {
+            var freqs = XOVER_FREQS[btn.dataset.xover];
+            if (!freqs) return;
+            _weqPushUndo();
+            // Save current base gains (not modulated) if entering fresh
+            if (wrongEqPoints.length > 0) {
+                _weqSplitSavedGains = wrongEqPoints.map(function (p, i) {
+                    return (weqAnimBaseY.length > i) ? weqAnimBaseY[i] : p.y;
+                });
+            }
+            // Create new points at crossover frequencies
+            wrongEqPoints = freqs.map(function (f) {
+                return { x: weqFreqToX(f), y: 0.5, q: 0.707, type: 'Bell', slope: 1 };
+            });
+            weqAnimBaseY = wrongEqPoints.map(function (p) { return p.y; });
+            weqAnimBaseX = wrongEqPoints.map(function (p) { return p.x; });
+            weqAnimBaseQ = wrongEqPoints.map(function (p) { return p.q; });
+            weqSyncToHost();
+            if (typeof markStateDirty === 'function') markStateDirty();
+            weqRenderPanel();
+            weqDrawCanvas();
+            if (typeof showToast === 'function') showToast(freqs.length + ' crossover' + (freqs.length > 1 ? 's' : '') + ' — ' + (freqs.length + 1) + ' bands', 'info', 1500);
+        };
+    });
 
     // Shapes menu
     var shapesBtn = document.getElementById('weqShapes');
@@ -3401,7 +4298,19 @@ function weqSetupMouse(wrap) {
                 }
                 // Update legend chip ranges
                 _weqUpdateLegendRanges();
-                weqSyncToHost();
+                // Fast-path: send only changed fields (no JSON serialization)
+                var dragPt = wrongEqPoints[weqDragPt];
+                if (dragType === 'LP' || dragType === 'HP') {
+                    weqSyncPointFast(weqDragPt, {
+                        freq: weqXToFreq(dragPt.x),
+                        q: dragPt.q
+                    });
+                } else {
+                    weqSyncPointFast(weqDragPt, {
+                        freq: weqXToFreq(dragPt.x),
+                        gain: weqYToDB(dragPt.y)
+                    });
+                }
                 weqSyncVirtualParams();
                 if (typeof markStateDirty === 'function') markStateDirty();
             }
@@ -3412,9 +4321,12 @@ function weqSetupMouse(wrap) {
             wrap.style.cursor = '';
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
-            // Update animation base positions if animation is running
-            if (weqAnimRafId) {
-                weqAnimBaseY = wrongEqPoints.map(function (p) { return p.y; });
+            // Update animation base for ONLY the dragged point — don't re-snapshot
+            // all points, as other points have modulated values that would get baked.
+            if (weqAnimRafId && nearIdx >= 0 && nearIdx < wrongEqPoints.length) {
+                if (nearIdx < weqAnimBaseY.length) weqAnimBaseY[nearIdx] = wrongEqPoints[nearIdx].y;
+                if (nearIdx < weqAnimBaseX.length) weqAnimBaseX[nearIdx] = wrongEqPoints[nearIdx].x;
+                if (nearIdx < weqAnimBaseQ.length) weqAnimBaseQ[nearIdx] = wrongEqPoints[nearIdx].q;
             }
             weqRenderPanel(); // full re-render on mouseup to update band rows
             weqSyncToHost();
@@ -3454,6 +4366,8 @@ function weqSetupMouse(wrap) {
     // Hover cursor + tooltip
     wrap.onmousemove = function (e) {
         var p = pos(e);
+        weqMouseNormX = p.x;
+        weqMouseNormY = p.y;
         // Floating tooltip
         var tip = wrap.querySelector('.weq-tip');
         if (!tip) {
@@ -3494,10 +4408,20 @@ function weqSetupMouse(wrap) {
             tip.style.top = (weqYtoCanvas(pt.y, WEQ_CANVAS_H) - 24) + 'px';
             tip.style.display = '';
         } else {
-            // Show crosshair position
+            // Show crosshair position + spectrum level at cursor
             var freq2 = weqXToFreq(p.x);
             var db2 = weqYToDB(p.y);
-            tip.textContent = weqFmtFreq(freq2) + 'Hz  ' + (db2 >= 0 ? '+' : '') + weqFmtDB(db2) + 'dB';
+            var tipText = weqFmtFreq(freq2) + 'Hz  ' + (db2 >= 0 ? '+' : '') + weqFmtDB(db2) + 'dB';
+            // Append spectrum level if visible
+            if (weqSpecVisible && weqSpectrumSmooth && weqSpectrumSmooth.length > 0) {
+                var specIdx = Math.round(p.x * (weqSpectrumSmooth.length - 1));
+                specIdx = Math.max(0, Math.min(weqSpectrumSmooth.length - 1, specIdx));
+                var specDb = weqSpectrumSmooth[specIdx];
+                if (specDb > -100) {
+                    tipText += '  │  ' + specDb.toFixed(1) + ' dBFS';
+                }
+            }
+            tip.textContent = tipText;
             tip.style.left = ((e.clientX - canvas.getBoundingClientRect().left) | 0) + 'px';
             tip.style.top = ((e.clientY - canvas.getBoundingClientRect().top) - 24) + 'px';
             tip.style.display = '';
@@ -3507,6 +4431,8 @@ function weqSetupMouse(wrap) {
     };
 
     wrap.onmouseleave = function () {
+        weqMouseNormX = -1;
+        weqMouseNormY = -1;
         var tip = wrap.querySelector('.weq-tip');
         if (tip) tip.style.display = 'none';
     };
@@ -4192,15 +5118,48 @@ function weqRandomize() {
     if (typeof markStateDirty === 'function') markStateDirty();
 }
 
+// ── Fast-path point sync: send individual field changes (no JSON) ──
+// Used during drags to avoid full serialization. Falls back to weqSyncToHost().
+var _weqFastFn = null;
+var _weqFastFnChecked = false;
+function weqSyncPointFast(ptIdx, fields) {
+    if (!window.__JUCE__ || !window.__JUCE__.backend) return;
+    if (!_weqFastFnChecked) {
+        _weqFastFnChecked = true;
+        try { _weqFastFn = window.__juceGetNativeFunction('setEqPointFast'); }
+        catch (e) { _weqFastFn = null; }
+    }
+    if (!_weqFastFn) {
+        // Fallback: use full sync
+        weqSyncToHost();
+        return;
+    }
+    var pt = wrongEqPoints[ptIdx];
+    if (!pt) return;
+    // Send each changed field
+    for (var key in fields) {
+        _weqFastFn(ptIdx, key, fields[key]);
+    }
+}
+
 // ── Sync EQ curve to C++ (send evaluated bin gains) ──
 var _weqSyncPending = false;
-var _weqSyncTimer = null;
-var _weqSyncMinInterval = 0; // no throttle — every event syncs immediately for zero-stepping
 
-function weqSyncToHost() {
+function weqSyncToHost(immediate) {
     if (!window.__JUCE__ || !window.__JUCE__.backend) return;
-    // No throttle — sync immediately on every call for zero-stepping EQ
-    _weqDoSync();
+    if (immediate) {
+        // Structural changes (add/remove points, preset load) must sync immediately
+        _weqSyncPending = false;
+        _weqDoSync();
+        return;
+    }
+    // Coalesce rapid calls (e.g. 60Hz mousemove drags) — at most 1 IPC per frame
+    if (_weqSyncPending) return;
+    _weqSyncPending = true;
+    requestAnimationFrame(function () {
+        _weqSyncPending = false;
+        _weqDoSync();
+    });
 }
 
 function _weqDoSync() {
@@ -4213,14 +5172,20 @@ function _weqDoSync() {
             preEq: weqPreEq,
             points: wrongEqPoints.map(function (p, i) {
                 _weqEnsureUid(p);
+                // During animation, send the BASE (unmodulated) values to C++
+                // so that modulated values don't get baked into state.
+                var isAnim = weqAnimRafId != null;
+                var syncX = (isAnim && i < weqAnimBaseX.length) ? weqAnimBaseX[i] : p.x;
+                var syncY = (isAnim && i < weqAnimBaseY.length) ? weqAnimBaseY[i] : p.y;
+                var syncQ = (isAnim && i < weqAnimBaseQ.length) ? weqAnimBaseQ[i] : (p.q != null ? p.q : 0.707);
                 return {
-                    freqHz: weqXToFreq(p.x),
-                    gainDB: weqYToDB(p.y),
+                    freqHz: weqXToFreq(syncX),
+                    gainDB: weqYToDB(syncY),
                     busId: p.uid,
                     pluginIds: p.pluginIds || [],
                     solo: p.solo || false,
                     mute: p.mute || false,
-                    q: p.q != null ? p.q : 0.707,
+                    q: syncQ,
                     type: p.type || 'Bell',
                     drift: p.drift || 0,
                     preEq: p.preEq !== false,
@@ -4237,6 +5202,7 @@ function _weqDoSync() {
             animSpeed: weqAnimSpeed,
             animDepth: weqAnimDepth,
             animShape: weqAnimShape,
+            animSpread: weqAnimSpread,
             drift: weqDrift,
             driftRange: weqDriftRange,
             driftScale: weqDriftScale,
@@ -4250,11 +5216,23 @@ function _weqDoSync() {
             qModSpeed: weqQModSpeed,
             qModDepth: weqQModDepth,
             qModShape: weqQModShape,
+            qModSpread: weqQModSpread,
             qLoCut: weqQLoCut,
             qHiCut: weqQHiCut,
             dbRange: weqDBRangeMax,
             splitMode: weqSplitMode,
-            oversample: weqOversample
+            oversample: weqOversample,
+            specSpeed: weqSpecSpeed,
+            specSlope: weqSpecSlope,
+            specFloor: weqSpecFloor,
+            specPeakHold: weqSpecPeakHold,
+            specVisible: weqSpecVisible,
+            specBlock: weqSpecBlock,
+            gainSync: weqGainSync,
+            gainSyncDiv: weqGainSyncDiv,
+            qSync: weqQSync,
+            qSyncDiv: weqQSyncDiv,
+            syncSource: weqSyncSource
         };
         setEqFn(JSON.stringify(data));
         weqSyncVirtualParams();
@@ -4630,12 +5608,18 @@ function weqSyncVirtualParams() {
             // Live DOM update: find the knob and value elements
             var knobEl = document.querySelector('.pr-knob[data-pid="' + p.id + '"]');
             if (knobEl) {
-                // Regenerate SVG from the canonical buildParamKnob
+                // Regenerate SVG with modulation arc (if any block is targeting this param)
                 if (typeof buildParamKnob === 'function') {
-                    knobEl.innerHTML = buildParamKnob(newNorm, 30, null);
+                    var ri = typeof getModArcInfo === 'function' ? getModArcInfo(p.id) : null;
+                    if (ri && typeof computeModCurrent === 'function') {
+                        var cur = computeModCurrent(ri, newNorm);
+                        if (cur !== null) ri.current = cur;
+                    }
+                    var knVal = (ri && ri.base !== undefined) ? ri.base : newNorm;
+                    knobEl.innerHTML = buildParamKnob(knVal, 30, ri);
                 }
                 // Update value text and bar fill
-                var row = knobEl.closest('.pr-row');
+                var row = knobEl.closest('.pr');
                 if (row) {
                     var valEl = row.querySelector('.pr-val');
                     if (valEl) valEl.textContent = newDisp;
@@ -4660,16 +5644,21 @@ function _weqBuildPresetData() {
         points: wrongEqPoints.map(function (p, idx) {
             var sx = (weqAnimRafId && weqAnimBaseX.length > idx) ? weqAnimBaseX[idx] : p.x;
             var sy = (weqAnimRafId && weqAnimBaseY.length > idx) ? weqAnimBaseY[idx] : p.y;
+            var sq = (weqAnimRafId && weqAnimBaseQ.length > idx) ? weqAnimBaseQ[idx] : (p.q != null ? p.q : 0.707);
             return {
                 x: sx, y: sy,
-                q: p.q != null ? p.q : 0.707,
+                q: sq,
                 type: p.type || 'Bell',
                 preEq: p.preEq !== false,
                 stereoMode: p.stereoMode || 0,
                 drift: p.drift || 0,
                 solo: p.solo || false,
                 mute: p.mute || false,
-                slope: p.slope || 1
+                slope: p.slope || 1,
+                modExclude: p.modExclude || 0,
+                modGainDepth: p.modGainDepth,
+                modQDepth: p.modQDepth,
+                modDriftDepth: p.modDriftDepth
             };
         }),
         depth: weqGlobalDepth,
@@ -4681,6 +5670,7 @@ function _weqBuildPresetData() {
         animSpeed: weqAnimSpeed,
         animDepth: weqAnimDepth,
         animShape: weqAnimShape,
+        animSpread: weqAnimSpread,
         drift: weqDrift,
         driftRange: weqDriftRange,
         driftScale: weqDriftScale,
@@ -4694,11 +5684,18 @@ function _weqBuildPresetData() {
         qModSpeed: weqQModSpeed,
         qModDepth: weqQModDepth,
         qModShape: weqQModShape,
+        qModSpread: weqQModSpread,
         qLoCut: weqQLoCut,
         qHiCut: weqQHiCut,
+        gainSync: weqGainSync,
+        gainSyncDiv: weqGainSyncDiv,
+        qSync: weqQSync,
+        qSyncDiv: weqQSyncDiv,
+        syncSource: weqSyncSource,
         dbRange: weqDBRangeMax,
         splitMode: weqSplitMode,
-        oversample: weqOversample
+        oversample: weqOversample,
+        modEnabled: weqModEnabled
     };
 }
 
@@ -4725,12 +5722,17 @@ function _weqApplyPresetData(data) {
                 drift: p.drift || 0,
                 preEq: p.preEq !== false,
                 stereoMode: p.stereoMode || 0,
-                slope: p.slope || 1
+                slope: p.slope || 1,
+                modExclude: p.modExclude || 0,
+                modGainDepth: p.modGainDepth,
+                modQDepth: p.modQDepth,
+                modDriftDepth: p.modDriftDepth
             };
         });
     }
     weqAnimBaseY = wrongEqPoints.map(function (p) { return p.y; });
     weqAnimBaseX = wrongEqPoints.map(function (p) { return p.x; });
+    weqAnimBaseQ = wrongEqPoints.map(function (p) { return p.q || 0.707; });
 
     // Restore globals
     if (data.depth != null) weqGlobalDepth = data.depth;
@@ -4742,6 +5744,7 @@ function _weqApplyPresetData(data) {
     if (data.animSpeed != null) weqAnimSpeed = data.animSpeed;
     if (data.animDepth != null) weqAnimDepth = data.animDepth;
     if (data.animShape != null) weqAnimShape = data.animShape;
+    if (data.animSpread != null) weqAnimSpread = data.animSpread;
     if (data.drift != null) weqDrift = data.drift;
     if (data.driftRange != null) weqDriftRange = data.driftRange;
     if (data.driftScale != null) weqDriftScale = data.driftScale;
@@ -4755,11 +5758,25 @@ function _weqApplyPresetData(data) {
     if (data.qModSpeed != null) weqQModSpeed = data.qModSpeed;
     if (data.qModDepth != null) weqQModDepth = data.qModDepth;
     if (data.qModShape != null) weqQModShape = data.qModShape;
+    if (data.qModSpread != null) weqQModSpread = data.qModSpread;
     if (data.qLoCut != null) weqQLoCut = data.qLoCut;
     if (data.qHiCut != null) weqQHiCut = data.qHiCut;
+    if (data.gainSync != null) weqGainSync = data.gainSync;
+    if (data.gainSyncDiv != null) weqGainSyncDiv = data.gainSyncDiv;
+    if (data.qSync != null) weqQSync = data.qSync;
+    if (data.qSyncDiv != null) weqQSyncDiv = data.qSyncDiv;
+    if (data.syncSource != null) weqSyncSource = data.syncSource;
     if (data.dbRange != null) weqDBRangeMax = data.dbRange;
     if (data.splitMode != null) weqSplitMode = data.splitMode;
     if (data.oversample != null) weqOversample = data.oversample;
+    if (data.modEnabled != null) weqModEnabled = data.modEnabled;
+    // Spectrum analyzer params
+    if (data.specSpeed != null) weqSpecSpeed = data.specSpeed;
+    if (data.specSlope != null) weqSpecSlope = data.specSlope;
+    if (data.specFloor != null) weqSpecFloor = data.specFloor;
+    if (data.specPeakHold != null) weqSpecPeakHold = data.specPeakHold;
+    if (data.specVisible != null) weqSpecVisible = data.specVisible;
+    if (data.specBlock != null) weqSpecBlock = data.specBlock;
 
     weqSelectedPt = -1;
     weqFocusBand = -1;
@@ -4875,10 +5892,11 @@ function _weqShowPresetBrowser(anchor) {
             weqAnimBaseY = []; weqAnimBaseX = [];
             weqGlobalDepth = 100; weqGlobalWarp = 0; weqGlobalSteps = 0; weqGlobalTilt = 0;
             weqGlobalBypass = false;
-            weqAnimSpeed = 0; weqAnimDepth = 6; weqAnimShape = 'sine';
+            weqAnimSpeed = 0; weqAnimDepth = 6; weqAnimShape = 'sine'; weqAnimSpread = 0;
             weqDrift = 0; weqDriftRange = 5; weqDriftContinuous = false; weqDriftTexture = 'smooth';
             weqGainLoCut = 20; weqGainHiCut = 20000; weqDriftLoCut = 20; weqDriftHiCut = 20000;
-            weqQModSpeed = 0; weqQModDepth = 50; weqQModShape = 'sine'; weqQLoCut = 20; weqQHiCut = 20000;
+            weqQModSpeed = 0; weqQModDepth = 50; weqQModShape = 'sine'; weqQModSpread = 0; weqQLoCut = 20; weqQHiCut = 20000;
+            weqGainSync = false; weqGainSyncDiv = '1/4'; weqQSync = false; weqQSyncDiv = '1/4'; weqSyncSource = 'daw';
             weqDBRangeMax = 24; weqOversample = 1;
             weqSelectedPt = -1; weqFocusBand = -1;
             if (typeof weqAnimStop === 'function') weqAnimStop();

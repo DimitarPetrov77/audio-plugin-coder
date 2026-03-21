@@ -179,6 +179,17 @@ private:
     // Updated by JS via setVisibleParams native function (~8 PIDs, debounced 100ms)
     std::unordered_set<std::string> visibleParamKeys;
 
+    // Display text cache: avoid redundant getText() virtual calls into hosted plugins.
+    // getText() is the most expensive per-param operation (plugin-dependent string formatting).
+    // We cache the result and only re-call when the float value has changed enough that
+    // the display text would visually differ. Float values always update at full 60Hz rate.
+    struct DispTextEntry
+    {
+        float   lastCalledAt = -1.0f;   // value at which getText() was last called
+        juce::String text;               // cached result of getText()
+    };
+    std::unordered_map<std::string, DispTextEntry> dispTextCache;
+
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HostesaAudioProcessorEditor)
 };

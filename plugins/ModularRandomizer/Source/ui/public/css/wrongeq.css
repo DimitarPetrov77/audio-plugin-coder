@@ -347,21 +347,7 @@
     height: 100%;
 }
 
-/* Floating tooltip on hover */
-.weq-tip {
-    position: absolute;
-    pointer-events: none;
-    background: rgba(0, 0, 0, 0.85);
-    color: var(--text-primary);
-    font-family: var(--font-mono);
-    font-size: 10px;
-    padding: 3px 8px;
-    border-radius: 3px;
-    white-space: nowrap;
-    z-index: 10;
-    transform: translateX(-50%);
-    transition: opacity 0.08s;
-}
+
 
 .weq-freq-axis {
     display: none;
@@ -373,6 +359,92 @@
     font-size: 9px;
     color: var(--text-muted);
     user-select: none;
+}
+
+/* ── Spectrum analyzer toolbar (SPAN-style controls) ── */
+.weq-spec-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 10px;
+    background: color-mix(in srgb, var(--bg-inset) 80%, transparent);
+    border-top: 1px solid color-mix(in srgb, var(--border) 30%, transparent);
+    flex-shrink: 0;
+    user-select: none;
+}
+
+.weq-spec-lbl {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+    opacity: 0.7;
+    margin-left: 4px;
+}
+
+.weq-spec-sel {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: color-mix(in srgb, var(--bg-cell) 60%, transparent);
+    border: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+    border-radius: 3px;
+    padding: 2px 5px;
+    cursor: pointer;
+    outline: none;
+    transition: border-color .12s;
+}
+
+.weq-spec-sel:hover,
+.weq-spec-sel:focus {
+    border-color: var(--accent);
+    color: var(--text-primary);
+}
+
+.weq-spec-btn {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    background: none;
+    border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+    border-radius: 3px;
+    padding: 2px 8px;
+    cursor: pointer;
+    transition: all .12s;
+    white-space: nowrap;
+    line-height: 1.4;
+}
+
+.weq-spec-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--accent);
+}
+
+.weq-spec-btn.on {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+/* Freeze button: pulsing glow when active */
+#weqSpecFreezeBtn.on {
+    color: #7ad4ff;
+    border-color: #5bb8e0;
+    background: rgba(90, 180, 230, 0.12);
+    animation: weqFreezePulse 2s ease-in-out infinite;
+}
+
+@keyframes weqFreezePulse {
+    0%, 100% { opacity: 0.8; }
+    50% { opacity: 1; }
+}
+
+.weq-spec-sep {
+    color: color-mix(in srgb, var(--border) 40%, transparent);
+    font-size: 10px;
+    user-select: none;
+    margin: 0 1px;
 }
 
 /* ── Footer controls ── */
@@ -431,6 +503,11 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+    transition: border-color .15s, background .15s;
+}
+
+.weq-sp-section:hover {
+    border-color: color-mix(in srgb, var(--border) 90%, transparent);
 }
 
 .weq-sp-title {
@@ -444,12 +521,97 @@
     padding-bottom: 4px;
     margin-bottom: 4px;
     border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.weq-sp-title::before {
+    content: '▾';
+    font-size: 8px;
+    color: var(--text-muted);
+    transition: transform .2s;
+    display: inline-block;
+}
+
+.weq-sp-section.collapsed .weq-sp-title::before {
+    transform: rotate(-90deg);
+}
+
+.weq-sp-title:hover {
+    color: var(--text-primary);
+}
+
+/* Active indicator dot */
+.weq-sp-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.weq-sp-dot.active {
+    background: var(--accent);
+    box-shadow: 0 0 6px var(--accent);
+}
+
+.weq-sp-dot.active.pulse {
+    animation: weqDotPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes weqDotPulse {
+    0%, 100% { opacity: 0.5; box-shadow: 0 0 4px var(--accent); }
+    50% { opacity: 1; box-shadow: 0 0 10px var(--accent); }
+}
+
+/* Collapsible body */
+.weq-sp-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow: hidden;
+    max-height: 500px;
+    transition: max-height .25s ease, opacity .2s;
+    opacity: 1;
+}
+
+.weq-sp-section.collapsed .weq-sp-body {
+    max-height: 0;
+    opacity: 0;
+    margin: 0;
+}
+
+.weq-sp-section.collapsed {
+    padding-bottom: 6px;
 }
 
 .weq-sp-row {
     display: flex;
     align-items: center;
     gap: 4px;
+}
+
+/* Mini waveform SVG preview */
+.weq-shape-svg {
+    width: 100%;
+    height: 28px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--bg-inset) 80%, #000);
+    border: 1px solid color-mix(in srgb, var(--border) 30%, transparent);
+    margin-bottom: 2px;
+}
+
+/* Affected bands count */
+.weq-sp-count {
+    font-size: 9px;
+    font-weight: 400;
+    color: var(--accent);
+    opacity: 0.7;
+    letter-spacing: 0;
 }
 
 .weq-sp-knob {
@@ -465,13 +627,19 @@
     white-space: nowrap;
     flex: 1;
     text-align: center;
-    transition: color .1s, border-color .1s;
+    transition: color .1s, border-color .1s, background .1s;
 }
 
 .weq-sp-knob:hover {
     color: var(--text-primary);
     border-color: var(--accent);
     background: var(--weq-cell-hover, var(--bg-cell-hover));
+}
+
+.weq-sp-knob:active {
+    color: var(--text-primary);
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, var(--bg-inset));
 }
 
 .weq-sp-knob.weq-anim-on {
@@ -539,6 +707,79 @@
 
 .weq-sp-toggle.on.weq-anim-on {
     animation: weqKnobPulse 1.5s ease-in-out infinite;
+}
+
+/* ── Tempo Sync toggle button ── */
+.weq-sp-sync {
+    font-size: 12px;
+    width: 24px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all .12s;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 4px;
+}
+.weq-sp-sync:hover {
+    color: var(--text-primary);
+    border-color: var(--accent);
+}
+.weq-sp-sync.on {
+    color: var(--fire-text, #fff);
+    background: var(--accent);
+    border-color: var(--accent);
+}
+/* Narrower select for sync division */
+.weq-sp-sel-sm {
+    max-width: 70px;
+    flex: 1;
+}
+/* DAW / Int source toggle */
+.weq-sp-src {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+    flex-shrink: 0;
+    margin-left: 2px;
+}
+.weq-sp-src button {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 600;
+    padding: 2px 5px;
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all .1s;
+}
+.weq-sp-src button + button {
+    border-left: 1px solid var(--border);
+}
+.weq-sp-src button.on {
+    background: var(--accent);
+    color: var(--fire-text, #fff);
+}
+.weq-sp-src button:hover:not(.on) {
+    color: var(--text-primary);
+}
+/* BPM indicator */
+.weq-sp-bpm {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-left: 3px;
+    opacity: 0.7;
+    flex-shrink: 0;
 }
 
 .weq-ft-group {
@@ -682,6 +923,22 @@
     }
 }
 
+/* Crossover preset buttons (appear in split mode) */
+.weq-xover-btn {
+    font-size: 10px !important;
+    padding: 3px 8px !important;
+    letter-spacing: 0.5px;
+    opacity: 0.7;
+    transition: all .12s;
+}
+
+.weq-xover-btn:hover {
+    opacity: 1;
+    color: var(--accent) !important;
+    border-color: var(--accent) !important;
+    background: color-mix(in srgb, var(--accent) 10%, transparent) !important;
+}
+
 .weq-ft-spacer {
     flex: 1;
 }
@@ -762,8 +1019,8 @@
 /* ── Band colors in canvas ── */
 .weq-band-legend {
     display: flex;
-    gap: 12px;
-    padding: 5px 12px;
+    gap: 14px;
+    padding: 7px 14px;
     flex-wrap: wrap;
     align-items: center;
     border-top: 1px solid var(--border);
@@ -781,23 +1038,23 @@
 }
 
 .weq-band-dot {
-    width: 8px;
-    height: 8px;
+    width: 10px;
+    height: 10px;
     border-radius: 50%;
     flex-shrink: 0;
 }
 
 .weq-band-label {
-    font-size: 9px;
+    font-size: 11px;
     font-weight: 700;
-    opacity: 0.5;
+    opacity: 0.7;
     letter-spacing: 0.5px;
 }
 
 .weq-band-type {
-    font-size: 8px;
+    font-size: 10px;
     font-weight: 600;
-    opacity: 0.4;
+    opacity: 0.5;
     letter-spacing: 0.3px;
     text-transform: uppercase;
 }
@@ -830,21 +1087,25 @@
 /* ── Tooltip ── */
 .weq-tip {
     position: absolute;
-    background: color-mix(in srgb, var(--bg-panel) 92%, transparent);
-    border: 1px solid var(--border-strong);
-    border-radius: 5px;
-    padding: 5px 10px;
+    background: color-mix(in srgb, var(--bg-panel) 85%, transparent);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid color-mix(in srgb, var(--border-strong) 60%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+    border-radius: 6px;
+    padding: 4px 10px;
     font-family: var(--font-mono);
-    font-size: 12px;
-    font-weight: 600;
+    font-size: 11px;
+    font-weight: 500;
     color: var(--text-primary);
     pointer-events: none;
     white-space: nowrap;
     z-index: 90;
     transform: translate(-50%, -100%);
     margin-top: -10px;
-    letter-spacing: 0.3px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    letter-spacing: 0.4px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.3);
+    transition: opacity .08s;
 }
 
 /* ── Grid tabs (reuse lane pattern) ── */
@@ -1072,9 +1333,9 @@
 /* ── Band Card ── */
 .weq-band-card {
     display: flex;
-    flex-direction: column;
-    min-width: 148px;
-    max-width: 148px;
+    flex-direction: row;
+    min-width: 170px;
+    max-width: 170px;
     background: var(--bg-cell);
     border: 1px solid color-mix(in srgb, var(--band-color, var(--border)) 20%, var(--border));
     border-right: none;
@@ -1086,6 +1347,15 @@
     cursor: pointer;
     position: relative;
     user-select: none;
+}
+
+/* Main card content takes all remaining width */
+.weq-card-main {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    gap: 0;
 }
 
 .weq-band-card:hover {
@@ -1403,6 +1673,75 @@
     text-shadow: 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
+/* ── Per-point modulation exclusion sidebar (vertical G / Q / D on card left) ── */
+.weq-card-mod-sidebar {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: center;
+    width: 28px;
+    flex-shrink: 0;
+    background: color-mix(in srgb, var(--bg-inset) 70%, transparent);
+    border-right: 1px solid color-mix(in srgb, var(--border) 18%, transparent);
+    gap: 3px;
+    padding: 4px 2px 3px 3px;
+}
+
+.weq-mod-excl {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    padding: 0;
+    border: 1px solid color-mix(in srgb, var(--border) 30%, transparent);
+    border-radius: 3px;
+    background: var(--bg-inset);
+    color: var(--text-secondary, var(--text-muted));
+    opacity: 0.5;
+    cursor: pointer;
+    text-align: center;
+    transition: opacity .1s, background .1s, color .1s, border-color .1s;
+    position: relative;
+    overflow: hidden;
+    z-index: 0;
+}
+
+/* Bottom button matches card's 8px bottom-left corner radius */
+.weq-mod-excl:last-child {
+    border-radius: 3px 3px 3px 7px;
+}
+
+.weq-mod-excl.active {
+    opacity: 1;
+    background: color-mix(in srgb, var(--accent) 25%, var(--bg-cell));
+    color: var(--text-primary, #fff);
+    border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+    cursor: ns-resize;
+}
+
+/* Depth fill bar (grows from bottom, colored proportional to depth) */
+.weq-mod-fill {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: color-mix(in srgb, var(--accent) 50%, transparent);
+    border-radius: 0 0 2px 2px;
+    pointer-events: none;
+    transition: height 0.08s ease-out;
+}
+
+.weq-mod-excl:not(.active):hover {
+    opacity: 0.75;
+    background: var(--bg-cell-hover);
+    color: var(--text-primary, #fff);
+}
+
 /* ═══════════════════════════════════════════
    Band unit (card + vertical strip) & Routing Panel
    ═══════════════════════════════════════════ */
@@ -1476,8 +1815,8 @@
     flex-direction: column;
     min-width: 200px;
     max-width: 200px;
-    background: #1a1c22;
-    border: 1px solid color-mix(in srgb, var(--accent) 30%, #2a2d36);
+    background: var(--bg-inset);
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
     border-radius: 6px;
     flex-shrink: 0;
     overflow: hidden;
@@ -1494,8 +1833,8 @@
     align-items: center;
     justify-content: space-between;
     padding: 8px 10px;
-    background: #15171c;
-    border-bottom: 1px solid #2a2d36;
+    background: var(--bg-inset);
+    border-bottom: 1px solid var(--border);
 }
 
 .weq-routing-title {
@@ -1503,7 +1842,7 @@
     font-size: 9px;
     font-weight: 700;
     letter-spacing: 0.12em;
-    color: #888;
+    color: var(--text-muted);
     text-transform: uppercase;
 }
 
@@ -1526,7 +1865,7 @@
 }
 
 .weq-routing-scroll::-webkit-scrollbar-thumb {
-    background: #3a3d46;
+    background: var(--scrollbar-thumb);
     border-radius: 2px;
 }
 
@@ -1540,7 +1879,7 @@
     align-items: center;
     gap: 4px;
     padding: 5px 6px;
-    background: #22252e;
+    background: var(--bg-cell);
     border-radius: 4px;
     margin-bottom: 3px;
 }
@@ -1553,7 +1892,7 @@
     font-family: var(--font-mono);
     font-size: 9px;
     font-weight: 700;
-    color: #555;
+    color: var(--text-muted);
     width: 14px;
     text-align: center;
     flex-shrink: 0;
@@ -1574,13 +1913,13 @@
     padding: 1px;
     border: none;
     background: none;
-    color: #666;
+    color: var(--text-muted);
     cursor: pointer;
     transition: color .1s;
 }
 
 .weq-routing-mv:hover {
-    color: #ddd;
+    color: var(--text-primary);
 }
 
 /* Plugin name */
@@ -1588,7 +1927,7 @@
     font-family: var(--font-mono);
     font-size: 11px;
     font-weight: 500;
-    color: #ccc;
+    color: var(--text-secondary);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1602,7 +1941,7 @@
     font-size: 9px;
     font-weight: 700;
     padding: 2px 7px;
-    border: 1px solid color-mix(in srgb, var(--accent) 50%, #333);
+    border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--border));
     border-radius: 3px;
     background: none;
     color: var(--accent);
@@ -1624,7 +1963,7 @@
     padding: 1px 4px;
     border: none;
     background: none;
-    color: #555;
+    color: var(--text-muted);
     cursor: pointer;
     transition: all .1s;
     flex-shrink: 0;
@@ -1632,15 +1971,15 @@
 }
 
 .weq-routing-rm:hover {
-    color: #e06464;
-    background: rgba(224, 100, 100, 0.15);
+    color: var(--locked-icon);
+    background: color-mix(in srgb, var(--locked-icon) 15%, transparent);
 }
 
 /* Empty state */
 .weq-routing-empty {
     font-family: var(--font-mono);
     font-size: 11px;
-    color: #555;
+    color: var(--text-muted);
     text-align: center;
     padding: 12px 6px;
 }
@@ -1650,17 +1989,17 @@
     display: flex;
     gap: 4px;
     padding: 6px;
-    border-top: 1px solid #2a2d36;
-    background: #15171c;
+    border-top: 1px solid var(--border);
+    background: var(--bg-inset);
 }
 
 .weq-routing-assign {
     font-family: var(--font-mono);
     font-size: 10px;
     font-weight: 600;
-    color: #999;
-    background: #22252e;
-    border: 1px solid #333;
+    color: var(--text-muted);
+    background: var(--bg-cell);
+    border: 1px solid var(--border);
     border-radius: 4px;
     padding: 5px 0;
     cursor: pointer;
@@ -1670,9 +2009,9 @@
 }
 
 .weq-routing-assign:hover {
-    border-color: #666;
-    color: #ddd;
-    background: #2a2d36;
+    border-color: var(--border-focus);
+    color: var(--text-primary);
+    background: var(--bg-cell-hover);
 }
 
 .weq-routing-load {
@@ -1680,8 +2019,8 @@
     font-size: 10px;
     font-weight: 700;
     color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 8%, #1a1c22);
-    border: 1px solid color-mix(in srgb, var(--accent) 35%, #333);
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-inset));
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
     border-radius: 4px;
     padding: 5px 0;
     cursor: pointer;
@@ -1693,7 +2032,7 @@
 .weq-routing-load:hover {
     border-color: var(--accent);
     color: #fff;
-    background: color-mix(in srgb, var(--accent) 15%, #1a1c22);
+    background: color-mix(in srgb, var(--accent) 15%, var(--bg-inset));
 }
 
 /* ── S / M / Del buttons (shared, used in card header) ── */

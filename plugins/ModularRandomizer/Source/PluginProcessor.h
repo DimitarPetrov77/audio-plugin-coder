@@ -356,6 +356,10 @@ public:
     /** WrongEQ: receive EQ curve data from JS */
     void setEqCurve (const juce::String& jsonData);
 
+    /** WrongEQ fast path: update a single field on one EQ point (no JSON, no alloc).
+        field: "freq", "gain", "q", "solo", "mute", "type", "slope", "drift", "stereo" */
+    void setEqPointFast (int pointIndex, const juce::String& field, double value);
+
     void setBusVolume (int bus, float vol);
     void setBusMute  (int bus, bool m);
     void setBusSolo  (int bus, bool s);
@@ -777,7 +781,7 @@ private:
     std::atomic<int> eqOversampleFactor { 1 };
     std::unique_ptr<juce::dsp::Oversampling<float>> eqOversampler;
     int eqOversampleOrder = 0; // current oversampler order (0=1x, 1=2x, 2=4x)
-    bool eqOversamplerReady = false;
+    std::atomic<bool> eqOversamplerReady { false };
 
 public:
     /** Batch param apply — sets multiple params in a single call (avoids N IPC round-trips).
@@ -913,7 +917,7 @@ private:
     //==============================================================================
 
     // ── Enum types for zero-alloc comparison in processBlock (H4 fix) ──
-    enum class BlockMode : uint8_t { Randomize, Envelope, Sample, MorphPad, Shapes, ShapesRange, Lane, Unknown };
+    enum class BlockMode : uint8_t { Randomize, Envelope, Sample, MorphPad, Shapes, ShapesRange, Lane, Link, Unknown };
     enum class TriggerType : uint8_t { Manual, Tempo, Midi, Audio };
     enum class MidiTrigMode : uint8_t { AnyNote, SpecificNote, CC };
     enum class AudioSource : uint8_t { Main, Sidechain };
@@ -1237,12 +1241,27 @@ private:
             bool midiNoteHeld = false; // MIDI sustain tracking
         };
         std::vector<LaneClip> laneClips;
+
+        // ── Link ──
+        struct LinkSource {
+            int pluginId   = -1;
+            int paramIndex = -1;
+            float macroValue = 0.0f;   // 0..1, used when pluginId == -2 (macro)
+        };
+        std::vector<LinkSource> linkSources;   // multiple source params, averaged
+        std::vector<float> linkMin;       // per-target, 0..100 (target value when source = 0%)
+        std::vector<float> linkMax;       // per-target, 0..100 (target value when source = 100%)
+        std::vector<float> linkBases;     // per-target, 0..1 base position for base-relative modulation
+        float linkSmoothMs = 0.0f;
+        // Link runtime state (audio thread only)
+        float linkSmoothedValue = -1.0f;
     };
 
     std::mutex blockMutex;                  // Protects logicBlocks; updateLogicBlocks holds it,
                                             // processBlock uses try_lock
     std::vector<LogicBlock> logicBlocks;
     juce::Random audioRandom;               // RNG for audio-thread randomization
+    juce::Random messageRandom;             // RNG for message-thread randomization (per-instance)
     double sampleCounter = 0.0;             // Monotonic sample position for trigger cooldowns
 
     // ══════════════════════════════════════════════════════════════
@@ -1280,6 +1299,20 @@ private:
     static constexpr int kWeqModSlots = kWeqModSlots_perBand + kWeqGlobalCount;
     ModAccum weqModBus[kWeqModSlots];
 
+    // ── Dirty-list: tracks which modbus cells were written this buffer ──
+    // Avoids scanning all 32K cells in clearModBus / resolveModBus.
+    struct DirtyEntry { int16_t slot; int16_t param; };
+    static constexpr int kMaxDirtyEntries = 512;  // way more than ever needed
+    DirtyEntry dirtyList[kMaxDirtyEntries];
+    int numDirty = 0;
+    DirtyEntry prevDirtyList[kMaxDirtyEntries]; // last buffer's dirty cells (for base release)
+    int numPrevDirty = 0;
+    // WrongEQ dirty list (separate, small)
+    int weqDirtyList[kWeqModSlots];
+    int numWeqDirty = 0;
+    int prevWeqDirtyList[kWeqModSlots];
+    int numPrevWeqDirty = 0;
+
     // Stable base value for each param — the "user knob position" that
     // modulation offsets are applied relative to.  -1 = not yet captured.
     float paramBase[kMaxPlugins][kMaxParams];
@@ -1306,11 +1339,13 @@ private:
 
     void clearModBus()
     {
-        for (int s = 0; s < kMaxPlugins; ++s)
-            for (int p = 0; p < kMaxParams; ++p)
-                modBus[s][p] = {};
-        for (int w = 0; w < kWeqModSlots; ++w)
-            weqModBus[w] = {};
+        // Only clear cells that were actually written last buffer
+        for (int i = 0; i < numDirty; ++i)
+            modBus[dirtyList[i].slot][dirtyList[i].param] = {};
+        numDirty = 0;
+        for (int i = 0; i < numWeqDirty; ++i)
+            weqModBus[weqDirtyList[i]] = {};
+        numWeqDirty = 0;
     }
 
     // Map WrongEQ paramIndex to flat modbus slot:
@@ -1333,6 +1368,8 @@ private:
             int s = weqSlot (paramIndex);
             if (s >= 0)
             {
+                if (!weqModBus[s].hasBase && !weqModBus[s].hasOffset && numWeqDirty < kWeqModSlots)
+                    weqDirtyList[numWeqDirty++] = s;
                 weqModBus[s].base = value;
                 weqModBus[s].hasBase = true;
                 weqParamBase[s] = value;
@@ -1342,6 +1379,8 @@ private:
         int s = slotForId (pluginId);
         if (s >= 0 && paramIndex >= 0 && paramIndex < kMaxParams)
         {
+            if (!modBus[s][paramIndex].hasBase && !modBus[s][paramIndex].hasOffset && numDirty < kMaxDirtyEntries)
+                dirtyList[numDirty++] = { (int16_t) s, (int16_t) paramIndex };
             modBus[s][paramIndex].base = value;
             modBus[s][paramIndex].hasBase = true;
             paramBase[s][paramIndex] = value;
@@ -1355,6 +1394,8 @@ private:
             int s = weqSlot (paramIndex);
             if (s >= 0)
             {
+                if (!weqModBus[s].hasBase && !weqModBus[s].hasOffset && numWeqDirty < kWeqModSlots)
+                    weqDirtyList[numWeqDirty++] = s;
                 weqModBus[s].offset += off;
                 weqModBus[s].hasOffset = true;
             }
@@ -1363,6 +1404,8 @@ private:
         int s = slotForId (pluginId);
         if (s >= 0 && paramIndex >= 0 && paramIndex < kMaxParams)
         {
+            if (!modBus[s][paramIndex].hasBase && !modBus[s][paramIndex].hasOffset && numDirty < kMaxDirtyEntries)
+                dirtyList[numDirty++] = { (int16_t) s, (int16_t) paramIndex };
             modBus[s][paramIndex].offset += off;
             modBus[s][paramIndex].hasOffset = true;
         }
@@ -1379,83 +1422,70 @@ private:
 
     void resolveModBus()
     {
-        for (int s = 0; s < kMaxPlugins; ++s)
+        // ── Hosted plugins: only process dirty cells ──
+        // Also need to check previously-active cells that are now inactive
+        // to release their base values. We track this via prevDirtyList.
+        for (int i = 0; i < numDirty; ++i)
         {
+            int s = dirtyList[i].slot;
+            int p = dirtyList[i].param;
             auto* hp = pluginSlots[s];
             if (hp == nullptr) continue;
             int pid = hp->id;
 
-            for (int p = 0; p < kMaxParams; ++p)
+            auto& acc = modBus[s][p];
+            float base;
+            if (acc.hasBase)
             {
-                auto& acc = modBus[s][p];
-                if (!acc.hasBase && !acc.hasOffset)
+                base = acc.base;
+            }
+            else
+            {
+                if (paramBase[s][p] < -0.5f)
+                    paramBase[s][p] = getParamValue (pid, p);
+                else if (paramModWritten[s][p] > -0.5f)
                 {
-                    // No modulation this buffer — release the base so next
-                    // modulation start re-captures the current knob value.
-                    if (paramBase[s][p] > -0.5f)
-                    {
-                        // Snap param back to base on last active buffer
-                        // (so the param isn't left stranded at a modulated position)
-                        paramBase[s][p] = -1.0f;
-                        paramModWritten[s][p] = -1.0f;
-                    }
-                    continue;
+                    float cur = getParamValue (pid, p);
+                    if (std::abs (cur - paramModWritten[s][p]) > 0.005f)
+                        paramBase[s][p] = cur;
                 }
+                base = paramBase[s][p];
+            }
 
-                float base;
-                if (acc.hasBase)
-                {
-                    // Explicit base setter (Morph Pad) — use directly
-                    base = acc.base;
-                }
-                else
-                {
-                    // Offset-only — need a stable base
-                    if (paramBase[s][p] < -0.5f)
-                    {
-                        // First buffer of modulation — capture current param value
-                        paramBase[s][p] = getParamValue (pid, p);
-                    }
-                    else if (paramModWritten[s][p] > -0.5f)
-                    {
-                        // Detect external change: if the current param value differs
-                        // from what the modbus wrote last buffer, someone else moved it
-                        // (user knob drag, Randomize, glide, etc.) — adopt as new base
-                        float cur = getParamValue (pid, p);
-                        if (std::abs (cur - paramModWritten[s][p]) > 0.005f)
-                            paramBase[s][p] = cur;
-                    }
-                    base = paramBase[s][p];
-                }
+            float final_ = juce::jlimit (0.0f, 1.0f, base + acc.offset);
+            setParamDirect (pid, p, final_);
+            paramWritten[s][p] = final_;
+            paramModWritten[s][p] = final_;
+        }
 
-                float final_ = juce::jlimit (0.0f, 1.0f, base + acc.offset);
-                setParamDirect (pid, p, final_);
-                paramWritten[s][p] = final_;
-                paramModWritten[s][p] = final_;
+        // Release bases for previously-dirty cells that are no longer active
+        for (int i = 0; i < numPrevDirty; ++i)
+        {
+            int s = prevDirtyList[i].slot;
+            int p = prevDirtyList[i].param;
+            auto& acc = modBus[s][p];
+            if (!acc.hasBase && !acc.hasOffset && paramBase[s][p] > -0.5f)
+            {
+                paramBase[s][p] = -1.0f;
+                paramModWritten[s][p] = -1.0f;
             }
         }
 
+        // Save current dirty list as prev for next buffer
+        numPrevDirty = numDirty;
+        std::memcpy (prevDirtyList, dirtyList, numDirty * sizeof (DirtyEntry));
+
         // ── WrongEQ modbus resolution ──
-        // weqSlot maps paramIndex → flat slot; here we need the reverse.
         auto weqParamIndex = [] (int slot) -> int {
-            if (slot < kWeqModSlots_perBand) return slot;  // per-band: slot IS paramIndex
-            return kWeqGlobalBase + (slot - kWeqModSlots_perBand);  // global: 100 + offset
+            if (slot < kWeqModSlots_perBand) return slot;
+            return kWeqGlobalBase + (slot - kWeqModSlots_perBand);
         };
 
-        for (int w = 0; w < kWeqModSlots; ++w)
+        for (int i = 0; i < numWeqDirty; ++i)
         {
+            int w = weqDirtyList[i];
             auto& acc = weqModBus[w];
-            if (!acc.hasBase && !acc.hasOffset)
-            {
-                if (weqParamBase[w] > -0.5f)
-                {
-                    weqParamBase[w] = -1.0f;
-                    weqParamModWritten[w] = -1.0f;
-                }
-                continue;
-            }
-
-            int pi = weqParamIndex (w);  // actual paramIndex for C++ get/set calls
+            int pi = weqParamIndex (w);
 
             float base;
             if (acc.hasBase)
@@ -1479,6 +1509,21 @@ private:
             setParamDirect (kWeqPluginId, pi, final_);
             weqParamModWritten[w] = final_;
         }
+
+        // Release WrongEQ bases for prev-dirty slots no longer active
+        for (int i = 0; i < numPrevWeqDirty; ++i)
+        {
+            int w = prevWeqDirtyList[i];
+            auto& acc = weqModBus[w];
+            if (!acc.hasBase && !acc.hasOffset && weqParamBase[w] > -0.5f)
+            {
+                weqParamBase[w] = -1.0f;
+                weqParamModWritten[w] = -1.0f;
+            }
+        }
+
+        numPrevWeqDirty = numWeqDirty;
+        std::memcpy (prevWeqDirtyList, weqDirtyList, numWeqDirty * sizeof (int));
     }
 
     // Per-plugin gesture listener — detects hosted plugin UI knob drags.
@@ -1620,14 +1665,45 @@ public:
     std::atomic<double> ppqPosition { 0.0 };         // PPQ position for tempo sync
 
     // ── Spectrum Analyzer (FFT) ──
-    static constexpr int fftOrder = 11;           // 2^11 = 2048 samples
-    static constexpr int fftSize  = 1 << fftOrder;
-    static constexpr int spectrumBinCount = 128;  // log-spaced output bins
-    float fftInputBuffer[fftSize] = {};
+    // Maximum FFT size (allocated once); active size controlled by fftActiveOrder
+    static constexpr int fftMaxOrder = 13;            // 2^13 = 8192
+    static constexpr int fftMaxSize  = 1 << fftMaxOrder;
+    static constexpr int spectrumBinCount = 256;      // log-spaced output bins (high-res for spline rendering)
+
+    std::atomic<int> fftActiveOrder { 11 };            // current order: 10=1024, 11=2048, 12=4096, 13=8192
+    int fftCurrentOrder = 11;                          // last-applied order (audio thread)
+    int fftCurrentSize  = 1 << 11;                     // cached 2^fftCurrentOrder
+
+    float fftInputBuffer[fftMaxSize] = {};
     int   fftInputPos = 0;
     std::atomic<bool> fftReady { false };
-    float fftWorkBuffer[fftSize * 2] = {};
+    float fftWorkBuffer[fftMaxSize * 2] = {};
     float spectrumBinsOut[spectrumBinCount] = {};
+    juce::dsp::FFT fftInstance { 11 };                // persistent FFT (recreated on order change)
+    float hannWindow[fftMaxSize] = {};                // pre-computed Hann window
+
+    /** Set FFT order from message thread. Takes effect on next fill cycle. */
+    void setFftOrder (int order)
+    {
+        order = juce::jlimit (10, (int) fftMaxOrder, order);
+        fftActiveOrder.store (order, std::memory_order_relaxed);
+    }
+
+    /** Called from audio thread when fftActiveOrder changes. Rebuilds window + FFT. */
+    void applyFftOrderChange ()
+    {
+        int newOrder = fftActiveOrder.load (std::memory_order_relaxed);
+        if (newOrder == fftCurrentOrder) return;
+        fftCurrentOrder = newOrder;
+        fftCurrentSize  = 1 << newOrder;
+        fftInputPos = 0;
+        fftReady.store (false, std::memory_order_relaxed);
+        // Rebuild Hann window for new size
+        for (int i = 0; i < fftCurrentSize; ++i)
+            hannWindow[i] = 0.5f * (1.0f - std::cos (2.0f * juce::MathConstants<float>::pi * (float) i / (float) fftCurrentSize));
+        // Recreate FFT instance
+        fftInstance = juce::dsp::FFT (newOrder);
+    }
 
     /** Get log-spaced spectrum bins (dB) for UI. Returns bin count (128) or 0 if not ready. */
     int getSpectrumBins (float* outBins, int maxBins);

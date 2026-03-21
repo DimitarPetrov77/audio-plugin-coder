@@ -97,10 +97,13 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         sidechainRmsLevel.store (scRms);
     }
 
-    // ── FFT spectrum accumulation (mono sum into ring buffer) ──
+    // ── FFT spectrum accumulation (mono sum into ring buffer, 50% overlap) ──
     {
         int numSamp = buffer.getNumSamples();
+        // Check for FFT order change from UI
+        applyFftOrderChange();
         int chCount = juce::jmin(mainBusChannels, buffer.getNumChannels());
+        int halfSize = fftCurrentSize / 2;
         for (int s = 0; s < numSamp; ++s)
         {
             float mono = 0.0f;
@@ -108,17 +111,17 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 mono += buffer.getReadPointer(ch)[s];
             if (chCount > 1) mono /= (float) chCount;
             fftInputBuffer[fftInputPos] = mono;
-            if (++fftInputPos >= fftSize)
+            if (++fftInputPos >= fftCurrentSize)
             {
-                fftInputPos = 0;
-                // Copy + Hann window into work buffer
-                for (int i = 0; i < fftSize; ++i)
-                {
-                    float w = 0.5f * (1.0f - std::cos(juce::MathConstants<float>::twoPi * (float)i / (float)(fftSize - 1)));
-                    fftWorkBuffer[i] = fftInputBuffer[i] * w;
-                }
-                std::memset(fftWorkBuffer + fftSize, 0, sizeof(float) * fftSize);
+                // Apply Hann window → work buffer, then mark ready
+                for (int i = 0; i < fftCurrentSize; ++i)
+                    fftWorkBuffer[i] = fftInputBuffer[i] * hannWindow[i];
+                std::memset(fftWorkBuffer + fftCurrentSize, 0, sizeof(float) * fftCurrentSize);
                 fftReady.store(true);
+
+                // 50% overlap: shift second half → first half, continue writing at midpoint
+                std::memmove(fftInputBuffer, fftInputBuffer + halfSize, sizeof(float) * halfSize);
+                fftInputPos = halfSize;
             }
         }
     }
@@ -1907,6 +1910,66 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                         } // end else (curve mode)
                     }
                 }
+                // ===== LINK MODE =====
+                else if (lb.modeE == BlockMode::Link && lb.enabled
+                         && !lb.linkSources.empty()
+                         && !lb.targets.empty())
+                {
+                    // Read and average all source param values (0..1)
+                    float srcSum = 0.0f;
+                    int srcCount = 0;
+                    for (const auto& ls : lb.linkSources)
+                    {
+                        if (ls.pluginId == -2)
+                        {
+                            // Macro source — use stored macroValue directly (already 0..1)
+                            srcSum += ls.macroValue;
+                            srcCount++;
+                        }
+                        else if (ls.pluginId >= 0 && ls.paramIndex >= 0)
+                        {
+                            srcSum += getParamValue (ls.pluginId, ls.paramIndex);
+                            srcCount++;
+                        }
+                    }
+                    float srcVal = (srcCount > 0) ? (srcSum / (float) srcCount) : 0.0f;
+
+                    // Optional smoothing (one-pole filter)
+                    if (lb.linkSmoothMs > 0.0f && lb.linkSmoothedValue >= 0.0f)
+                    {
+                        float coeff = std::exp (-1.0f / (lb.linkSmoothMs * 0.001f
+                                                         * (float) currentSampleRate
+                                                         / (float) numSamples));
+                        lb.linkSmoothedValue += (srcVal - lb.linkSmoothedValue) * (1.0f - coeff);
+                        srcVal = lb.linkSmoothedValue;
+                    }
+                    else
+                    {
+                        lb.linkSmoothedValue = srcVal;
+                    }
+
+                    // Map source value (0..1) directly into each target's [min, max] range.
+                    // Like Bitwig macros: source at 0% → targets at Min, source at 100% → targets at Max.
+                    for (size_t ti = 0; ti < lb.targets.size(); ++ti)
+                    {
+                        float lo = (ti < lb.linkMin.size()) ? lb.linkMin[ti] / 100.0f : 0.0f;
+                        float hi = (ti < lb.linkMax.size()) ? lb.linkMax[ti] / 100.0f : 1.0f;
+
+                        // Direct linear interpolation: source 0→lo, source 1→hi
+                        float mapped = lo + srcVal * (hi - lo);
+                        mapped = juce::jlimit(0.0f, 1.0f, mapped);
+
+                        writeModBase (lb.targets[ti].pluginId, lb.targets[ti].paramIndex, mapped);
+                    }
+
+                    // Write readback for UI (reuse envReadback channel)
+                    if (envIdx < maxEnvReadback)
+                    {
+                        envReadback[envIdx].blockId.store (lb.id);
+                        envReadback[envIdx].level.store (srcVal);
+                        envIdx++;
+                    }
+                }
             }
             resolveModBus();
             numActiveEnvBlocks.store (envIdx);
@@ -2360,6 +2423,16 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             int   eqTypes[maxEqBands], eqStages[maxEqBands];
             bool  eqMuted[maxEqBands];
             {
+                // Hoist global params out of per-point loop (common to all points)
+                float maxDB      = eqDbRange.load();
+                float depthScale = eqGlobalDepth.load() / 100.0f;
+                float warpVal    = eqGlobalWarp.load();
+                int   steps      = eqGlobalSteps.load();
+                // Pre-compute warp denominator (one tanh per buffer, not per point)
+                float warpW = warpVal / 100.0f;
+                float tanhDenom = (std::abs(warpVal) > 0.5f && warpW > 0.0f)
+                                  ? std::tanh(warpW * 3.0f) : 1.0f;
+
                 for (int i = 0; i < nPts; ++i)
                 {
                     float freqBase = eqPoints[i].freqHz.load();
@@ -2371,23 +2444,20 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                         gainBase += eqPoints[i].modGainDB.load (std::memory_order_relaxed);
                         qBase    += eqPoints[i].modQ.load (std::memory_order_relaxed);
                     }
-                    float maxDB = eqDbRange.load();
-                    float gain  = juce::jlimit (-maxDB, maxDB, gainBase) * (eqGlobalDepth.load() / 100.0f);
+                    float gain  = juce::jlimit (-maxDB, maxDB, gainBase) * depthScale;
 
                     // Apply global warp to target gain
-                    float warpVal = eqGlobalWarp.load();
                     if (std::abs (warpVal) > 0.5f)
                     {
                         float norm = (gain + maxDB) / (maxDB * 2.0f);
-                        float w = warpVal / 100.0f;
-                        if (w > 0.0f)
+                        if (warpW > 0.0f)
                         {
                             float mid = norm * 2.0f - 1.0f;
-                            norm = 0.5f + 0.5f * std::tanh (w * 3.0f * mid) / std::tanh (w * 3.0f);
+                            norm = 0.5f + 0.5f * std::tanh (warpW * 3.0f * mid) / tanhDenom;
                         }
                         else
                         {
-                            float aw = -w;
+                            float aw = -warpW;
                             float c = norm * 2.0f - 1.0f;
                             float sv = c >= 0.0f ? 1.0f : -1.0f;
                             norm = 0.5f + 0.5f * sv * std::pow (std::abs (c), 1.0f / (1.0f + aw * 3.0f));
@@ -2396,7 +2466,6 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                     }
 
                     // Apply global steps
-                    int steps = eqGlobalSteps.load();
                     if (steps >= 2)
                     {
                         float stepSz = (maxDB * 2.0f) / (float)(steps - 1);
@@ -2468,7 +2537,7 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                     }
                 };
 
-                if (eqOversamplerReady && eqOversampler)
+                if (eqOversamplerReady.load(std::memory_order_acquire) && eqOversampler)
                 {
                     int osFactor = 1 << eqOversampleOrder;
                     float osSR = sr * osFactor;
@@ -2497,42 +2566,50 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             // +tilt = boost highs / cut lows, -tilt = boost lows / cut highs.
             {
                 float tiltVal = eqGlobalTilt.load();
-                // Compute tilt gains: symmetric in dB around pivot
-                // JS: tiltDB = logPos * (tiltVal/100) * 12, logPos ≈ ±5 at 20Hz/20kHz.
-                // 1st-order filter asymptotes to gainLow/gainHigh well below/above fc.
-                float tiltDB = (tiltVal / 100.0f) * 12.0f; // max ±12dB at frequency extremes
-                float gainLowTarget  = std::pow (10.0f, -tiltDB / 20.0f);
-                float gainHighTarget = std::pow (10.0f,  tiltDB / 20.0f);
 
-                // 1st-order LP coefficient: alpha = 1 - exp(-2π * fc / sr)
-                float tiltSR = (float) currentSampleRate;
-                float tiltAlpha = 1.0f - std::exp (-2.0f * juce::MathConstants<float>::pi * 632.0f / tiltSR);
+                // Fast-path: skip entirely when tilt is at 0 AND gains have converged to unity.
+                // Saves 2x pow() + 1x exp() per buffer in the typical case.
+                bool tiltIdle = (std::abs(tiltVal) < 0.1f
+                      && std::abs(tiltGainLowCur[0]  - 1.0f) < 0.001f
+                      && std::abs(tiltGainHighCur[0] - 1.0f) < 0.001f);
 
-                int tiltChans = juce::jmin (numChannels, 2);
-                for (int ch = 0; ch < tiltChans; ++ch)
+                if (!tiltIdle)
                 {
-                    auto* samples = buffer.getWritePointer (ch);
-                    float lpState = tiltLpState[ch];
-                    float gLow  = tiltGainLowCur[ch];
-                    float gHigh = tiltGainHighCur[ch];
+                    float tiltDB = (tiltVal / 100.0f) * 12.0f;
+                    float gainLowTarget  = std::pow (10.0f, -tiltDB / 20.0f);
+                    float gainHighTarget = std::pow (10.0f,  tiltDB / 20.0f);
 
-                    // Per-sample gain smoothing: ~5ms time constant
+                    float tiltSR = (float) currentSampleRate;
+                    float tiltAlpha = 1.0f - std::exp (-2.0f * juce::MathConstants<float>::pi * 632.0f / tiltSR);
+                    // Gain smoothing coeff: ~5ms time constant (channel-invariant, compute once)
                     float smoothCoeff = 1.0f - std::exp (-1.0f / (tiltSR * 0.005f));
 
-                    for (int s = 0; s < numSamples; ++s)
+                    int tiltChans = juce::jmin (numChannels, 2);
+                    for (int ch = 0; ch < tiltChans; ++ch)
                     {
-                        gLow  += smoothCoeff * (gainLowTarget  - gLow);
-                        gHigh += smoothCoeff * (gainHighTarget - gHigh);
+                        auto* samples = buffer.getWritePointer (ch);
+                        float lpState = tiltLpState[ch];
+                        float gLow  = tiltGainLowCur[ch];
+                        float gHigh = tiltGainHighCur[ch];
 
-                        float x = samples[s];
-                        lpState += tiltAlpha * (x - lpState);
-                        float hp = x - lpState;
-                        samples[s] = lpState * gLow + hp * gHigh;
+                        for (int s = 0; s < numSamples; ++s)
+                        {
+                            gLow  += smoothCoeff * (gainLowTarget  - gLow);
+                            gHigh += smoothCoeff * (gainHighTarget - gHigh);
+
+                            float x = samples[s];
+                            lpState += tiltAlpha * (x - lpState);
+                            float hp = x - lpState;
+                            samples[s] = lpState * gLow + hp * gHigh;
+                        }
+
+                        // Flush denormals on LP state (prevents CPU spikes during silence)
+                        if (std::abs(lpState) < 1.0e-20f) lpState = 0.0f;
+
+                        tiltLpState[ch]      = lpState;
+                        tiltGainLowCur[ch]   = gLow;
+                        tiltGainHighCur[ch]  = gHigh;
                     }
-
-                    tiltLpState[ch]      = lpState;
-                    tiltGainLowCur[ch]   = gLow;
-                    tiltGainHighCur[ch]  = gHigh;
                 }
             }
 
@@ -2543,23 +2620,28 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             // The crossovers use JUCE LinkwitzRiley (DFII biquads) which produce
             // low-frequency thumps when cutoff frequencies change. By skipping when
             // not needed, the SVF-processed buffer passes straight to output.
+            // Build busId → band index lookup table (O(N) once, then O(1) per plugin)
+            int busIdToBand[maxEqBands]; // busId → band index (point bands = odd)
+            for (int i = 0; i < maxEqBands; ++i) busIdToBand[i] = -1;
+            for (int si = 0; si < nPts; ++si)
+            {
+                int origIdx = eqSortOrder[si].load();
+                if (origIdx >= 0 && origIdx < maxEqBands)
+                {
+                    int ptBus = eqPoints[origIdx].busId.load();
+                    if (ptBus >= 0 && ptBus < maxEqBands)
+                        busIdToBand[ptBus] = si * 2 + 1; // point band = odd index
+                }
+            }
+
             bool needsBandSplit = false;
             {
                 for (auto& hp : hostedPlugins)
                 {
                     if (! hp->instance || ! hp->prepared || hp->bypassed || hp->crashed) continue;
                     int plugBusId = hp->busId;
-                    for (int si = 0; si < nPts; ++si)
-                    {
-                        int origIdx = eqSortOrder[si].load();
-                        if (origIdx >= 0 && origIdx < maxEqBands)
-                        {
-                            int ptBus = eqPoints[origIdx].busId.load();
-                            if (ptBus >= 0 && ptBus == plugBusId)
-                            { needsBandSplit = true; break; }
-                        }
-                    }
-                    if (needsBandSplit) break;
+                    if (plugBusId >= 0 && plugBusId < maxEqBands && busIdToBand[plugBusId] >= 0)
+                    { needsBandSplit = true; break; }
                 }
             }
 
@@ -2685,6 +2767,8 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                     if (! bandSoloed[b]) bandSilenced[b] = true;
             }
 
+
+
             // Process plugins on their assigned bands
             // Skip if band is muted (bypass) or silenced (solo isolation)
             for (auto& hp : hostedPlugins)
@@ -2692,20 +2776,8 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 if (! hp->instance || ! hp->prepared || hp->bypassed || hp->crashed) continue;
                 int plugBusId = hp->busId;
 
-                int targetBand = -1;
-                for (int si = 0; si < nPts; ++si)
-                {
-                    int origIdx = eqSortOrder[si].load();
-                    if (origIdx >= 0 && origIdx < maxEqBands)
-                    {
-                        int ptBus = eqPoints[origIdx].busId.load();
-                        if (ptBus >= 0 && ptBus == plugBusId)
-                        {
-                            targetBand = si * 2 + 1; // point band = odd index
-                            break;
-                        }
-                    }
-                }
+                // O(1) lookup instead of inner loop
+                int targetBand = (plugBusId >= 0 && plugBusId < maxEqBands) ? busIdToBand[plugBusId] : -1;
                 // If no matching eqPoint found, plugin has no valid band
                 if (targetBand < 0 || targetBand >= nBands) continue;
                 // Skip plugins on muted or silenced bands
@@ -2795,19 +2867,9 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 for (auto& hp : hostedPlugins)
                 {
                     if (! hp->instance || ! hp->prepared || hp->bypassed || hp->crashed) continue;
+                    // Check if this plugin is assigned to any EQ band (O(1) via lookup table)
                     int plugBusId = hp->busId;
-
-                    // Check if this plugin is assigned to any EQ band
-                    bool assigned = false;
-                    for (int si = 0; si < nPts; ++si)
-                    {
-                        int origIdx = eqSortOrder[si].load();
-                        if (origIdx >= 0 && origIdx < maxEqBands)
-                        {
-                            int ptBus = eqPoints[origIdx].busId.load();
-                            if (ptBus >= 0 && ptBus == plugBusId) { assigned = true; break; }
-                        }
-                    }
+                    bool assigned = (plugBusId >= 0 && plugBusId < maxEqBands && busIdToBand[plugBusId] >= 0);
                     if (assigned) continue; // already processed in Step 2
 
                     // Unassigned: process on the full summed buffer (post-EQ global insert)

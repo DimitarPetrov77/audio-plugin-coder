@@ -85,6 +85,7 @@ document.getElementById('addMorph').onclick = function () { addBlock('morph_pad'
 document.getElementById('addShapes').onclick = function () { addBlock('shapes'); };
 document.getElementById('addShapesRange').onclick = function () { addBlock('shapes_range'); };
 document.getElementById('addLane').onclick = function () { addBlock('lane'); };
+document.getElementById('addLink').onclick = function () { addBlock('link'); };
 document.getElementById('addPluginBtn').onclick = function () { openPluginBrowser(); };
 document.getElementById('undoBtn').onclick = function () { performUndo(); };
 document.getElementById('redoBtn').onclick = function () { performRedo(); };

@@ -142,6 +142,14 @@ function removePlugin(pid) {
             }
         }
     });
+    // Clean up stale link sources referencing this plugin's hostId
+    var rmHostId = pb.hostId !== undefined ? pb.hostId : pid;
+    blocks.forEach(function (b) {
+        if (b.mode !== 'link' || !b.linkSources) return;
+        b.linkSources = b.linkSources.filter(function (src) {
+            return src.pluginId !== rmHostId;
+        });
+    });
     pluginBlocks = pluginBlocks.filter(function (p) { return p.id !== pid; });
     renderAllPlugins(); renderBlocks(); updCounts(); syncBlocksToHost(); syncExpandedPlugins();
     // Update WrongEQ routing panel (plugin may have been in a band or global)
@@ -295,7 +303,16 @@ function _buildParamRow(p, isA, aBlk, aCol, srBlock) {
     var knobVal = (rangeInfo && rangeInfo.base !== undefined) ? rangeInfo.base : p.v;
     var knobSvg = buildParamKnob(knobVal, 30, rangeInfo);
     var grip = p.lk ? '' : '<span class="pr-grip" title="Drag to logic block">⠿</span>';
-    row.innerHTML = grip + '<div class="pr-knob" data-pid="' + p.id + '" data-hid="' + (p.hostId !== undefined ? p.hostId : '') + '" data-ri="' + (p.realIndex !== undefined ? p.realIndex : '') + '">' + knobSvg + '</div><span class="pr-name">' + p.name + '</span><div class="pr-dots">' + dots + '</div><span class="pr-val">' + (p.disp || ((p.v * 100).toFixed(0) + '%')) + '</span><div class="pr-bar"><div class="pr-bar-f" style="width:' + (p.v * 100) + '%"></div></div>' + (p.lk ? '<span class="pr-lock">' + (p.alk ? '&#9888;' : '&#128274;') + '</span>' : '');
+    // Check if this param is a link source — O(1) via pre-built lookup table
+    var linkSrcIndicator = '';
+    if (_linkSrcLookup) {
+        var lsKey = p.hostId + ':' + p.realIndex;
+        var lsEntry = _linkSrcLookup[lsKey];
+        if (lsEntry) {
+            linkSrcIndicator = '<span class="pr-link-src" style="color:' + lsEntry.color + '" title="Link source (Block ' + lsEntry.blockNum + ')">&#9670;</span>';
+        }
+    }
+    row.innerHTML = grip + '<div class="pr-knob" data-pid="' + p.id + '" data-hid="' + (p.hostId !== undefined ? p.hostId : '') + '" data-ri="' + (p.realIndex !== undefined ? p.realIndex : '') + '">' + knobSvg + '</div><span class="pr-name">' + p.name + '</span>' + linkSrcIndicator + '<div class="pr-dots">' + dots + '</div><span class="pr-val">' + (p.disp || ((p.v * 100).toFixed(0) + '%')) + '</span><div class="pr-bar"><div class="pr-bar-f" style="width:' + (p.v * 100) + '%"></div></div>' + (p.lk ? '<span class="pr-lock">' + (p.alk ? '&#9888;' : '&#128274;') + '</span>' : '');
     return row;
 }
 
@@ -596,6 +613,27 @@ var MOD_ARC_REGISTRY = {
             return rawVal;
         },
         outputType: 'absolute' // 0..1 direct parameter value
+    },
+    link: {
+        // Link: absolute direct mapping (Bitwig macro style)
+        // Arc shows the min→max range on the knob
+        getDepth: function (b, pid) {
+            var lo = b.linkMin && b.linkMin[pid] !== undefined ? b.linkMin[pid] : 0;
+            var hi = b.linkMax && b.linkMax[pid] !== undefined ? b.linkMax[pid] : 100;
+            // Store min/max for arc rendering (0..1 scale)
+            b._linkArcMin = lo / 100;
+            b._linkArcMax = hi / 100;
+            // Half-range for arc width
+            return Math.abs(hi - lo) / 200;
+        },
+        getPolarity: function (b) { return 'bipolar'; },
+        getOutput: function (b, pid) {
+            // Return the current parameter value directly — C++ uses writeModBase
+            var p = PMap[pid];
+            if (!p) return undefined;
+            return p.v;
+        },
+        outputType: 'absolute' // 0..1 direct parameter value
     }
 };
 
@@ -673,11 +711,14 @@ function getModArcInfo(pid) {
         sources.push(srcEntry);
         if (!firstColor) {
             firstColor = bColor(b.colorIdx);
-            // For absolute (lane/morph_pad) blocks, use the midpoint of the value range as base
+            // For absolute (lane/morph_pad/link) blocks, use the midpoint of the value range as base
             if (reg.outputType === 'absolute' && b._laneArcMin !== undefined) {
                 firstBase = (b._laneArcMin + b._laneArcMax) / 2;
             } else if (reg.outputType === 'absolute' && b._morphPadArcMin !== undefined) {
                 firstBase = (b._morphPadArcMin + b._morphPadArcMax) / 2;
+            } else if (b.mode === 'link' && b._linkArcMin !== undefined) {
+                // Link: arc centered on midpoint of min/max range
+                firstBase = (b._linkArcMin + b._linkArcMax) / 2;
             } else {
                 firstBase = b.targetBases && b.targetBases[pid] !== undefined ? b.targetBases[pid] : 0.5;
             }
@@ -732,6 +773,10 @@ function updateModBases(pid, newVal) {
             if (!b.targetRangeBases) b.targetRangeBases = {};
             b.targetRangeBases[pid] = newVal;
         }
+        if (b.mode === 'link') {
+            if (!b.linkBases) b.linkBases = {};
+            b.linkBases[pid] = newVal;
+        }
         if (!b.targetBases) b.targetBases = {};
         b.targetBases[pid] = newVal;
     }
@@ -745,9 +790,31 @@ function linToDb(lin) { return lin <= 0.001 ? -60 : 20 * Math.log10(lin); }
 function dbToLin(db) { return db <= -59.9 ? 0 : Math.pow(10, db / 20); }
 function fmtDb(db) { return db <= -59.9 ? '-\u221E' : (db >= 0 ? '+' : '') + db.toFixed(1); }
 
+// Pre-computed link-source lookup table: pluginId:paramIndex → {color, blockNum}
+// Built once per render pass, consumed by _buildParamRow for O(1) diamond indicators.
+var _linkSrcLookup = null;
+function _rebuildLinkSrcLookup() {
+    _linkSrcLookup = {};
+    for (var lbi = 0; lbi < blocks.length; lbi++) {
+        var lb = blocks[lbi];
+        if (lb.mode !== 'link' || !lb.linkSources || !lb.enabled) continue;
+        var col = bColor(lb.colorIdx);
+        for (var lsi = 0; lsi < lb.linkSources.length; lsi++) {
+            var ls = lb.linkSources[lsi];
+            var key = ls.pluginId + ':' + ls.paramIndex;
+            if (!_linkSrcLookup[key]) {
+                _linkSrcLookup[key] = { color: col, blockNum: lbi + 1 };
+            }
+        }
+    }
+}
+
 function renderAllPlugins() {
     // Don't rebuild during preset loading — would destroy placeholder cards
     if (typeof gpLoadInProgress !== 'undefined' && gpLoadInProgress) return;
+
+    // Rebuild link-source lookup table (used by _buildParamRow for diamond indicators)
+    _rebuildLinkSrcLookup();
 
     var c = document.getElementById('pluginScroll');
     var isA = assignMode !== null, aBlk = isA ? findBlock(assignMode) : null, aCol = isA && aBlk ? bColor(aBlk.colorIdx) : '';
@@ -1050,6 +1117,7 @@ function wirePluginCards() {
     });
     // Drag and drop reordering
     var dragSrcIdx = null;
+    var _dragHighlight = null; // tracks the currently highlighted card during drag (avoids querySelectorAll)
     document.querySelectorAll('.pcard').forEach(function (card) {
         card.addEventListener('dragstart', function (e) {
             // If the drag originates from a param row (.pr), skip plugin reorder drag
@@ -1062,18 +1130,22 @@ function wirePluginCards() {
         card.addEventListener('dragend', function () {
             card.classList.remove('dragging');
             dragSrcIdx = null;
-            document.querySelectorAll('.pcard').forEach(function (c) {
-                c.classList.remove('dragging', 'drag-over-top', 'drag-over-bottom');
-            });
+            if (_dragHighlight) {
+                _dragHighlight.classList.remove('drag-over-top', 'drag-over-bottom');
+                _dragHighlight = null;
+            }
         });
         card.addEventListener('dragover', function (e) {
             e.preventDefault();
             e.dataTransfer.dropEffect = 'move';
             var rect = card.getBoundingClientRect();
             var midY = rect.top + rect.height / 2;
-            document.querySelectorAll('.pcard').forEach(function (c) {
-                c.classList.remove('drag-over-top', 'drag-over-bottom');
-            });
+            // Clear previous highlight (O(1) instead of querySelectorAll)
+            if (_dragHighlight && _dragHighlight !== card) {
+                _dragHighlight.classList.remove('drag-over-top', 'drag-over-bottom');
+            }
+            _dragHighlight = card;
+            card.classList.remove('drag-over-top', 'drag-over-bottom');
             if (e.clientY < midY) card.classList.add('drag-over-top');
             else card.classList.add('drag-over-bottom');
         });
@@ -1348,10 +1420,10 @@ pse.addEventListener('click', function (e) {
             }
         } else if (e.ctrlKey || e.metaKey) {
             if (b.targets.has(pid)) { b.targets.delete(pid); cleanBlockAfterUnassign(b, pid); lastClickedAction = 'remove'; }
-            else { assignTarget(b, pid); if (b.mode === 'shapes_range') { if (!b.targetRanges) b.targetRanges = {}; if (!b.targetRangeBases) b.targetRangeBases = {}; if (b.targetRanges[pid] === undefined) { b.targetRanges[pid] = 0; b.targetRangeBases[pid] = pp.v; } } if (b.mode === 'shapes') { if (!b.targetBases) b.targetBases = {}; b.targetBases[pid] = pp.v; } lastClickedAction = 'add'; }
+            else { assignTarget(b, pid); if (b.mode === 'shapes_range') { if (!b.targetRanges) b.targetRanges = {}; if (!b.targetRangeBases) b.targetRangeBases = {}; if (b.targetRanges[pid] === undefined) { b.targetRanges[pid] = 0; b.targetRangeBases[pid] = pp.v; } } if (b.mode === 'link') { if (!b.linkBases) b.linkBases = {}; b.linkBases[pid] = pp.v; } if (b.mode === 'shapes') { if (!b.targetBases) b.targetBases = {}; b.targetBases[pid] = pp.v; } lastClickedAction = 'add'; }
         } else {
             if (b.targets.has(pid)) { b.targets.delete(pid); cleanBlockAfterUnassign(b, pid); lastClickedAction = 'remove'; }
-            else { assignTarget(b, pid); if (b.mode === 'shapes_range') { if (!b.targetRanges) b.targetRanges = {}; if (!b.targetRangeBases) b.targetRangeBases = {}; if (b.targetRanges[pid] === undefined) { b.targetRanges[pid] = 0; b.targetRangeBases[pid] = pp.v; } } if (b.mode === 'shapes') { if (!b.targetBases) b.targetBases = {}; b.targetBases[pid] = pp.v; } lastClickedAction = 'add'; }
+            else { assignTarget(b, pid); if (b.mode === 'shapes_range') { if (!b.targetRanges) b.targetRanges = {}; if (!b.targetRangeBases) b.targetRangeBases = {}; if (b.targetRanges[pid] === undefined) { b.targetRanges[pid] = 0; b.targetRangeBases[pid] = pp.v; } } if (b.mode === 'link') { if (!b.linkBases) b.linkBases = {}; b.linkBases[pid] = pp.v; } if (b.mode === 'shapes') { if (!b.targetBases) b.targetBases = {}; b.targetBases[pid] = pp.v; } lastClickedAction = 'add'; }
         }
         lastClickedPid = pid;
         renderAllPlugins();
@@ -1521,16 +1593,28 @@ pse.addEventListener('contextmenu', function (e) {
             _lastDragVal = newVal;
 
             if (isVirtual) {
-                // Virtual param: update EQ state directly
+                // Virtual param: always apply to EQ state + redraw canvas
                 if (typeof weqApplyVirtualParam === 'function') weqApplyVirtualParam(pid, newVal);
-                p.v = newVal;
-                knob.innerHTML = buildParamKnob(newVal, 30, null);
-                var row = knob.closest('.pr');
-                if (row) {
-                    var ve = row.querySelector('.pr-val');
-                    if (ve) ve.textContent = p.disp || ((newVal * 100).toFixed(0) + '%');
-                    var bf = row.querySelector('.pr-bar-f');
-                    if (bf) bf.style.width = (newVal * 100) + '%';
+                if (_hasModBlocks) {
+                    // Modulated virtual: update bases, let realtime.js render knob+arc
+                    updateModBases(pid, newVal);
+                    // Update value text only — knob SVG is rendered by realtime.js
+                    var row = knob.closest('.pr');
+                    if (row) {
+                        var ve = row.querySelector('.pr-val');
+                        if (ve) ve.textContent = (newVal * 100).toFixed(0) + '%';
+                    }
+                } else {
+                    // Unmodulated virtual: direct render
+                    p.v = newVal;
+                    knob.innerHTML = buildParamKnob(newVal, 30, null);
+                    var row = knob.closest('.pr');
+                    if (row) {
+                        var ve = row.querySelector('.pr-val');
+                        if (ve) ve.textContent = p.disp || ((newVal * 100).toFixed(0) + '%');
+                        var bf = row.querySelector('.pr-bar-f');
+                        if (bf) bf.style.width = (newVal * 100) + '%';
+                    }
                 }
                 // Redraw canvas + sync to host
                 if (typeof weqDrawCanvas === 'function') weqDrawCanvas();

@@ -1049,12 +1049,18 @@ function buildGlobalPresetData() {
                         drift: lane.drift != null ? lane.drift : 0, driftRange: lane.driftRange != null ? lane.driftRange : 5, driftScale: lane.driftScale || '1/1', warp: lane.warp != null ? lane.warp : 0, interp: lane.interp || 'smooth',
                         playMode: lane.playMode || 'forward', freeSecs: lane.freeSecs != null ? lane.freeSecs : 4,
                         synced: lane.synced !== false, muted: !!lane.muted,
+                        trigMode: lane.trigMode || 'loop', trigSource: lane.trigSource || 'manual',
+                        trigMidiNote: lane.trigMidiNote != null ? lane.trigMidiNote : -1, trigMidiCh: lane.trigMidiCh || 0,
+                        trigThreshold: lane.trigThreshold != null ? lane.trigThreshold : -12,
+                        trigAudioSrc: lane.trigAudioSrc || 'main', trigRetrigger: lane.trigRetrigger !== false,
+                        trigHold: !!lane.trigHold,
                         morphMode: !!lane.morphMode,
                         morphSnapshots: (lane.morphSnapshots || []).map(function (s) { return { position: s.position || 0, hold: s.hold != null ? s.hold : 0.5, curve: s.curve || 0, depth: s.depth != null ? s.depth : 1.0, drift: s.drift || 0, driftRange: s.driftRange != null ? s.driftRange : 5, driftScale: s.driftScale || '', warp: s.warp || 0, steps: s.steps || 0, name: s.name || '', source: s.source || '', values: s.values || {} }; }),
                         overlayLanes: lane._overlayLanes || []
                     };
                 }),
-                enabled: b.enabled !== false, expanded: b.expanded
+                enabled: b.enabled !== false, expanded: b.expanded,
+                linkSources: b.linkSources || [], linkMin: b.linkMin || {}, linkMax: b.linkMax || {}, linkBases: b.linkBases || {}, linkSmoothMs: b.linkSmoothMs || 0
             };
         }),
         bc: bc, actId: actId,
@@ -1067,7 +1073,7 @@ function buildGlobalPresetData() {
             points: wrongEqPoints.map(function (p, idx) {
                 var saveX = (typeof weqAnimRafId !== 'undefined' && weqAnimRafId && typeof weqAnimBaseX !== 'undefined' && weqAnimBaseX.length > idx) ? weqAnimBaseX[idx] : p.x;
                 var saveY = (typeof weqAnimRafId !== 'undefined' && weqAnimRafId && typeof weqAnimBaseY !== 'undefined' && weqAnimBaseY.length > idx) ? weqAnimBaseY[idx] : p.y;
-                return { x: saveX, y: saveY, uid: p.uid, pluginIds: p.pluginIds || [], seg: p.seg || null, solo: p.solo || false, mute: p.mute || false, q: p.q != null ? p.q : 0.707, type: p.type || 'Bell', drift: p.drift || 0, preEq: p.preEq !== false, stereoMode: p.stereoMode || 0, slope: p.slope || 1 };
+                return { x: saveX, y: saveY, uid: p.uid, pluginIds: p.pluginIds || [], seg: p.seg || null, solo: p.solo || false, mute: p.mute || false, q: p.q != null ? p.q : 0.707, type: p.type || 'Bell', drift: p.drift || 0, preEq: p.preEq !== false, stereoMode: p.stereoMode || 0, slope: p.slope || 1, modExclude: p.modExclude || 0 };
             }),
             interp: typeof weqGlobalInterp !== 'undefined' ? weqGlobalInterp : 'smooth',
             depth: typeof weqGlobalDepth !== 'undefined' ? weqGlobalDepth : 100,
@@ -1080,6 +1086,7 @@ function buildGlobalPresetData() {
             animSpeed: typeof weqAnimSpeed !== 'undefined' ? weqAnimSpeed : 0,
             animDepth: typeof weqAnimDepth !== 'undefined' ? weqAnimDepth : 6,
             animShape: typeof weqAnimShape !== 'undefined' ? weqAnimShape : 'sine',
+            animSpread: typeof weqAnimSpread !== 'undefined' ? weqAnimSpread : 0,
             drift: typeof weqDrift !== 'undefined' ? weqDrift : 0,
             driftRange: typeof weqDriftRange !== 'undefined' ? weqDriftRange : 5,
             driftScale: typeof weqDriftScale !== 'undefined' ? weqDriftScale : '1/1',
@@ -1093,6 +1100,7 @@ function buildGlobalPresetData() {
             qModSpeed: typeof weqQModSpeed !== 'undefined' ? weqQModSpeed : 0,
             qModDepth: typeof weqQModDepth !== 'undefined' ? weqQModDepth : 50,
             qModShape: typeof weqQModShape !== 'undefined' ? weqQModShape : 'sine',
+            qModSpread: typeof weqQModSpread !== 'undefined' ? weqQModSpread : 0,
             qLoCut: typeof weqQLoCut !== 'undefined' ? weqQLoCut : 20,
             qHiCut: typeof weqQHiCut !== 'undefined' ? weqQHiCut : 20000,
 
@@ -1100,7 +1108,8 @@ function buildGlobalPresetData() {
             splitMode: typeof weqSplitMode !== 'undefined' ? weqSplitMode : false,
             oversample: typeof weqOversample !== 'undefined' ? weqOversample : 1,
             unassignedMode: typeof weqUnassignedMode !== 'undefined' ? weqUnassignedMode : 0,
-            eqPresetName: typeof _weqCurrentPreset !== 'undefined' ? _weqCurrentPreset : null
+            eqPresetName: typeof _weqCurrentPreset !== 'undefined' ? _weqCurrentPreset : null,
+            modEnabled: typeof weqModEnabled !== 'undefined' ? weqModEnabled : true
         }
     };
 }
@@ -1197,12 +1206,19 @@ function applyGlobalPreset(data, presetName) {
                         drift: lane.drift != null ? lane.drift : 0, driftRange: lane.driftRange != null ? lane.driftRange : 5, driftScale: lane.driftScale || '1/1', warp: lane.warp != null ? lane.warp : 0, interp: lane.interp || 'smooth',
                         playMode: lane.playMode || 'forward', freeSecs: lane.freeSecs != null ? lane.freeSecs : 4,
                         synced: lane.synced !== false, muted: !!lane.muted,
+                        trigMode: lane.trigMode || 'loop', trigSource: lane.trigSource || 'manual',
+                        trigMidiNote: lane.trigMidiNote != null ? lane.trigMidiNote : -1, trigMidiCh: lane.trigMidiCh || 0,
+                        trigThreshold: lane.trigThreshold != null ? lane.trigThreshold : -12,
+                        trigAudioSrc: lane.trigAudioSrc || 'main', trigRetrigger: lane.trigRetrigger !== false,
+                        trigHold: !!lane.trigHold,
                         morphMode: !!lane.morphMode,
                         morphSnapshots: (lane.morphSnapshots || []).map(function (s) { return { position: s.position || 0, hold: s.hold != null ? s.hold : 0.5, curve: s.curve || 0, depth: s.depth != null ? s.depth : 1.0, drift: s.drift || 0, driftRange: s.driftRange != null ? s.driftRange : 5, driftScale: s.driftScale || '', warp: s.warp || 0, steps: s.steps || 0, name: s.name || '', source: s.source || '', values: s.values || {} }; }),
                         _overlayLanes: lane.overlayLanes || []
                     };
                 }),
-                enabled: sb.enabled !== false, expanded: sb.expanded !== false
+                enabled: sb.enabled !== false, expanded: sb.expanded !== false,
+                linkSources: sb.linkSources || (sb.linkSourcePluginId != null && sb.linkSourcePluginId >= 0 ? [{ pluginId: sb.linkSourcePluginId, paramIndex: sb.linkSourceParamIndex || -1, pluginName: sb.linkSourcePluginName || '', paramName: sb.linkSourceParamName || '' }] : []),
+                linkMin: sb.linkMin || {}, linkMax: sb.linkMax || {}, linkBases: sb.linkBases || {}, linkSmoothMs: sb.linkSmoothMs || 0
             };
         });
         bc = data.bc || blocks.reduce(function (m, b) { return Math.max(m, b.id); }, 0);
@@ -1361,6 +1377,9 @@ function applyGlobalPreset(data, presetName) {
                             b.targetBases = remapKeyedMap(b.targetBases);
                             b.targetRanges = remapKeyedMap(b.targetRanges);
                             b.targetRangeBases = remapKeyedMap(b.targetRangeBases);
+                            b.linkMin = remapKeyedMap(b.linkMin);
+                            b.linkMax = remapKeyedMap(b.linkMax);
+                            b.linkBases = remapKeyedMap(b.linkBases);
                             // Remap snapshots
                             if (b.snapshots) {
                                 b.snapshots.forEach(function (s) {
@@ -1410,6 +1429,14 @@ function applyGlobalPreset(data, presetName) {
                                     }
                                 });
                             }
+                            // Remap link source pluginIds
+                            if (b.linkSources) {
+                                b.linkSources.forEach(function (src) {
+                                    if (src.pluginId >= 0 && idMap[src.pluginId] !== undefined) {
+                                        src.pluginId = idMap[src.pluginId];
+                                    }
+                                });
+                            }
                         });
                     }
                 }
@@ -1441,7 +1468,7 @@ function applyGlobalPreset(data, presetName) {
                     var weq = data.wrongEq;
                     if (weq.points) {
                         wrongEqPoints = weq.points.map(function (p) {
-                            var pt = { x: p.x, y: p.y, pluginIds: p.pluginIds || [], seg: p.seg || null, solo: p.solo || false, mute: p.mute || false, q: p.q != null ? p.q : 0.707, type: p.type || 'Bell', drift: p.drift || 0, preEq: p.preEq !== undefined ? p.preEq : (weq.preEq !== undefined ? weq.preEq : true), stereoMode: p.stereoMode || 0, slope: p.slope || 1 };
+                            var pt = { x: p.x, y: p.y, pluginIds: p.pluginIds || [], seg: p.seg || null, solo: p.solo || false, mute: p.mute || false, q: p.q != null ? p.q : 0.707, type: p.type || 'Bell', drift: p.drift || 0, preEq: p.preEq !== undefined ? p.preEq : (weq.preEq !== undefined ? weq.preEq : true), stereoMode: p.stereoMode || 0, slope: p.slope || 1, modExclude: p.modExclude || 0 };
                             if (p.uid) pt.uid = p.uid;
                             else if (typeof _weqAllocUid === 'function') pt.uid = _weqAllocUid();
                             return pt;
@@ -1466,6 +1493,7 @@ function applyGlobalPreset(data, presetName) {
                     if (typeof weqAnimSpeed !== 'undefined' && weq.animSpeed != null) weqAnimSpeed = weq.animSpeed;
                     if (typeof weqAnimDepth !== 'undefined' && weq.animDepth != null) weqAnimDepth = weq.animDepth;
                     if (typeof weqAnimShape !== 'undefined' && weq.animShape != null) weqAnimShape = weq.animShape;
+                    if (typeof weqAnimSpread !== 'undefined' && weq.animSpread != null) weqAnimSpread = weq.animSpread;
                     // Drift params
                     if (typeof weqDrift !== 'undefined' && weq.drift != null) weqDrift = weq.drift;
                     if (typeof weqDriftRange !== 'undefined' && weq.driftRange != null) weqDriftRange = weq.driftRange;
@@ -1480,6 +1508,7 @@ function applyGlobalPreset(data, presetName) {
                     if (typeof weqQModSpeed !== 'undefined' && weq.qModSpeed != null) weqQModSpeed = weq.qModSpeed;
                     if (typeof weqQModDepth !== 'undefined' && weq.qModDepth != null) weqQModDepth = weq.qModDepth;
                     if (typeof weqQModShape !== 'undefined' && weq.qModShape != null) weqQModShape = weq.qModShape;
+                    if (typeof weqQModSpread !== 'undefined' && weq.qModSpread != null) weqQModSpread = weq.qModSpread;
                     if (typeof weqQLoCut !== 'undefined' && weq.qLoCut != null) weqQLoCut = weq.qLoCut;
                     if (typeof weqQHiCut !== 'undefined' && weq.qHiCut != null) weqQHiCut = weq.qHiCut;
 
@@ -1487,6 +1516,7 @@ function applyGlobalPreset(data, presetName) {
                     if (typeof weqSplitMode !== 'undefined' && weq.splitMode != null) weqSplitMode = weq.splitMode;
                     if (typeof weqOversample !== 'undefined' && weq.oversample != null) weqOversample = weq.oversample;
                     if (typeof weqUnassignedMode !== 'undefined' && weq.unassignedMode != null) weqUnassignedMode = weq.unassignedMode;
+                    if (typeof weqModEnabled !== 'undefined' && weq.modEnabled != null) weqModEnabled = weq.modEnabled;
                     if (typeof _weqCurrentPreset !== 'undefined') _weqCurrentPreset = weq.eqPresetName || null;
 
                     // Remap WrongEQ pluginIds from old host IDs to new IDs

@@ -66,6 +66,10 @@ var BLOCK_EXPOSABLE_PARAMS = {
     lane: [
         { key: 'enabled', label: 'Enabled', type: 'bool' }
         // Per-lane params (depth, speed) are added dynamically based on lane count
+    ],
+    link: [
+        { key: 'linkSmoothMs', label: 'Smooth', type: 'float', min: 0, max: 500, suffix: 'ms' },
+        { key: 'enabled', label: 'Enabled', type: 'bool' }
     ]
 };
 
@@ -83,6 +87,16 @@ function getExposableParamsForBlock(b) {
                 // Morph lanes don't have speed in the traditional sense
             } else {
                 params.push({ key: 'lane.' + li + '.speed', label: laneLabel + ' Speed', type: 'float', min: 0, max: 100, suffix: '%' });
+            }
+        }
+    }
+
+    // Link blocks get per-macro-source value params
+    if (b.mode === 'link' && b.linkSources) {
+        for (var mi = 0; mi < b.linkSources.length; mi++) {
+            if (b.linkSources[mi].pluginId === -2) {
+                var macroLabel = 'Macro ' + (mi + 1);
+                params.push({ key: 'linkMacro.' + mi + '.value', label: macroLabel, type: 'float', min: 0, max: 100, suffix: '%' });
             }
         }
     }
@@ -620,6 +634,18 @@ function setBlockParamFromDAW(blockId, paramKey, value) {
             var lMin = pDef ? (pDef.min || 0) : 0;
             var lMax = pDef ? (pDef.max || 100) : 100;
             b.lanes[laneIdx][laneProp] = value * (lMax - lMin) + lMin;
+        }
+        if (typeof syncBlocksToHost === 'function') syncBlocksToHost();
+        if (typeof renderBlocks === 'function') renderBlocks();
+        return;
+    }
+
+    // Handle link macro dynamic params (e.g. "linkMacro.0.value")
+    var macroMatch = paramKey.match(/^linkMacro\.(\d+)\.value$/);
+    if (macroMatch) {
+        var macroIdx = parseInt(macroMatch[1]);
+        if (b.linkSources && b.linkSources[macroIdx] && b.linkSources[macroIdx].pluginId === -2) {
+            b.linkSources[macroIdx].macroValue = value * 100; // 0..1 DAW → 0..100 internal
         }
         if (typeof syncBlocksToHost === 'function') syncBlocksToHost();
         if (typeof renderBlocks === 'function') renderBlocks();

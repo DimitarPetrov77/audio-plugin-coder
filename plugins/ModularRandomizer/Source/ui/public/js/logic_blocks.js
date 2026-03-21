@@ -1,4 +1,4 @@
-﻿// ============================================================
+// ============================================================
 // LOGIC BLOCKS
 // Block creation, rendering, wiring, randomize, sync to host
 // ============================================================
@@ -124,7 +124,8 @@ function addBlock(mode) {
         id: id, mode: mode, enabled: true, targets: new Set(), targetBases: {}, targetRanges: {}, targetRangeBases: {}, colorIdx: bc - 1, trigger: 'manual', beatDiv: '1/4', midiMode: 'any_note', midiNote: 60, midiCC: 1, midiCh: 0, velScale: false, threshold: -12, audioSrc: 'main', rMin: 0, rMax: 100, rangeMode: 'relative', polarity: 'bipolar', quantize: false, qSteps: 12, movement: 'instant', glideMs: 200, envAtk: 10, envRel: 100, envSens: 50, envInvert: false, envFilterMode: 'flat', envFilterFreq: 50, envFilterBW: 5, loopMode: 'loop', sampleSpeed: 1.0, sampleReverse: false, jumpMode: 'restart', sampleName: '', sampleWaveform: null, expanded: true, clockSource: 'daw',
         snapshots: [], playheadX: 0.5, playheadY: 0.5, morphMode: 'manual', exploreMode: 'wander', lfoShape: 'circle', lfoDepth: 80, lfoRotation: 0, morphSpeed: 50, morphAction: 'jump', stepOrder: 'cycle', morphSource: 'midi', jitter: 0, morphGlide: 200, morphTempoSync: false, morphSyncDiv: '1/4', snapRadius: 100,
         shapeType: 'circle', shapeTracking: 'horizontal', shapeSize: 80, shapeSpin: 0, shapeSpeed: 50, shapePhaseOffset: 0, shapeRange: 'relative', shapePolarity: 'bipolar', shapeTempoSync: false, shapeSyncDiv: '1/4', shapeTrigger: 'free',
-        laneTool: 'draw', laneGrid: '1/8', lanes: []
+        laneTool: 'draw', laneGrid: '1/8', lanes: [],
+        linkSources: [], linkMin: {}, linkMax: {}, linkBases: {}, linkSmoothMs: 0
     };
     blocks.push(blk);
     // shapes_range defaults to unipolar (drag direction) â€” most intuitive for per-param ranges
@@ -137,27 +138,38 @@ function assignTarget(block, pid) {
     var p = PMap[pid];
     if (!p || p.lk) return;
     block.targets.add(pid);
-    // Capture value at assignment time if not already stored
-    if (!block.targetBases) block.targetBases = {};
-    if (block.targetBases[pid] === undefined) {
-        block.targetBases[pid] = p.v;
+    if (block.mode === 'shapes' || block.mode === 'shapes_range') {
+        if (!block.targetBases) block.targetBases = {};
+        if (block.targetBases[pid] === undefined) block.targetBases[pid] = p.v;
+        if (block.mode === 'shapes_range') {
+            if (!block.targetRanges) block.targetRanges = {};
+            if (!block.targetRangeBases) block.targetRangeBases = {};
+            if (block.targetRanges[pid] === undefined) {
+                block.targetRanges[pid] = 0;
+                block.targetRangeBases[pid] = p.v;
+            }
+        }
+    } else if (block.mode === 'link') {
+        if (!block.linkBases) block.linkBases = {};
+        if (block.linkBases[pid] === undefined) block.linkBases[pid] = p.v;
     }
 }
 // Build a single logic block card DOM element
 function buildBlockCard(b, bi) {
     var col = bColor(b.colorIdx), isAct = b.id === actId, isAs = assignMode === b.id;
     var card = document.createElement('div');
-    var modeClass = b.mode === 'randomize' ? ' mode-rand' : (b.mode === 'envelope' ? ' mode-env' : (b.mode === 'morph_pad' ? ' mode-morph' : (b.mode === 'shapes' || b.mode === 'shapes_range' ? ' mode-shapes' : (b.mode === 'lane' ? ' mode-lane' : ' mode-smp'))));
-    card.className = 'lcard' + modeClass + (isAct ? ' active' : '') + (b.mode === 'envelope' && isAct ? ' env-active' : '') + (b.mode === 'sample' && isAct ? ' smp-active' : '') + (b.mode === 'morph_pad' && isAct ? ' morph-active' : '') + ((b.mode === 'shapes' || b.mode === 'shapes_range') && isAct ? ' shapes-active' : '') + (b.mode === 'lane' && isAct ? ' lane-active' : '') + (!b.enabled ? ' disabled' : '');
+    var modeClass = b.mode === 'randomize' ? ' mode-rand' : (b.mode === 'envelope' ? ' mode-env' : (b.mode === 'morph_pad' ? ' mode-morph' : (b.mode === 'shapes' || b.mode === 'shapes_range' ? ' mode-shapes' : (b.mode === 'lane' ? ' mode-lane' : (b.mode === 'link' ? ' mode-link' : ' mode-smp')))));
+    card.className = 'lcard' + modeClass + (isAct ? ' active' : '') + (b.mode === 'envelope' && isAct ? ' env-active' : '') + (b.mode === 'sample' && isAct ? ' smp-active' : '') + (b.mode === 'morph_pad' && isAct ? ' morph-active' : '') + ((b.mode === 'shapes' || b.mode === 'shapes_range') && isAct ? ' shapes-active' : '') + (b.mode === 'lane' && isAct ? ' lane-active' : '') + (b.mode === 'link' && isAct ? ' link-active' : '') + (!b.enabled ? ' disabled' : '');
     card.setAttribute('data-blockid', b.id);
+    var tc = b.targets.size, tH = '';
     var sum = ''; if (b.mode === 'envelope') sum = 'Atk ' + b.envAtk + 'ms / Rel ' + b.envRel + 'ms';
     else if (b.mode === 'sample') sum = (b.sampleName || 'No sample') + ' / ' + b.loopMode;
     else if (b.mode === 'morph_pad') { var ml = { manual: 'Manual', auto: 'Auto', trigger: 'Trigger' }[b.morphMode] || 'Manual'; sum = 'Morph / ' + ml + ' / ' + (b.snapshots ? b.snapshots.length : 0) + ' snaps'; }
     else if (b.mode === 'shapes') { sum = (b.shapeType || 'circle') + ' / ' + (b.shapeTracking || 'horizontal'); }
     else if (b.mode === 'shapes_range') { var rc = 0; if (b.targetRanges) { for (var k in b.targetRanges) rc++; } sum = (b.shapeType || 'circle') + ' / ' + (b.shapeTracking || 'horizontal') + ' / ' + rc + ' ranges'; }
     else if (b.mode === 'lane') { var lc = b.lanes ? b.lanes.length : 0; sum = 'Lane / ' + lc + ' lane' + (lc !== 1 ? 's' : '') + ' / ' + (b.laneGrid || '1/8'); }
+    else if (b.mode === 'link') { var lsc = b.linkSources ? b.linkSources.length : 0; var lmc = 0; if (b.linkSources) { for (var lsi = 0; lsi < b.linkSources.length; lsi++) { if (b.linkSources[lsi].pluginId === -2) lmc++; } } sum = 'Link / ' + lsc + ' src' + (lmc > 0 ? ' (' + lmc + ' macro)' : '') + ' → ' + tc + ' tgt'; }
     else { sum = ({ manual: 'Manual', tempo: 'Tempo', midi: 'MIDI', audio: 'Audio' }[b.trigger]) + ' / ' + (b.movement === 'instant' ? 'Instant' : 'Smooth'); }
-    var tc = b.targets.size, tH = '';
     // Build pid → lane color + label map for lane-mode blocks
     var pidLaneMap = {};
     var laneOrderedPids = [];
@@ -185,12 +197,16 @@ function buildBlockCard(b, bi) {
     var pwrCls = b.enabled ? 'pwr-btn on' : 'pwr-btn';
     var bH = '';
     // â”€â”€ MODE â€” top section â”€â”€
+    // ── MODE — top section (hidden for Link) ──
+    if (b.mode !== 'link') {
     bH += '<div class="block-section"><span class="block-section-label">Mode</span><div class="seg" data-b="' + b.id + '" data-f="mode"><button class="' + (b.mode === 'randomize' ? 'on' : '') + '" data-v="randomize">Randomize</button><button class="' + (b.mode === 'envelope' ? 'on' : '') + '" data-v="envelope">Envelope</button><button class="' + (b.mode === 'sample' ? 'on' : '') + '" data-v="sample">Sample</button><button class="' + (b.mode === 'morph_pad' ? 'on' : '') + '" data-v="morph_pad">Morph Pad</button><button class="' + (b.mode === 'shapes' ? 'on' : '') + '" data-v="shapes">Shapes</button><button class="' + (b.mode === 'shapes_range' ? 'on' : '') + '" data-v="shapes_range">Shapes Range</button><button class="' + (b.mode === 'lane' ? 'on' : '') + '" data-v="lane">Lane</button></div></div>';
-    // â”€â”€ MODE BODY â”€â”€
-    if (b.mode === 'randomize') bH += renderRndBody(b); else if (b.mode === 'sample') bH += renderSampleBody(b); else if (b.mode === 'morph_pad') bH += renderMorphBody(b); else if (b.mode === 'shapes') bH += renderShapesBody(b); else if (b.mode === 'shapes_range') bH += renderShapesRangeBody(b); else if (b.mode === 'lane') bH += renderLaneBody(b); else bH += renderEnvBody(b);
-    // â”€â”€ TARGETS â”€â”€
+    }
+    if (b.mode === 'randomize') bH += renderRndBody(b); else if (b.mode === 'sample') bH += renderSampleBody(b); else if (b.mode === 'morph_pad') bH += renderMorphBody(b); else if (b.mode === 'shapes') bH += renderShapesBody(b); else if (b.mode === 'shapes_range') bH += renderShapesRangeBody(b); else if (b.mode === 'lane') bH += renderLaneBody(b); else if (b.mode === 'link') bH += renderLinkBody(b); else bH += renderEnvBody(b);
+    // ── TARGETS (hidden for Link — targets shown inside link body) ──
+    if (b.mode !== 'link') {
     bH += '<div class="block-section"><span class="block-section-label">Targets (' + tc + ')</span><div class="tgt-box">' + tH + '</div></div>';
-    // â”€â”€ FIRE (randomize only) â”€â”€
+    }
+    // FIRE (randomize only)
     if (b.mode === 'randomize') bH += '<div class="block-section" style="border-bottom:none;padding-bottom:0"><button class="fire" data-b="' + b.id + '">FIRE</button></div>';
     var ch = '<span class="lchev ' + (b.expanded ? 'open' : '') + '">&#9654;</span>';
     card.innerHTML = '<div class="lhead" data-id="' + b.id + '"><div style="display:flex;align-items:center">' + ch + '<span class="block-color" style="background:' + col + '"></span><span class="ltitle">Block ' + (bi + 1) + '</span><span class="lsum">' + sum + ' / ' + tc + ' params</span></div><div style="display:flex;gap:4px;align-items:center"><div class="' + pwrCls + '" data-pwr="' + b.id + '"></div><button class="sm-btn assign-btn" data-id="' + b.id + '" style="' + abS + '">' + abT + '</button><button class="lclose" data-id="' + b.id + '">x</button></div></div><div class="lbody ' + (b.expanded ? '' : 'hide') + '">' + bH + '</div>';
@@ -381,13 +397,102 @@ function renderBlocks() {
 // Wire block cards as drop targets for param drag
 function wireBlockDropTargets() {
     document.querySelectorAll('.lcard[data-blockid]').forEach(function (card) {
+        var bid = parseInt(card.getAttribute('data-blockid'));
+        var bl = findBlock(bid);
+
+        // ── Link mode: wire separate drop zones for source (left) and target (right) ──
+        if (bl && bl.mode === 'link') {
+            var srcZone = card.querySelector('.link-col-source');
+            var tgtZone = card.querySelector('.link-col-targets');
+
+            // Helper to wire a drop zone
+            function wireLinkDrop(zone, role) {
+                if (!zone) return;
+                zone.addEventListener('dragover', function (e) {
+                    if (e.dataTransfer.types.indexOf('text/plain') === -1) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'copy';
+                    zone.classList.add('link-drop-hover');
+                    zone.classList.add('link-drop-' + role);
+                });
+                zone.addEventListener('dragleave', function (ev) {
+                    // Only remove if we truly left the zone (not entering a child)
+                    if (zone.contains(ev.relatedTarget)) return;
+                    zone.classList.remove('link-drop-hover', 'link-drop-source', 'link-drop-target');
+                });
+                zone.addEventListener('drop', function (e) {
+                    e.preventDefault();
+                    e.stopPropagation(); // prevent card-level handler
+                    zone.classList.remove('link-drop-hover', 'link-drop-source', 'link-drop-target');
+                    var data = e.dataTransfer.getData('text/plain');
+                    if (!data || data.indexOf('params:') !== 0) return;
+                    var pids = data.replace('params:', '').split(',');
+                    pushUndoSnapshot();
+                    pids.forEach(function (pid) {
+                        var pp = PMap[pid];
+                        if (!pp || pp.lk) return;
+                        if (role === 'source') {
+                            // Add as link source
+                            if (!bl.linkSources) bl.linkSources = [];
+                            // Prevent duplicate source (same plugin+param)
+                            var dup = false;
+                            for (var si = 0; si < bl.linkSources.length; si++) {
+                                if (bl.linkSources[si].pluginId === pp.hostId && bl.linkSources[si].paramIndex === pp.realIndex) { dup = true; break; }
+                            }
+                            if (!dup) {
+                                var plugName = '';
+                                for (var pi = 0; pi < pluginBlocks.length; pi++) { if (pluginBlocks[pi].hostId === pp.hostId) { plugName = pluginBlocks[pi].name; break; } }
+                                bl.linkSources.push({ pluginId: pp.hostId, paramIndex: pp.realIndex, pluginName: plugName, paramName: pp.name });
+                            }
+                        } else {
+                            // Add as link target
+                            assignTarget(bl, pid);
+                            // Capture link base
+                            if (!bl.linkBases) bl.linkBases = {};
+                            if (bl.linkBases[pid] === undefined) bl.linkBases[pid] = pp.v;
+                        }
+                    });
+                    selectedParams.clear();
+                    renderSingleBlock(bid); renderAllPlugins(); syncBlocksToHost();
+                    if (typeof showToast === 'function') {
+                        showToast(pids.length + ' param' + (pids.length > 1 ? 's' : '') + ' added as ' + role, 'success', 1500);
+                    }
+                });
+            }
+            wireLinkDrop(srcZone, 'source');
+            wireLinkDrop(tgtZone, 'target');
+
+            // Also wire the card level as fallback → targets
+            card.addEventListener('dragover', function (e) {
+                if (e.dataTransfer.types.indexOf('text/plain') === -1) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'copy';
+            });
+            card.addEventListener('drop', function (e) {
+                e.preventDefault();
+                var data = e.dataTransfer.getData('text/plain');
+                if (!data || data.indexOf('params:') !== 0) return;
+                var pids = data.replace('params:', '').split(',');
+                pushUndoSnapshot();
+                pids.forEach(function (pid) {
+                    var pp = PMap[pid];
+                    if (pp && !pp.lk) {
+                        assignTarget(bl, pid);
+                        if (!bl.linkBases) bl.linkBases = {};
+                        if (bl.linkBases[pid] === undefined) bl.linkBases[pid] = pp.v;
+                    }
+                });
+                selectedParams.clear();
+                renderSingleBlock(bid); renderAllPlugins(); syncBlocksToHost();
+            });
+            return; // skip default handler for this card
+        }
+
+        // ── Default: drop → assignTarget ──
         card.addEventListener('dragover', function (e) {
             if (e.dataTransfer.types.indexOf('text/plain') === -1) return;
             e.preventDefault();
             e.dataTransfer.dropEffect = 'copy';
-            // Color the highlight with this block's color
-            var bid = parseInt(card.getAttribute('data-blockid'));
-            var bl = findBlock(bid);
             if (bl) {
                 var col = bColor(bl.colorIdx);
                 card.style.setProperty('--drag-color', col);
@@ -405,8 +510,6 @@ function wireBlockDropTargets() {
             var data = e.dataTransfer.getData('text/plain');
             if (!data || data.indexOf('params:') !== 0) return;
             var pids = data.replace('params:', '').split(',');
-            var bid = parseInt(card.getAttribute('data-blockid'));
-            var bl = findBlock(bid);
             if (!bl) return;
             pids.forEach(function (pid) {
                 var pp = PMap[pid];
@@ -935,6 +1038,185 @@ function renderShapesRangeBody(b) {
     return h;
 }
 
+
+
+// ── Link Mode ──
+function renderLinkBody(b) {
+    var h = '';
+    // Two-column layout: SOURCE (left) | TARGETS (right)
+    h += '<div class="link-columns">';
+
+    // ═══ LEFT COLUMN: SOURCES ═══
+    h += '<div class="link-col-source">';
+    var _srcCount = (b.linkSources || []).length;
+    h += '<div class="link-src-section-hdr"><span class="link-section-title">Sources' + (_srcCount > 0 ? ' <span class="link-count">' + _srcCount + '</span>' : '') + '</span></div>';
+
+    // ── Source entries ──
+    if (!b.linkSources) b.linkSources = [];
+    h += '<div class="link-col-source-scroll">';
+    if (b.linkSources.length === 0) {
+        h += '<div class="link-empty-msg">◆ Add a plugin param or macro below</div>';
+    }
+    for (var si = 0; si < b.linkSources.length; si++) {
+        var src = b.linkSources[si];
+        var isMacro = src.pluginId === -2;
+        h += '<div class="link-src-row">';
+        // Source label + value meter + remove
+        h += '<div class="link-src-row-top">';
+        if (isMacro) {
+            h += '<span class="link-src-tag link-src-tag-macro">M</span>';
+            h += '<span class="link-src-label">Macro ' + (si + 1) + '</span>';
+        } else {
+            h += '<span class="link-src-tag link-src-tag-plugin">\u25C6</span>';
+            var srcLabel = '\u2014 Not set \u2014';
+            var srcNavPid = '';
+            if (src.pluginId >= 0 && src.paramIndex >= 0) {
+                var srcPid = src.pluginId + ':' + src.paramIndex;
+                var srcP = PMap[srcPid];
+                srcLabel = srcP ? (getPluginName(src.pluginId) + ' \u203A ' + srcP.name) : (src.pluginName || 'Plugin') + ' \u203A ' + (src.paramName || 'Param');
+                srcNavPid = srcPid;
+            } else if (src.pluginId >= 0) {
+                srcLabel = (src.pluginName || getPluginName(src.pluginId)) + ' \u203A \u2014';
+            }
+            h += '<span class="link-src-label' + (srcNavPid ? ' link-src-nav' : '') + '"' + (srcNavPid ? ' data-pid="' + srcNavPid + '"' : '') + ' title="' + srcLabel + '">' + srcLabel + '</span>';
+        }
+        h += '<button class="link-src-rm" data-b="' + b.id + '" data-si="' + si + '" title="Remove source">\u00d7</button>';
+        h += '</div>';
+        // Source value meter bar (shows real-time source value)
+        h += '<div class="link-src-meter-wrap">';
+        if (isMacro) {
+            // Macro: draggable slider
+            var macroVal = src.macroValue != null ? src.macroValue : 50;
+            h += '<input type="range" class="link-macro-slider" min="0" max="100" value="' + macroVal + '" data-b="' + b.id + '" data-si="' + si + '">';
+            h += '<span class="link-src-meter-val">' + Math.round(macroVal) + '%</span>';
+        } else {
+            // Plugin source: interactive slider that controls the actual parameter
+            var srcVal = 0;
+            var srcDispText = '0%';
+            if (src.pluginId >= 0 && src.paramIndex >= 0) {
+                var srcPid2 = src.pluginId + ':' + src.paramIndex;
+                var srcP2 = PMap[srcPid2];
+                srcVal = srcP2 ? Math.round((srcP2.v || 0) * 100) : 0;
+                srcDispText = srcP2 && srcP2.disp ? srcP2.disp : srcVal + '%';
+            }
+            h += '<input type="range" class="link-src-slider" min="0" max="100" value="' + srcVal + '" data-b="' + b.id + '" data-si="' + si + '" data-pid="' + (src.pluginId >= 0 ? (src.pluginId + ':' + src.paramIndex) : '') + '" id="linkSrcSlider-' + b.id + '-' + si + '">';
+            h += '<span class="link-src-meter-val" id="linkSrcVal-' + b.id + '-' + si + '">' + srcDispText + '</span>';
+        }
+        h += '</div>';
+        h += '</div>'; // close link-src-row
+    }
+
+    // ── Add Source buttons ──
+    h += '<div class="link-add-btns">';
+    h += '<button class="link-add-src-btn link-add-src-plugin" data-b="' + b.id + '" title="Add a plugin parameter as source">\u25C6 Plugin</button>';
+    h += '<button class="link-add-src-btn link-add-src-macro" data-b="' + b.id + '" title="Add a macro knob as source">M Macro</button>';
+    h += '</div>';
+
+    h += '</div>'; // close link-col-source-scroll
+
+    // ── Smoothing — pinned at bottom of source column ──
+    h += '<div class="link-smooth-row">';
+    h += '<span class="link-smooth-lbl">Smooth</span>';
+    h += '<input type="range" class="link-smooth-slider" min="0" max="500" value="' + (b.linkSmoothMs || 0) + '" data-b="' + b.id + '">';
+    h += '<span class="link-smooth-val">' + Math.round(b.linkSmoothMs || 0) + 'ms</span>';
+    h += '</div>'; // close link-smooth-row
+
+    h += '</div>'; // close link-col-source
+
+    // ═══ RIGHT COLUMN: TARGETS ═══
+    h += '<div class="link-col-targets">';
+    h += '<div class="link-targets-hdr">';
+    var _tgtCount = b.targets ? b.targets.size : 0;
+    h += '<span class="link-section-title">Targets' + (_tgtCount > 0 ? ' <span class="link-count">' + _tgtCount + '</span>' : '') + '</span>';
+    if (_tgtCount >= 2) h += '<button class="sm-btn link-copy-all" data-b="' + b.id + '" title="Copy first target\u2019s range to all">Copy \u2192 All</button>';
+    h += '<button class="sm-btn link-rnd-ranges" data-b="' + b.id + '" title="Randomize all ranges">\u2684 Rand</button>';
+    h += '</div>';
+    h += '<div class="link-targets-scroll" data-b="' + b.id + '">';
+    var tArr = Array.from(b.targets);
+    var rangeCount = 0;
+    for (var ri = 0; ri < tArr.length; ri++) {
+        var pid = tArr[ri], p = PMap[pid];
+        if (!p) continue;
+        var lo = b.linkMin && b.linkMin[pid] !== undefined ? b.linkMin[pid] : 0;
+        var hi = b.linkMax && b.linkMax[pid] !== undefined ? b.linkMax[pid] : 100;
+        rangeCount++;
+        h += '<div class="link-tgt-row" data-pid="' + pid + '">';
+        // Top: name + live value + remove
+        h += '<div class="link-tgt-row-top">';
+        h += '<span class="link-tgt-name-label" data-pid="' + pid + '" title="' + paramPluginName(pid) + ': ' + p.name + '">' + paramPluginName(pid) + ': ' + p.name + '</span>';
+        var tgtDispText = p.disp || Math.round((p.v || 0) * 100) + '%';
+        h += '<span class="link-tgt-live-val" id="linkTgtLive-' + b.id + '-' + pid.replace(':', '_') + '">' + tgtDispText + '</span>';
+        h += '<button class="link-tgt-rm" data-b="' + b.id + '" data-pid="' + pid + '" title="Remove">\u00d7</button>';
+        h += '</div>';
+        // Sliders: Min and Max on one row
+        h += '<div class="link-tgt-sliders">';
+        h += '<div class="link-tgt-slider-group">';
+        h += '<span class="link-tgt-slider-lbl">Min</span>';
+        h += '<input type="range" class="link-tgt-slider link-tgt-min-slider" min="0" max="100" value="' + lo + '" data-b="' + b.id + '" data-pid="' + pid + '" data-which="min" data-hid="' + (p.hostId !== undefined ? p.hostId : '') + '" data-ri="' + (p.realIndex !== undefined ? p.realIndex : '') + '">';
+        h += '<span class="link-tgt-slider-val" id="linkTgtVal-' + b.id + '-' + pid.replace(':', '_') + '-min" data-b="' + b.id + '" data-pid="' + pid + '" data-vwhich="min">' + Math.round(lo) + '%</span>';
+        h += '</div>';
+        h += '<div class="link-tgt-slider-group">';
+        h += '<span class="link-tgt-slider-lbl">Max</span>';
+        h += '<input type="range" class="link-tgt-slider link-tgt-max-slider" min="0" max="100" value="' + hi + '" data-b="' + b.id + '" data-pid="' + pid + '" data-which="max" data-hid="' + (p.hostId !== undefined ? p.hostId : '') + '" data-ri="' + (p.realIndex !== undefined ? p.realIndex : '') + '">';
+        h += '<span class="link-tgt-slider-val" id="linkTgtVal-' + b.id + '-' + pid.replace(':', '_') + '-max" data-b="' + b.id + '" data-pid="' + pid + '" data-vwhich="max">' + Math.round(hi) + '%</span>';
+        h += '</div>';
+        h += '</div>';
+        // Visual range indicator bar
+        var _barLo = Math.min(lo, hi), _barHi = Math.max(lo, hi);
+        h += '<div class="link-tgt-range-bar"><div class="link-tgt-range-fill" style="left:' + _barLo + '%;width:' + (_barHi - _barLo) + '%"></div></div>';
+        // Invert button
+        h += '<button class="link-tgt-invert" data-b="' + b.id + '" data-pid="' + pid + '" title="Invert range (swap Min/Max)">⇅</button>';
+        h += '</div>'; // close link-tgt-row
+    }
+    if (rangeCount === 0) h += '<div class="link-empty-msg">← Click Assign, then select params in the rack</div>';
+    h += '</div>'; // close link-targets-scroll
+    h += '</div>'; // close link-col-targets
+
+    h += '</div>'; // close link-columns
+
+    // Deferred: resolve min/max value labels to real plugin text
+    if (rangeCount > 0) {
+        var _linkTgtPairs = [];
+        for (var _ri = 0; _ri < tArr.length; _ri++) {
+            var _pid = tArr[_ri], _p = PMap[_pid];
+            if (!_p || _p.hostId === undefined) continue;
+            var _lo = b.linkMin && b.linkMin[_pid] !== undefined ? b.linkMin[_pid] : 0;
+            var _hi = b.linkMax && b.linkMax[_pid] !== undefined ? b.linkMax[_pid] : 100;
+            _linkTgtPairs.push({ pid: _pid, hid: _p.hostId, ri: _p.realIndex, lo: _lo, hi: _hi, bId: b.id });
+        }
+        if (_linkTgtPairs.length > 0) {
+            setTimeout(function () { _linkResolveDisplayText(_linkTgtPairs); }, 0);
+        }
+    }
+
+    return h;
+}
+
+// Resolve link target min/max labels to real plugin display text
+function _linkResolveDisplayText(pairs) {
+    var fn = window.__juceGetNativeFunction ? window.__juceGetNativeFunction('getParamTextForValue') : null;
+    if (!fn) return;
+    for (var i = 0; i < pairs.length; i++) {
+        (function (pair) {
+            // Min label
+            fn(pair.hid, pair.ri, pair.lo / 100).then(function (text) {
+                if (text) {
+                    var el = document.getElementById('linkTgtVal-' + pair.bId + '-' + pair.pid.replace(':', '_') + '-min');
+                    if (el) el.textContent = text;
+                }
+            });
+            // Max label
+            fn(pair.hid, pair.ri, pair.hi / 100).then(function (text) {
+                if (text) {
+                    var el = document.getElementById('linkTgtVal-' + pair.bId + '-' + pair.pid.replace(':', '_') + '-max');
+                    if (el) el.textContent = text;
+                }
+            });
+        })(pairs[i]);
+    }
+}
+
+
 // Lane Mode functions are defined in lane_module.js
 // (renderLaneBody, laneCanvasSetup, laneDrawCanvas, laneSetupMouse, etc.)
 
@@ -1175,13 +1457,423 @@ function wireBlocks() {
     document.querySelectorAll('.assign-btn').forEach(function (btn) { btn.onclick = function (e) { e.stopPropagation(); var id = parseInt(btn.dataset.id); if (assignMode === id) assignMode = null; else { assignMode = id; actId = id; var b = findBlock(id); if (b && !b.expanded) b.expanded = true; } renderBlocks(); renderAllPlugins(); }; });
     document.querySelectorAll('.lclose').forEach(function (btn) { btn.onclick = function (e) { e.stopPropagation(); var id = parseInt(btn.dataset.id); pushUndoSnapshot(); blocks = blocks.filter(function (b) { return b.id !== id; }); if (actId === id) actId = blocks.length ? blocks[0].id : null; if (assignMode === id) assignMode = null; renderBlocks(); renderAllPlugins(); updCounts(); syncBlocksToHost(); }; });
     document.querySelectorAll('[data-pwr]').forEach(function (btn) { btn.onclick = function (e) { e.stopPropagation(); var bId = parseInt(btn.dataset.pwr); var b = findBlock(bId); if (b) { b.enabled = !b.enabled; renderSingleBlock(bId); renderAllPlugins(); syncBlocksToHost(); } }; });
-    document.querySelectorAll('.seg,.seg-inline').forEach(function (seg) { seg.querySelectorAll('button').forEach(function (btn) { btn.onclick = function (e) { e.stopPropagation(); var bId = parseInt(seg.dataset.b); var b = findBlock(bId); if (b) { var oldMode = b[seg.dataset.f]; b[seg.dataset.f] = btn.dataset.v; if (seg.dataset.f === 'mode' && oldMode !== btn.dataset.v) { /* Leaving shapes/shapes_range: restore params to stored bases */ if ((oldMode === 'shapes' || oldMode === 'shapes_range') && b.targets.size > 0) { var basesMap = oldMode === 'shapes_range' ? b.targetRangeBases : b.targetBases; var setFn = (window.__JUCE__ && window.__JUCE__.backend) ? window.__juceGetNativeFunction('setParam') : null; b.targets.forEach(function (pid) { var p = PMap[pid]; if (!p) return; var base = basesMap && basesMap[pid] !== undefined ? basesMap[pid] : p.v; p.v = base; if (setFn && p.hostId !== undefined) setFn(p.hostId, p.realIndex, base); }); } /* Entering shapes: capture current param values as bases for existing targets */ if (btn.dataset.v === 'shapes' && b.targets.size > 0) { if (!b.targetBases) b.targetBases = {}; b.targets.forEach(function (pid) { var p = PMap[pid]; if (p && b.targetBases[pid] === undefined) b.targetBases[pid] = p.v; }); } } renderSingleBlock(bId); if (seg.dataset.f === 'mode') renderAllPlugins(); syncBlocksToHost(); } }; }); });
+    document.querySelectorAll('.seg,.seg-inline').forEach(function (seg) { seg.querySelectorAll('button').forEach(function (btn) { btn.onclick = function (e) { e.stopPropagation(); var bId = parseInt(seg.dataset.b); var b = findBlock(bId); if (b) { var oldMode = b[seg.dataset.f]; b[seg.dataset.f] = btn.dataset.v; if (seg.dataset.f === 'mode' && oldMode !== btn.dataset.v) { /* Leaving shapes/shapes_range: restore params to stored bases */ if ((oldMode === 'shapes' || oldMode === 'shapes_range') && b.targets.size > 0) { var basesMap = oldMode === 'shapes_range' ? b.targetRangeBases : b.targetBases; var setFn = (window.__JUCE__ && window.__JUCE__.backend) ? window.__juceGetNativeFunction('setParam') : null; b.targets.forEach(function (pid) { var p = PMap[pid]; if (!p) return; var base = basesMap && basesMap[pid] !== undefined ? basesMap[pid] : p.v; p.v = base; if (setFn && p.hostId !== undefined) setFn(p.hostId, p.realIndex, base); }); } /* Leaving link: restore params to stored link bases */ if (oldMode === 'link' && b.targets.size > 0) { var setFn2 = (window.__JUCE__ && window.__JUCE__.backend) ? window.__juceGetNativeFunction('setParam') : null; b.targets.forEach(function (pid) { var p = PMap[pid]; if (!p) return; var base = b.linkBases && b.linkBases[pid] !== undefined ? b.linkBases[pid] : p.v; p.v = base; if (setFn2 && p.hostId !== undefined) setFn2(p.hostId, p.realIndex, base); }); } /* Entering shapes: capture current param values as bases for existing targets */ if (btn.dataset.v === 'shapes' && b.targets.size > 0) { if (!b.targetBases) b.targetBases = {}; b.targets.forEach(function (pid) { var p = PMap[pid]; if (p && b.targetBases[pid] === undefined) b.targetBases[pid] = p.v; }); } /* Entering link: capture current param values as link bases */ if (btn.dataset.v === 'link' && b.targets.size > 0) { if (!b.linkBases) b.linkBases = {}; b.targets.forEach(function (pid) { var p = PMap[pid]; if (p && b.linkBases[pid] === undefined) b.linkBases[pid] = p.v; }); } } renderSingleBlock(bId); if (seg.dataset.f === 'mode') renderAllPlugins(); syncBlocksToHost(); } }; }); });
     document.querySelectorAll('.tgl').forEach(function (t) { t.onclick = function (e) { e.stopPropagation(); var bId = parseInt(t.dataset.b); var b = findBlock(bId); if (b) { b[t.dataset.f] = !b[t.dataset.f]; renderSingleBlock(bId); syncBlocksToHost(); } }; });
     document.querySelectorAll('.sub-sel').forEach(function (s) { s.onchange = function () { var bId = parseInt(s.dataset.b); var b = findBlock(bId); if (b) { var val = s.value; if (s.dataset.f === 'midiCh') val = parseInt(val) || 0; else if (s.dataset.f === 'envFilterBW') val = parseFloat(val) || 2; b[s.dataset.f] = val; renderSingleBlock(bId); syncBlocksToHost(); } }; });
+    // ── Link: add plugin source button — opens lane-style searchable dropdown ──
+    document.querySelectorAll('.link-add-src-plugin').forEach(function (btn) {
+        btn.onclick = function (e) {
+            e.stopPropagation();
+            var bId = parseInt(btn.dataset.b); var b = findBlock(bId); if (!b) return;
+            // Close any existing link add-source menu
+            var existing = document.querySelector('.link-src-menu');
+            if (existing) { existing.remove(); return; }
+
+            // Build popup menu — lane-style with search and plugin/param sections
+            var menu = document.createElement('div');
+            menu.className = 'lane-add-menu link-src-menu';
+            menu.style.position = 'fixed';
+            menu.style.zIndex = '999';
+
+            // Search input
+            var searchInput = document.createElement('input');
+            searchInput.type = 'text';
+            searchInput.className = 'lane-add-menu-search';
+            searchInput.placeholder = 'Search params\u2026';
+            searchInput.onclick = function (ev) { ev.stopPropagation(); };
+            menu.appendChild(searchInput);
+
+            var allItems = [];
+            // Group by plugin
+            pluginBlocks.forEach(function (pb) {
+                if (!pb.hostId && pb.hostId !== 0) return;
+                var hdr = document.createElement('div');
+                hdr.className = 'lane-add-menu-hdr';
+                hdr.textContent = pb.name;
+                menu.appendChild(hdr);
+                pb.params.forEach(function (p) {
+                    var item = document.createElement('div');
+                    item.className = 'lane-add-menu-item';
+                    item.textContent = p.name;
+                    item.dataset.search = (pb.name + ' ' + p.name).toLowerCase();
+                    item.onclick = function (ev) {
+                        ev.stopPropagation();
+                        pushUndoSnapshot();
+                        if (!b.linkSources) b.linkSources = [];
+                        b.linkSources.push({
+                            pluginId: pb.hostId, paramIndex: p.realIndex,
+                            pluginName: pb.name, paramName: p.name
+                        });
+                        menu.remove();
+                        renderSingleBlock(bId); renderAllPlugins(); syncBlocksToHost();
+                    };
+                    menu.appendChild(item);
+                    allItems.push(item);
+                });
+            });
+            if (allItems.length === 0) {
+                var empty = document.createElement('div');
+                empty.className = 'lane-add-menu-item';
+                empty.textContent = 'No plugins loaded';
+                empty.style.opacity = '0.5';
+                menu.appendChild(empty);
+            }
+
+            // Wire search filtering
+            searchInput.oninput = function () {
+                var q = searchInput.value.toLowerCase();
+                allItems.forEach(function (el) {
+                    el.style.display = (el.dataset.search || '').indexOf(q) >= 0 ? '' : 'none';
+                });
+                // Hide section headers with no visible items
+                menu.querySelectorAll('.lane-add-menu-hdr').forEach(function (hdr) {
+                    var next = hdr.nextElementSibling;
+                    var hasVisible = false;
+                    while (next && !next.classList.contains('lane-add-menu-hdr')) {
+                        if (next.style.display !== 'none') hasVisible = true;
+                        next = next.nextElementSibling;
+                    }
+                    hdr.style.display = hasVisible ? '' : 'none';
+                });
+            };
+
+            // Position and append
+            menu.style.visibility = 'hidden';
+            document.body.appendChild(menu);
+            var realH = menu.offsetHeight, realW = menu.offsetWidth || 200;
+            var rect = btn.getBoundingClientRect();
+            var vw = window.innerWidth, vh = window.innerHeight;
+            var fLeft = rect.left, fTop = rect.bottom + 2;
+            if (fLeft + realW > vw - 4) fLeft = vw - realW - 4;
+            if (fLeft < 4) fLeft = 4;
+            if (fTop + realH > vh - 4) fTop = Math.max(4, rect.top - realH - 2);
+            menu.style.left = fLeft + 'px'; menu.style.top = fTop + 'px';
+            menu.style.visibility = '';
+            searchInput.focus();
+            // Close on outside click
+            setTimeout(function () {
+                var closer = function (ev) {
+                    var m = document.querySelector('.link-src-menu');
+                    if (!m || !m.contains(ev.target)) {
+                        if (m) m.remove();
+                        document.removeEventListener('mousedown', closer);
+                    }
+                };
+                document.addEventListener('mousedown', closer);
+            }, 10);
+        };
+    });
+    // ── Link: add macro source ──
+    document.querySelectorAll('.link-add-src-macro').forEach(function (btn) {
+        btn.onclick = function (e) {
+            e.stopPropagation();
+            var bId = parseInt(btn.dataset.b); var b = findBlock(bId); if (!b) return;
+            pushUndoSnapshot();
+            if (!b.linkSources) b.linkSources = [];
+            b.linkSources.push({ pluginId: -2, paramIndex: -1, macroValue: 50, pluginName: '', paramName: '' });
+            renderSingleBlock(bId); renderAllPlugins(); syncBlocksToHost();
+        };
+    });
+    // ── Link: macro slider ──
+    document.querySelectorAll('.link-macro-slider').forEach(function (sl) {
+        sl.oninput = function () {
+            var bId = parseInt(sl.dataset.b); var b = findBlock(bId); if (!b) return;
+            var si = parseInt(sl.dataset.si);
+            if (!b.linkSources || !b.linkSources[si]) return;
+            b.linkSources[si].macroValue = parseFloat(sl.value);
+            var valSpan = sl.nextElementSibling;
+            if (valSpan) valSpan.textContent = Math.round(sl.value) + '%';
+            syncBlocksToHost(); // sync on every drag tick so macro controls targets in real-time
+        };
+        sl.onchange = function () { syncBlocksToHost(); };
+        // Double-click to reset macro to 50%
+        sl.ondblclick = function (e) {
+            e.stopPropagation();
+            var bId = parseInt(sl.dataset.b); var b = findBlock(bId); if (!b) return;
+            var si = parseInt(sl.dataset.si);
+            if (!b.linkSources || !b.linkSources[si]) return;
+            sl.value = 50;
+            b.linkSources[si].macroValue = 50;
+            var valSpan = sl.nextElementSibling;
+            if (valSpan) valSpan.textContent = '50%';
+            syncBlocksToHost();
+        };
+    });
+    // ── Link: plugin source slider (controls the actual param) ──
+    document.querySelectorAll('.link-src-slider').forEach(function (sl) {
+        sl.onmousedown = function () { sl._dragging = true; };
+        sl.oninput = function () {
+            var pid = sl.dataset.pid;
+            var p = PMap[pid]; if (!p) return;
+            var norm = parseFloat(sl.value) / 100;
+            p.v = norm;
+            // Send to host
+            if (window.__JUCE__ && window.__JUCE__.backend) {
+                var setFn = window.__juceGetNativeFunction('setParam');
+                if (setFn && p.hostId !== undefined) setFn(p.hostId, p.realIndex, norm);
+            }
+            // Update value label — try real display text first
+            var valSpan = sl.nextElementSibling;
+            if (valSpan && p.hostId !== undefined && p.realIndex !== undefined) {
+                var fn = window.__juceGetNativeFunction ? window.__juceGetNativeFunction('getParamTextForValue') : null;
+                if (fn) {
+                    fn(p.hostId, p.realIndex, norm).then(function (text) {
+                        if (text && valSpan) valSpan.textContent = text;
+                    });
+                } else {
+                    valSpan.textContent = p.disp || (Math.round(norm * 100) + '%');
+                }
+            } else if (valSpan) {
+                valSpan.textContent = p.disp || (Math.round(norm * 100) + '%');
+            }
+        };
+        sl.onchange = function () {
+            sl._dragging = false;
+            syncBlocksToHost();
+        };
+        sl.onmouseup = function () { sl._dragging = false; };
+    });
+    // ── Link: smoothing slider ──
+    document.querySelectorAll('.link-smooth-slider').forEach(function (sl) {
+        sl.oninput = function () {
+            var bId = parseInt(sl.dataset.b); var b = findBlock(bId); if (!b) return;
+            b.linkSmoothMs = parseFloat(sl.value);
+            var valSpan = sl.nextElementSibling;
+            if (valSpan) valSpan.textContent = Math.round(sl.value) + 'ms';
+            syncBlocksToHost();
+        };
+        sl.onchange = function () { syncBlocksToHost(); };
+        // Double-click to reset smooth to 0ms
+        sl.ondblclick = function (e) {
+            e.stopPropagation();
+            var bId = parseInt(sl.dataset.b); var b = findBlock(bId); if (!b) return;
+            sl.value = 0;
+            b.linkSmoothMs = 0;
+            var valSpan = sl.nextElementSibling;
+            if (valSpan) valSpan.textContent = '0ms';
+            syncBlocksToHost();
+        };
+    });
+    // ── Link: remove source button ──
+    document.querySelectorAll('.link-src-rm').forEach(function (btn) {
+        btn.onclick = function (e) {
+            e.stopPropagation();
+            var bId = parseInt(btn.dataset.b); var b = findBlock(bId); if (!b) return;
+            var si = parseInt(btn.dataset.si);
+            pushUndoSnapshot();
+            if (b.linkSources) b.linkSources.splice(si, 1);
+            renderSingleBlock(bId); renderAllPlugins(); syncBlocksToHost();
+        };
+    });
+    // ── Link: random ranges button ──
+    document.querySelectorAll('.link-rnd-ranges').forEach(function (btn) {
+        btn.onclick = function (e) {
+            e.stopPropagation();
+            var bId = parseInt(btn.dataset.b); var b = findBlock(bId); if (!b) return;
+            pushUndoSnapshot();
+            if (!b.linkMin) b.linkMin = {};
+            if (!b.linkMax) b.linkMax = {};
+            b.targets.forEach(function (pid) {
+                var lo = Math.round(Math.random() * 100);
+                var hi = Math.round(Math.random() * 100);
+                if (lo > hi) { var t = lo; lo = hi; hi = t; }
+                b.linkMin[pid] = lo;
+                b.linkMax[pid] = hi;
+            });
+            renderSingleBlock(bId); renderAllPlugins(); syncBlocksToHost();
+        };
+    });
+    // ── Link: invert range (swap min/max) ──
+    document.querySelectorAll('.link-tgt-invert').forEach(function (btn) {
+        btn.onclick = function (e) {
+            e.stopPropagation();
+            var bId = parseInt(btn.dataset.b); var b = findBlock(bId); if (!b) return;
+            var pid = btn.dataset.pid;
+            pushUndoSnapshot();
+            if (!b.linkMin) b.linkMin = {};
+            if (!b.linkMax) b.linkMax = {};
+            var oldMin = b.linkMin[pid] !== undefined ? b.linkMin[pid] : 0;
+            var oldMax = b.linkMax[pid] !== undefined ? b.linkMax[pid] : 100;
+            b.linkMin[pid] = oldMax;
+            b.linkMax[pid] = oldMin;
+            renderSingleBlock(bId); renderAllPlugins(); syncBlocksToHost();
+        };
+    });
+    // ── Link: copy first target's range to all ──
+    document.querySelectorAll('.link-copy-all').forEach(function (btn) {
+        btn.onclick = function (e) {
+            e.stopPropagation();
+            var bId = parseInt(btn.dataset.b); var b = findBlock(bId); if (!b) return;
+            var tArr = Array.from(b.targets);
+            if (tArr.length < 2) return;
+            var firstPid = tArr[0];
+            var firstLo = b.linkMin && b.linkMin[firstPid] !== undefined ? b.linkMin[firstPid] : 0;
+            var firstHi = b.linkMax && b.linkMax[firstPid] !== undefined ? b.linkMax[firstPid] : 100;
+            pushUndoSnapshot();
+            if (!b.linkMin) b.linkMin = {};
+            if (!b.linkMax) b.linkMax = {};
+            for (var ci = 1; ci < tArr.length; ci++) {
+                b.linkMin[tArr[ci]] = firstLo;
+                b.linkMax[tArr[ci]] = firstHi;
+            }
+            renderSingleBlock(bId); renderAllPlugins(); syncBlocksToHost();
+            if (typeof showToast === 'function') showToast('Range copied to ' + (tArr.length - 1) + ' targets', 'info', 1500);
+        };
+    });
+    // ── Link: target min/max sliders ──
+    document.querySelectorAll('.link-tgt-slider').forEach(function (sl) {
+        var _tgtSliderSnap = null;
+        var _tgtSliderStart = null;
+        sl.addEventListener('mousedown', function () {
+            _tgtSliderSnap = typeof captureFullSnapshot === 'function' ? captureFullSnapshot() : null;
+            _tgtSliderStart = parseFloat(sl.value);
+        });
+        sl.oninput = function () {
+            var bId = parseInt(sl.dataset.b); var b = findBlock(bId); if (!b) return;
+            var pid = sl.dataset.pid, which = sl.dataset.which;
+            if (which === 'min') {
+                if (!b.linkMin) b.linkMin = {};
+                b.linkMin[pid] = parseFloat(sl.value);
+            } else {
+                if (!b.linkMax) b.linkMax = {};
+                b.linkMax[pid] = parseFloat(sl.value);
+            }
+            // Update the adjacent value label — try to use real plugin text
+            var valSpan = sl.parentNode.querySelector('[data-vwhich="' + which + '"]');
+            var normVal = parseFloat(sl.value) / 100;
+            var hid = parseInt(sl.dataset.hid);
+            var ri = parseInt(sl.dataset.ri);
+            if (valSpan && !isNaN(hid) && !isNaN(ri)) {
+                var fn = window.__juceGetNativeFunction ? window.__juceGetNativeFunction('getParamTextForValue') : null;
+                if (fn) {
+                    fn(hid, ri, normVal).then(function (text) {
+                        if (text && valSpan) valSpan.textContent = text;
+                    });
+                } else {
+                    valSpan.textContent = Math.round(sl.value) + '%';
+                }
+            } else if (valSpan) {
+                valSpan.textContent = Math.round(sl.value) + '%';
+            }
+            syncBlocksToHost();
+        };
+        sl.onchange = function () {
+            if (_tgtSliderSnap && _tgtSliderStart !== null && parseFloat(sl.value) !== _tgtSliderStart) {
+                undoStack.push({ type: 'full', snapshot: _tgtSliderSnap });
+                if (undoStack.length > maxUndo) undoStack.shift();
+                redoStack = [];
+                if (typeof updateUndoBadge === 'function') updateUndoBadge();
+            }
+            _tgtSliderSnap = null; _tgtSliderStart = null;
+            renderAllPlugins(); syncBlocksToHost();
+        };
+        // Double-click to reset: min → 0, max → 100
+        sl.ondblclick = function (e) {
+            e.stopPropagation();
+            var bId = parseInt(sl.dataset.b); var b = findBlock(bId); if (!b) return;
+            var pid = sl.dataset.pid, which = sl.dataset.which;
+            var defaultVal = which === 'min' ? 0 : 100;
+            sl.value = defaultVal;
+            if (which === 'min') {
+                if (!b.linkMin) b.linkMin = {};
+                b.linkMin[pid] = defaultVal;
+            } else {
+                if (!b.linkMax) b.linkMax = {};
+                b.linkMax[pid] = defaultVal;
+            }
+            // Trigger the label update
+            sl.dispatchEvent(new Event('input'));
+            renderSingleBlock(bId); renderAllPlugins(); syncBlocksToHost();
+        };
+    });
+    // ── Link: remove target button ──
+    document.querySelectorAll('.link-tgt-rm').forEach(function (btn) {
+        btn.onclick = function (e) {
+            e.stopPropagation();
+            var bId = parseInt(btn.dataset.b); var b = findBlock(bId); if (!b) return;
+            var pid = btn.dataset.pid;
+            pushUndoSnapshot();
+            b.targets.delete(pid);
+            if (b.linkMin) delete b.linkMin[pid];
+            if (b.linkMax) delete b.linkMax[pid];
+            if (b.linkBases) delete b.linkBases[pid];
+            if (b.linkModOutputs) delete b.linkModOutputs[pid];
+            renderSingleBlock(bId); renderAllPlugins(); syncBlocksToHost();
+        };
+    });
+    // ── Link: click target name → navigate to param in rack ──
+    document.querySelectorAll('.link-tgt-name-label').forEach(function (lbl) {
+        lbl.onclick = function (e) {
+            e.stopPropagation();
+            var pid = lbl.dataset.pid;
+            var pp = PMap[pid]; if (!pp) return;
+            // Expand the plugin card if collapsed
+            for (var pbi = 0; pbi < pluginBlocks.length; pbi++) {
+                var pb = pluginBlocks[pbi];
+                if (pb.id === pp.hostId && !pb.expanded) {
+                    pb.expanded = true;
+                    dirtyPluginParams(pp.hostId);
+                    renderAllPlugins();
+                    break;
+                }
+            }
+            // Retry until virtual scroll reveals the param row
+            var attempts = 0;
+            (function tryLocate() {
+                attempts++;
+                if (typeof scrollVirtualToParam === 'function') scrollVirtualToParam(pid);
+                var paramRow = document.querySelector('.pr[data-pid="' + pid + '"]');
+                if (paramRow) {
+                    paramRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    paramRow.classList.remove('touched'); void paramRow.offsetWidth;
+                    paramRow.classList.add('touched');
+                } else if (attempts < 15) {
+                    requestAnimationFrame(tryLocate);
+                }
+            })();
+        };
+    });
+    // ── Link: click source name → navigate to param in rack ──
+    document.querySelectorAll('.link-src-nav').forEach(function (lbl) {
+        lbl.onclick = function (e) {
+            e.stopPropagation();
+            var pid = lbl.dataset.pid;
+            var pp = PMap[pid]; if (!pp) return;
+            // Expand the plugin card if collapsed
+            for (var pbi = 0; pbi < pluginBlocks.length; pbi++) {
+                var pb = pluginBlocks[pbi];
+                if (pb.id === pp.hostId && !pb.expanded) {
+                    pb.expanded = true;
+                    dirtyPluginParams(pp.hostId);
+                    renderAllPlugins();
+                    break;
+                }
+            }
+            // Retry until virtual scroll reveals the param row
+            var attempts = 0;
+            (function tryLocate() {
+                attempts++;
+                if (typeof scrollVirtualToParam === 'function') scrollVirtualToParam(pid);
+                var paramRow = document.querySelector('.pr[data-pid="' + pid + '"]');
+                if (paramRow) {
+                    paramRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    paramRow.classList.remove('touched'); void paramRow.offsetWidth;
+                    paramRow.classList.add('touched');
+                } else if (attempts < 15) {
+                    requestAnimationFrame(tryLocate);
+                }
+            })();
+        };
+    });
     // Default values for double-click reset
-    var knobDefaults = { rMin: 0, rMax: 100, threshold: -12, glideMs: 200, envAtk: 10, envRel: 100, envSens: 50, envFilterFreq: 50, envFilterBW: 5, morphSpeed: 50, morphGlide: 200, jitter: 0, snapRadius: 100, lfoDepth: 80, lfoRotation: 0, sampleSpeedPct: 100, qSteps: 12, shapeSize: 80, shapeSpin: 0, shapeSpeed: 50, shapePhaseOffset: 0 };
+    var knobDefaults = { rMin: 0, rMax: 100, threshold: -12, glideMs: 200, envAtk: 10, envRel: 100, envSens: 50, envFilterFreq: 50, envFilterBW: 5, morphSpeed: 50, morphGlide: 200, jitter: 0, snapRadius: 100, lfoDepth: 80, lfoRotation: 0, sampleSpeedPct: 100, qSteps: 12, shapeSize: 80, shapeSpin: 0, shapeSpeed: 50, shapePhaseOffset: 0, linkSmoothMs: 0 };
     document.querySelectorAll('.lbody input[type="range"]').forEach(function (sl) {
         if (!sl.dataset.b) return;
+        // Skip link slider types — they have their own handlers
+        if (sl.classList.contains('link-tgt-slider')) return;
+        if (sl.classList.contains('link-macro-slider')) return;
+        if (sl.classList.contains('link-smooth-slider')) return;
+        if (sl.classList.contains('link-src-slider')) return;
         // Capture state before slider drag for undo
         var _sliderUndoSnap = null;
         var _sliderStartVal = null;
@@ -1222,7 +1914,24 @@ function wireBlocks() {
             var b = findBlock(bId); if (!b) return;
             var _knobUndoSnap = captureFullSnapshot();
             var startY = e.clientY;
-            var curVal = (f === 'sampleSpeedPct') ? (b.sampleSpeed * 100) : (b[f] != null ? b[f] : mn);
+            // Read current value — handle compound fields for link block
+            var curVal;
+            if (f === 'sampleSpeedPct') {
+                curVal = b.sampleSpeed * 100;
+            } else if (f.indexOf('linkMin__') === 0) {
+                var _pid = f.substring(9);
+                curVal = (b.linkMin && b.linkMin[_pid] != null) ? b.linkMin[_pid] : 0;
+            } else if (f.indexOf('linkMax__') === 0) {
+                var _pid = f.substring(9);
+                curVal = (b.linkMax && b.linkMax[_pid] != null) ? b.linkMax[_pid] : 100;
+            } else if (f.indexOf('linkMacro__') === 0) {
+                var _si = parseInt(f.substring(11));
+                curVal = (b.linkSources && b.linkSources[_si] && b.linkSources[_si].macroValue != null) ? b.linkSources[_si].macroValue : 50;
+            } else if (f.indexOf('linkSrcDisp__') === 0) {
+                return; // read-only display knob — no drag
+            } else {
+                curVal = (b[f] != null ? b[f] : mn);
+            }
             var _knobStartVal = curVal;
             var range = mx - mn;
             var sensitivity = 150;
@@ -1230,7 +1939,11 @@ function wireBlocks() {
                 var dy = startY - me.clientY;
                 var nv = Math.max(mn, Math.min(mx, curVal + (dy / sensitivity) * range));
                 nv = Math.round(nv);
+                // Write value — handle compound fields for link block
                 if (f === 'sampleSpeedPct') b.sampleSpeed = nv / 100;
+                else if (f.indexOf('linkMin__') === 0) { var _pid = f.substring(9); if (!b.linkMin) b.linkMin = {}; b.linkMin[_pid] = nv; }
+                else if (f.indexOf('linkMax__') === 0) { var _pid = f.substring(9); if (!b.linkMax) b.linkMax = {}; b.linkMax[_pid] = nv; }
+                else if (f.indexOf('linkMacro__') === 0) { var _si = parseInt(f.substring(11)); if (b.linkSources && b.linkSources[_si]) b.linkSources[_si].macroValue = nv; }
                 else b[f] = nv;
                 // Get mode from closest card
                 var card = bk.closest('.lcard');
@@ -1240,6 +1953,7 @@ function wireBlocks() {
                     else if (card.classList.contains('mode-smp')) mode = 'smp';
                     else if (card.classList.contains('mode-morph')) mode = 'morph';
                     else if (card.classList.contains('mode-shapes')) mode = 'shapes';
+                    else if (card.classList.contains('mode-link')) mode = 'link';
                 }
                 // Rebuild SVG
                 var norm = (nv - mn) / range;
@@ -1262,7 +1976,7 @@ function wireBlocks() {
                 var valEl = bk.querySelector('.bk-val');
                 if (valEl) {
                     var unit = '';
-                    if (f === 'envAtk' || f === 'envRel' || f === 'glideMs' || f === 'morphGlide') valEl.textContent = nv + 'ms';
+                    if (f === 'envAtk' || f === 'envRel' || f === 'glideMs' || f === 'morphGlide' || f === 'linkSmoothMs') valEl.textContent = nv + 'ms';
                     else if (f === 'threshold') valEl.textContent = nv + 'dB';
                     else if (f === 'shapeSpin' || f === 'lfoRotation') valEl.textContent = (nv > 0 ? '+' : '') + nv + '%';
                     else if (f === 'shapePhaseOffset') valEl.textContent = nv + 'Â°';
@@ -2053,13 +2767,18 @@ function wireBlocks() {
             var bId = parseInt(btn.dataset.b), li = parseInt(btn.dataset.li);
             var pid = btn.dataset.pid;
             var b = findBlock(bId); if (!b || !b.lanes[li]) return;
+            pushUndoSnapshot();
             var lane = b.lanes[li];
             lane.pids = lane.pids.filter(function (p) { return p !== pid; });
-            // For morph lanes: also remove from b.targets so ensureLanes
-            // doesn't auto-create a new curve lane for the orphaned PID
+            // For morph lanes: also remove from b.targets and clean snapshot values
             if (lane.morphMode) {
                 b.targets.delete(pid);
                 cleanBlockAfterUnassign(b, pid);
+                if (lane.morphSnapshots) {
+                    lane.morphSnapshots.forEach(function (s) {
+                        if (s.values && s.values[pid] !== undefined) delete s.values[pid];
+                    });
+                }
             }
             if (lane.pids.length === 0 && !lane.morphMode) {
                 b.lanes.splice(li, 1); // remove empty curve lane (morph lanes keep existing)
@@ -2403,6 +3122,8 @@ function wireBlocks() {
     blocks.forEach(function (b) {
         if (b.mode === 'lane') laneCanvasSetup(b);
     });
+
+
 }
 function drawWaveform(blockId) {
     var b = findBlock(blockId);
@@ -2532,6 +3253,11 @@ function cleanBlockAfterUnassign(b, pid) {
     if (b.targetBases) delete b.targetBases[pid];
     if (b.targetRanges) delete b.targetRanges[pid];
     if (b.targetRangeBases) delete b.targetRangeBases[pid];
+    // Clean link data
+    if (b.linkMin) delete b.linkMin[pid];
+    if (b.linkMax) delete b.linkMax[pid];
+    if (b.linkBases) delete b.linkBases[pid];
+    if (b.linkModOutputs) delete b.linkModOutputs[pid];
     // Clean morph pad snapshot values
     if (b.snapshots) {
         for (var si = 0; si < b.snapshots.length; si++) {
@@ -2542,6 +3268,7 @@ function cleanBlockAfterUnassign(b, pid) {
 // â”€â”€â”€ Sync logic block state to C++ backend â”€â”€â”€
 function syncBlocksToHost() {
     if (typeof markGpDirty === 'function') markGpDirty();
+    if (typeof markStateDirty === 'function') markStateDirty();
     if (!(window.__JUCE__ && window.__JUCE__.backend)) return;
     var fn = window.__juceGetNativeFunction('updateBlocks');
     var data = blocks.map(function (b) {
@@ -2677,6 +3404,25 @@ function syncBlocksToHost() {
                         return { position: s.position || 0, hold: s.hold != null ? s.hold : 0.5, curve: s.curve || 0, depth: s.depth != null ? s.depth : 1.0, drift: s.drift || 0, driftRange: s.driftRange != null ? s.driftRange : 5, driftScale: s.driftScale || '', warp: s.warp || 0, steps: s.steps || 0, name: s.name || '', source: s.source || '', values: s.values || {} };
                     })
                 };
+            });
+        }
+        if (b.mode === 'link') {
+            // Multi-source: send array of { pluginId, paramIndex }
+            obj.linkSources = (b.linkSources || []).map(function (s) {
+                var src = { pluginId: s.pluginId != null ? s.pluginId : -1, paramIndex: s.paramIndex != null ? s.paramIndex : -1 };
+                if (s.pluginId === -2 && s.macroValue != null) src.macroValue = s.macroValue;
+                return src;
+            });
+            obj.linkSmoothMs = b.linkSmoothMs || 0;
+            // Send per-target min/max/bases aligned with targets array
+            obj.linkMin = tIds.map(function (pid) {
+                return b.linkMin && b.linkMin[pid] !== undefined ? b.linkMin[pid] : 0;
+            });
+            obj.linkMax = tIds.map(function (pid) {
+                return b.linkMax && b.linkMax[pid] !== undefined ? b.linkMax[pid] : 100;
+            });
+            obj.linkBases = tIds.map(function (pid) {
+                return b.linkBases && b.linkBases[pid] !== undefined ? b.linkBases[pid] : (PMap[pid] ? PMap[pid].v : 0.5);
             });
         }
         return obj;
