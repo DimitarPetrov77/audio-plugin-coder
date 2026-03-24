@@ -337,7 +337,7 @@ var _weqSpecLastTime = 0;     // timestamp for peak decay rate
 // ── Spectrum Parameters (SPAN-style) ──
 var weqSpecSpeed   = 2;     // 0=very slow, 1=slow, 2=medium, 3=fast, 4=very fast
 var weqSpecSlope   = 0;     // dB/octave tilt compensation (0, 3, 4.5, 6)
-var weqSpecFloor   = -80;   // display floor in dB (-120, -100, -80, -60, -40)
+var weqSpecFloor   = -120;  // display floor in dB (-120, -100, -80, -60, -40)
 var weqSpecCeil    = 0;     // display ceiling in dB (always 0 dBFS)
 var weqSpecFreeze  = false; // freeze spectrum display
 var weqSpecPeakHold = true; // show peak-hold line
@@ -1060,21 +1060,7 @@ function weqRenderPanel() {
         h += '<option value="' + _slopeLabels[sli].val + '"' + (weqSpecSlope === _slopeLabels[sli].val ? ' selected' : '') + '>' + _slopeLabels[sli].label + '</option>';
     }
     h += '</select>';
-    // Range
-    h += '<span class="weq-spec-lbl">Range</span>';
-    h += '<select class="weq-spec-sel" id="weqSpecRangeSel" title="Display dynamic range (dB)">';
-    for (var ri = 0; ri < _rangeLabels.length; ri++) {
-        h += '<option value="' + _rangeLabels[ri].val + '"' + (weqSpecFloor === _rangeLabels[ri].val ? ' selected' : '') + '>' + _rangeLabels[ri].label + '</option>';
-    }
-    h += '</select>';
-    // Block size
-    var _blockLabels = [1024, 2048, 4096, 8192];
-    h += '<span class="weq-spec-lbl">Block</span>';
-    h += '<select class="weq-spec-sel" id="weqSpecBlockSel" title="FFT block size (larger = better frequency resolution, slower response)">';
-    for (var bsi = 0; bsi < _blockLabels.length; bsi++) {
-        h += '<option value="' + _blockLabels[bsi] + '"' + (weqSpecBlock === _blockLabels[bsi] ? ' selected' : '') + '>' + _blockLabels[bsi] + '</option>';
-    }
-    h += '</select>';
+
     h += '<span class="weq-spec-sep">│</span>';
     // Freeze
     h += '<button class="weq-spec-btn' + (weqSpecFreeze ? ' on' : '') + '" id="weqSpecFreezeBtn" title="Freeze spectrum">❄</button>';
@@ -1548,6 +1534,8 @@ function weqRenderPanel() {
     var savedScroll = el.scrollTop;
     var bandsScroll = el.querySelector('.weq-bands-scroll');
     var savedBandsScroll = bandsScroll ? bandsScroll.scrollLeft : 0;
+    var sidePanel = el.querySelector('.weq-side-panel');
+    var savedSideScroll = sidePanel ? sidePanel.scrollTop : 0;
 
     el.innerHTML = h;
 
@@ -1560,6 +1548,10 @@ function weqRenderPanel() {
     if (savedBandsScroll > 0) {
         var newBands = el.querySelector('.weq-bands-scroll');
         if (newBands) newBands.scrollLeft = savedBandsScroll;
+    }
+    if (savedSideScroll > 0) {
+        var newSide = el.querySelector('.weq-side-panel');
+        if (newSide) newSide.scrollTop = savedSideScroll;
     }
 
     // Trigger plugin rack re-render so bus dropdowns reflect EQ point frequencies
@@ -1816,22 +1808,12 @@ function weqDrawCanvas() {
                 return (1 - (clamped - specFloor) / specRange) * H;
             };
 
-            // ── Build spectrum Path2D once, draw multi-layer glow from it ──
-            // Downsample 256 bins to ~128 display points (max-pool to preserve peaks)
-            var dispN = Math.min(specBins, Math.max(64, Math.ceil(W / 5)));
-            var dispData = new Float32Array(dispN);
-            var ratio = specBins / dispN;
-            for (var di = 0; di < dispN; di++) {
-                var lo = Math.floor(di * ratio);
-                var hi = Math.min(specBins - 1, Math.floor((di + 1) * ratio));
-                var mx = weqSpectrumSmooth[lo];
-                for (var bi = lo + 1; bi <= hi; bi++) {
-                    if (weqSpectrumSmooth[bi] > mx) mx = weqSpectrumSmooth[bi];
-                }
-                dispData[di] = mx;
-            }
+            // ── Build spectrum Path2D once, draw optimized glow from it ──
+            // Use full resolution (no max-pool downsampling) for tight, accurate representation
+            var dispN = specBins;
+            var dispData = weqSpectrumSmooth;
 
-            // Catmull-Rom spline → Path2D (built once, stroked/filled multiple times)
+            // Catmull-Rom spline → Path2D (built once)
             var _specBuildPath2D = function(data, n, xScale, yFn) {
                 var p2d = new Path2D();
                 p2d.moveTo(0, yFn(data[0]));
@@ -1846,7 +1828,8 @@ function weqDrawCanvas() {
                     var yNext = yFn(data[iNext]);
                     var x0c = ((i - 1) / (n - 1)) * xScale;
                     var y0c = yFn(data[i - 1]);
-                    var t = 0.5; // Catmull-Rom tension
+                    // Corrected Catmull-Rom to Cubic Bezier math (divide tension by 3)
+                    var t = 0.5 / 3.0;
                     var cp1x = x0c + (x1 - xPrev) * t;
                     var cp1y = y0c + (y1 - yPrev) * t;
                     var cp2x = x1 - (xNext - x0c) * t;
@@ -1874,44 +1857,31 @@ function weqDrawCanvas() {
             ctx.fillStyle = specGrad;
             ctx.fill(fillPath);
 
-            // ── Multi-layer glow strokes (reuse same Path2D) ──
+            // ── Optimized strokes (consolidated from 3 layers to 2 for performance) ──
             ctx.lineJoin = 'round';
-            // Layer 1: Diffuse glow
-            ctx.strokeStyle = 'rgba(60, 200, 230, 0.08)';
-            ctx.lineWidth = 4;
-            ctx.stroke(specPath);
-            // Layer 2: Medium glow
+            // Outer glow
             ctx.strokeStyle = 'rgba(70, 210, 235, 0.15)';
-            ctx.lineWidth = 2;
+            ctx.lineWidth = 3;
             ctx.stroke(specPath);
-            // Layer 3: Crisp bright line
-            ctx.strokeStyle = 'rgba(100, 225, 245, 0.45)';
+            // Crisp bright line
+            ctx.strokeStyle = 'rgba(100, 225, 245, 0.5)';
             ctx.lineWidth = 1.2;
             ctx.stroke(specPath);
 
-            // ── Peak-hold line (build separate Path2D, reuse for 2 layers) ──
+            // ── Peak-hold line ──
             if (weqSpecPeakHold && weqSpectrumPeaks && weqSpectrumPeaks.length === specBins) {
-                // Downsample peaks with same max-pool
-                var peakDisp = new Float32Array(dispN);
-                for (var pdi = 0; pdi < dispN; pdi++) {
-                    var plo = Math.floor(pdi * ratio);
-                    var phi = Math.min(specBins - 1, Math.floor((pdi + 1) * ratio));
-                    var pmx = Math.max(specFloor + 3, weqSpectrumPeaks[plo]);
-                    for (var pbi = plo + 1; pbi <= phi; pbi++) {
-                        var pv = Math.max(specFloor + 3, weqSpectrumPeaks[pbi]);
-                        if (pv > pmx) pmx = pv;
-                    }
-                    peakDisp[pdi] = pmx;
-                }
-                var peakPath = _specBuildPath2D(peakDisp, dispN, W, specY);
-                // Glow layer
-                ctx.strokeStyle = 'rgba(140, 240, 255, 0.12)';
-                ctx.lineWidth = 2.5;
+                // Use full resolution without max-pooling
+                var peakDisp = weqSpectrumPeaks;
+                var peakPath = _specBuildPath2D(peakDisp, dispN, W, function(db) { 
+                    return specY(Math.max(specFloor + 3, db)); 
+                });
+                // Crisp line with subtle glow via shadowBlur
+                ctx.strokeStyle = 'rgba(150, 240, 255, 0.45)';
+                ctx.lineWidth = 1.0;
+                ctx.shadowColor = 'rgba(140, 240, 255, 0.25)';
+                ctx.shadowBlur = 4;
                 ctx.stroke(peakPath);
-                // Crisp line
-                ctx.strokeStyle = 'rgba(150, 240, 255, 0.55)';
-                ctx.lineWidth = 0.7;
-                ctx.stroke(peakPath);
+                ctx.shadowBlur = 0; // reset
             }
 
             // ── Spectrum dB scale markers (right edge) ──
@@ -3822,12 +3792,7 @@ function weqSetupEvents() {
         weqSpectrumSmooth = null; weqSpectrumPeaks = null; _weqSpecSpatialBuf = null;
         if (typeof markStateDirty === 'function') markStateDirty();
     };
-    var specRangeSel = document.getElementById('weqSpecRangeSel');
-    if (specRangeSel) specRangeSel.onchange = function () {
-        weqSpecFloor = parseInt(specRangeSel.value);
-        weqDrawCanvas();
-        if (typeof markStateDirty === 'function') markStateDirty();
-    };
+
     var specFreezeBtn = document.getElementById('weqSpecFreezeBtn');
     if (specFreezeBtn) specFreezeBtn.onclick = function () {
         weqSpecFreeze = !weqSpecFreeze;
@@ -3853,14 +3818,7 @@ function weqSetupEvents() {
             weqDrawCanvas();
         }
     };
-    var specBlockSel = document.getElementById('weqSpecBlockSel');
-    if (specBlockSel) specBlockSel.onchange = function () {
-        weqSpecBlock = parseInt(specBlockSel.value);
-        // Reset spectrum arrays for new FFT resolution
-        weqSpectrumSmooth = null; weqSpectrumPeaks = null; weqSpectrumBins = null; _weqSpecSpatialBuf = null;
-        weqSyncToHost(); // tell C++ about new block size
-        if (typeof markStateDirty === 'function') markStateDirty();
-    };
+
 
     // Split mode toggle
     var splitBtn = document.getElementById('weqSplitBtn');
@@ -4351,9 +4309,14 @@ function weqSetupMouse(wrap) {
             weqSyncToHost();
             if (typeof markStateDirty === 'function') markStateDirty();
         } else {
+            if (wrongEqPoints.length >= 8) return; // Enforce max 8 bands limit
             // Add new point at 0dB at clicked frequency
             _weqPushUndo();
-            var newPt = { uid: _weqAllocUid(), x: snapFreq(p.x), y: weqDBtoY(0), pluginIds: [], preEq: true, seg: null, solo: false, mute: false, q: 0.707, type: 'Bell', drift: 0 };
+            var anySolo = false;
+            for (var spi = 0; spi < wrongEqPoints.length; spi++) {
+                if (wrongEqPoints[spi].solo) anySolo = true;
+            }
+            var newPt = { uid: _weqAllocUid(), x: snapFreq(p.x), y: weqDBtoY(0), pluginIds: [], preEq: true, seg: null, solo: anySolo, mute: false, q: 0.707, type: 'Bell', drift: 0 };
             wrongEqPoints.push(newPt);
             if (weqAnimRafId) { weqAnimBaseY.push(newPt.y); weqAnimBaseX.push(newPt.x); }
             weqSelectedPt = wrongEqPoints.length - 1;
@@ -5773,10 +5736,9 @@ function _weqApplyPresetData(data) {
     // Spectrum analyzer params
     if (data.specSpeed != null) weqSpecSpeed = data.specSpeed;
     if (data.specSlope != null) weqSpecSlope = data.specSlope;
-    if (data.specFloor != null) weqSpecFloor = data.specFloor;
+    // Removed specFloor and specBlock deserialization to force defaults
     if (data.specPeakHold != null) weqSpecPeakHold = data.specPeakHold;
     if (data.specVisible != null) weqSpecVisible = data.specVisible;
-    if (data.specBlock != null) weqSpecBlock = data.specBlock;
 
     weqSelectedPt = -1;
     weqFocusBand = -1;

@@ -1314,25 +1314,65 @@ int HostesaAudioProcessor::getSpectrumBins(float *outBins, int maxBins) {
     float freqLo = std::pow(10.0f, logMin + t0 * (logMax - logMin));
     float freqHi = std::pow(10.0f, logMin + t1 * (logMax - logMin));
 
-    // Map to FFT bin range
-    int lo = juce::jlimit(0, halfSize - 1, (int)(freqLo * (float)fftCurrentSize / sr));
-    int hi = juce::jlimit(0, halfSize - 1, (int)(freqHi * (float)fftCurrentSize / sr));
-    if (hi < lo) hi = lo;
-
-    // RMS energy (power spectral density): sum squared magnitudes, then sqrt
-    // This is what professional analyzers (SPAN, Pro-Q) use for accurate energy representation
+    float exactLo = freqLo * (float)fftCurrentSize / sr;
+    float exactHi = freqHi * (float)fftCurrentSize / sr;
     float energy = 0.0f;
-    int binCount = hi - lo + 1;
-    for (int i = lo; i <= hi; ++i) {
-      float re = fftWorkBuffer[i * 2];
-      float im = fftWorkBuffer[i * 2 + 1];
-      energy += re * re + im * im;
+
+    // Fractional Bin Interpolation for low frequencies
+    // If the UI bin spans less than 1.5 FFT bins, we interpolate the magnitude
+    // between the two nearest integer bins using the center frequency.
+    // This perfectly sweeps between FFT bins instead of snapping to integer indices.
+    if ((exactHi - exactLo) < 1.5f) {
+      float tc = (float)b / (float)(numBins - 1);
+      float freqCenter = std::pow(10.0f, logMin + tc * (logMax - logMin));
+      float exactBin = freqCenter * (float)fftCurrentSize / sr;
+      
+      int idx0 = juce::jlimit(0, halfSize - 1, (int)exactBin);
+      int idx1 = juce::jlimit(0, halfSize - 1, idx0 + 1);
+      float frac = exactBin - (float)idx0;
+
+      float re0 = fftWorkBuffer[idx0 * 2], im0 = fftWorkBuffer[idx0 * 2 + 1];
+      float mag0 = std::sqrt(re0 * re0 + im0 * im0);
+      
+      float re1 = fftWorkBuffer[idx1 * 2], im1 = fftWorkBuffer[idx1 * 2 + 1];
+      float mag1 = std::sqrt(re1 * re1 + im1 * im1);
+
+      float interpMag = mag0 + frac * (mag1 - mag0);
+      energy = interpMag * interpMag; // Power spectral density
+    } else {
+      // RMS energy calculation for high frequencies (spanning multiple integer bins)
+      int lo = juce::jlimit(0, halfSize - 1, (int)exactLo);
+      int hi = juce::jlimit(0, halfSize - 1, (int)exactHi);
+      if (hi < lo) hi = lo;
+
+      int binCount = hi - lo + 1;
+      for (int i = lo; i <= hi; ++i) {
+        float re = fftWorkBuffer[i * 2];
+        float im = fftWorkBuffer[i * 2 + 1];
+        energy += re * re + im * im;
+      }
+      energy /= (float)binCount;
     }
-    float rms = std::sqrt(energy / (float) binCount);
+
+    float rms = std::sqrt(energy);
 
     // Convert to dB (normalize by FFT size)
-    float db = rms > 0.0f ? 20.0f * std::log10(rms / (float)fftCurrentSize) : -100.0f;
-    outBins[b] = juce::jlimit(-100.0f, 20.0f, db);
+    float targetDb = rms > 0.0f ? 20.0f * std::log10(rms / (float)fftCurrentSize) : -100.0f;
+    targetDb = juce::jlimit(-100.0f, 20.0f, targetDb);
+
+    // Temporal smoothing: Fast attack, slow decay (prevents jiggling)
+    float currentDb = spectrumBinsOut[b];
+    if (currentDb == 0.0f) currentDb = -100.0f; // Init to floor
+
+    if (targetDb > currentDb) {
+        currentDb += 0.6f * (targetDb - currentDb); // Fast attack
+    } else {
+        currentDb -= 0.8f; // Slow linear decay (~24dB/sec at 30fps)
+        if (currentDb < targetDb) currentDb = targetDb;
+    }
+
+    spectrumBinsOut[b] = currentDb;
+    outBins[b] = currentDb;
   }
 
   return numBins;

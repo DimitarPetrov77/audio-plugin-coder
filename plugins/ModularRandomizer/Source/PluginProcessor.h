@@ -691,6 +691,7 @@ private:
                 case 3:  return lp + hp;                       // Notch
                 case 4:  return in + gainMix * lp;             // Low shelf
                 case 5:  return in + gainMix * hp;             // High shelf
+                case 6:  return k * bp;                        // Band-pass (Solo)
                 default: return in + gainMix * k * bp;
             }
         }

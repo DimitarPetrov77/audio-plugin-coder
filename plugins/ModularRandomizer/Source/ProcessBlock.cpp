@@ -2433,6 +2433,15 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 float tanhDenom = (std::abs(warpVal) > 0.5f && warpW > 0.0f)
                                   ? std::tanh(warpW * 3.0f) : 1.0f;
 
+                // Check if *any* EQ point is soloed in the entire UI (Listen mode)
+                bool anyEqSolo = false;
+                for (int checkIdx = 0; checkIdx < nPts && checkIdx < maxEqBands; ++checkIdx) {
+                    if (eqPoints[checkIdx].solo.load()) {
+                        anyEqSolo = true;
+                        break;
+                    }
+                }
+
                 for (int i = 0; i < nPts; ++i)
                 {
                     float freqBase = eqPoints[i].freqHz.load();
@@ -2472,13 +2481,17 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                         gain = std::round (gain / stepSz) * stepSz;
                     }
 
+                    bool isSoloed = eqPoints[i].solo.load();
+
                     // Muted or preEq-off → passthrough (0 dB gain makes SVF bell/shelf = unity)
-                    bool isMuted = eqPoints[i].mute.load() || !eqPoints[i].preEq.load();
+                    // If any point is soloed, everything else is effectively muted.
+                    bool isMuted = eqPoints[i].mute.load() || !eqPoints[i].preEq.load() || (anyEqSolo && !isSoloed);
 
                     eqFreqs[i]  = juce::jlimit (20.0f, sr * 0.49f, freqBase);
                     eqGains[i]  = isMuted ? 0.0f : gain;
                     eqQs[i]     = juce::jlimit (0.025f, 40.0f, qBase);
-                    eqTypes[i]  = eqPoints[i].filterType.load();
+                    // Solo effectively transforms the point into a Listen Band-Pass (type 6)
+                    eqTypes[i]  = (anyEqSolo && isSoloed) ? 6 : eqPoints[i].filterType.load();
                     eqStages[i] = juce::jlimit (1, maxBiquadStages, eqPoints[i].slope.load());
                     eqMuted[i]  = isMuted;
                     eqBiquadActive[i] = true;
@@ -2499,7 +2512,7 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                         // For muted LP/HP/Notch: still process to keep SVF state warm,
                         // but output the original input (passthrough). This prevents
                         // a click when unmuting — the filter state is already primed.
-                        bool muteBypass = eqMuted[i] && (eqTypes[i] == 1 || eqTypes[i] == 2 || eqTypes[i] == 3);
+                        bool muteBypass = eqMuted[i] && (eqTypes[i] == 1 || eqTypes[i] == 2 || eqTypes[i] == 3 || eqTypes[i] == 6);
 
                         float freq = juce::jlimit (20.0f, svfSR * 0.49f, eqFreqs[i]);
                         float gain = eqGains[i];
