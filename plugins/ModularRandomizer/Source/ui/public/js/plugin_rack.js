@@ -1376,21 +1376,9 @@ pse.addEventListener('click', function (e) {
         var b = findBlock(assignMode);
         if (!b) return;
 
-        // Shapes Range: assign with range=0 (no arc until dragged)
-        if (b.mode === 'shapes_range') {
-            if (b.targets.has(pid)) {
-                b.targets.delete(pid);
-                cleanBlockAfterUnassign(b, pid);
-                lastClickedAction = 'remove';
-            } else {
-                assignTarget(b, pid);
-                if (!b.targetRanges) b.targetRanges = {};
-                if (!b.targetRangeBases) b.targetRangeBases = {};
-                b.targetRanges[pid] = 0;
-                b.targetRangeBases[pid] = pp.v; // anchor = current position
-                lastClickedAction = 'add';
-            }
-        } else if (e.shiftKey && lastClickedPid) {
+        pushUndoSnapshot();
+
+        if (e.shiftKey && lastClickedPid) {
             var allRows = Array.prototype.slice.call(pse.querySelectorAll('.pr[data-pid]'));
             var startIdx = -1, endIdx = -1;
             for (var ri = 0; ri < allRows.length; ri++) {
@@ -1406,11 +1394,6 @@ pse.addEventListener('click', function (e) {
                     if (rp && !rp.lk) {
                         if (lastClickedAction === 'add') {
                             assignTarget(b, rpid);
-                            if (b.mode === 'shapes_range') {
-                                if (!b.targetRanges) b.targetRanges = {};
-                                if (!b.targetRangeBases) b.targetRangeBases = {};
-                                if (b.targetRanges[rpid] === undefined) { b.targetRanges[rpid] = 0; b.targetRangeBases[rpid] = rp.v; }
-                            }
                         } else {
                             b.targets.delete(rpid);
                             cleanBlockAfterUnassign(b, rpid);
@@ -1420,10 +1403,10 @@ pse.addEventListener('click', function (e) {
             }
         } else if (e.ctrlKey || e.metaKey) {
             if (b.targets.has(pid)) { b.targets.delete(pid); cleanBlockAfterUnassign(b, pid); lastClickedAction = 'remove'; }
-            else { assignTarget(b, pid); if (b.mode === 'shapes_range') { if (!b.targetRanges) b.targetRanges = {}; if (!b.targetRangeBases) b.targetRangeBases = {}; if (b.targetRanges[pid] === undefined) { b.targetRanges[pid] = 0; b.targetRangeBases[pid] = pp.v; } } if (b.mode === 'link') { if (!b.linkBases) b.linkBases = {}; b.linkBases[pid] = pp.v; } if (b.mode === 'shapes') { if (!b.targetBases) b.targetBases = {}; b.targetBases[pid] = pp.v; } lastClickedAction = 'add'; }
+            else { assignTarget(b, pid); lastClickedAction = 'add'; }
         } else {
             if (b.targets.has(pid)) { b.targets.delete(pid); cleanBlockAfterUnassign(b, pid); lastClickedAction = 'remove'; }
-            else { assignTarget(b, pid); if (b.mode === 'shapes_range') { if (!b.targetRanges) b.targetRanges = {}; if (!b.targetRangeBases) b.targetRangeBases = {}; if (b.targetRanges[pid] === undefined) { b.targetRanges[pid] = 0; b.targetRangeBases[pid] = pp.v; } } if (b.mode === 'link') { if (!b.linkBases) b.linkBases = {}; b.linkBases[pid] = pp.v; } if (b.mode === 'shapes') { if (!b.targetBases) b.targetBases = {}; b.targetBases[pid] = pp.v; } lastClickedAction = 'add'; }
+            else { assignTarget(b, pid); lastClickedAction = 'add'; }
         }
         lastClickedPid = pid;
         renderAllPlugins();
@@ -1534,10 +1517,6 @@ pse.addEventListener('contextmenu', function (e) {
                 // Auto-assign if not yet assigned
                 if (!srBlk.targets.has(pid)) {
                     assignTarget(srBlk, pid);
-                    if (!srBlk.targetRanges) srBlk.targetRanges = {};
-                    if (!srBlk.targetRangeBases) srBlk.targetRangeBases = {};
-                    srBlk.targetRanges[pid] = 0;
-                    srBlk.targetRangeBases[pid] = p.v; // capture base position
                 }
                 // Ensure base exists
                 if (!srBlk.targetRangeBases) srBlk.targetRangeBases = {};

@@ -57,6 +57,7 @@ function showCtx(x, y, p) {
                 var bid = parseInt(item.dataset.unassignblock);
                 var bl = findBlock(bid);
                 if (!bl) return;
+                pushUndoSnapshot();
                 pids.forEach(function (pid) { bl.targets.delete(pid); cleanBlockAfterUnassign(bl, pid); });
                 m.classList.remove('vis');
                 selectedParams.clear();
@@ -84,6 +85,7 @@ function showCtx(x, y, p) {
                 var bid = parseInt(item.dataset.assignblock);
                 var bl = findBlock(bid);
                 if (!bl) return;
+                pushUndoSnapshot();
                 pids.forEach(function (pid) {
                     var pp = PMap[pid];
                     if (pp && !pp.lk) assignTarget(bl, pid);
@@ -128,6 +130,7 @@ function showCtx(x, y, p) {
                 var bl = findBlock(bid);
                 if (!bl || !bl.lanes[lIdx]) return;
                 var lane = bl.lanes[lIdx];
+                pushUndoSnapshot();
                 pids.forEach(function (pid) {
                     var pp = PMap[pid];
                     if (pp && !pp.lk) {
