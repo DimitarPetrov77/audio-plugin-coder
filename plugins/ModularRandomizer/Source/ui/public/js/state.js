@@ -36,6 +36,31 @@ var scanInProgress = false;
     }
 })();
 
+// Pre-populate the plugin browser from the on-disk cache — no scan triggered.
+// If cache exists, scannedPlugins is filled immediately so opening the browser
+// shows the list right away. If cache is empty, the browser will show
+// a "No plugins found — click Scan" prompt instead of auto-scanning.
+(function initCachedPlugins() {
+    if (!window.__JUCE__ || !window.__JUCE__.backend) return;
+    var fn = window.__juceGetNativeFunction('getCachedPlugins');
+    if (!fn) return;
+    fn().then(function (result) {
+        if (result && result.length > 0) {
+            scannedPlugins = result.map(function (p) {
+                return {
+                    name:   p.name     || 'Unknown',
+                    vendor: p.vendor   || '',
+                    cat:    p.category || 'fx',
+                    path:   p.path     || '',
+                    fmt:    p.format   || 'VST3'
+                };
+            });
+        }
+        // scannedPlugins.length === 0 means no cache yet — browser will show
+        // a "Scan" prompt when opened, not auto-trigger a scan.
+    });
+})();
+
 // Plugin rack state
 var PMap = {}, pluginBlocks = [], plugBC = 0;
 

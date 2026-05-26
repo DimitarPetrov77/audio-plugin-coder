@@ -768,6 +768,58 @@
     color: var(--env-color, #C8B060)
 }
 
+/* ── Vendor "By Vendor" view ─────────────────────────── */
+.vendor-section {
+    border-bottom: 1px solid var(--bg-inset)
+}
+
+.vendor-header {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 14px;
+    cursor: pointer;
+    user-select: none;
+    background: var(--bg-cell);
+    transition: background 0.1s
+}
+
+.vendor-header:hover {
+    background: var(--bg-cell-hover)
+}
+
+.vendor-chevron {
+    font-size: 9px;
+    color: var(--text-muted);
+    width: 10px;
+    flex-shrink: 0
+}
+
+.vendor-name {
+    flex: 1;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .3px;
+    color: var(--text-primary)
+}
+
+.vendor-count {
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: var(--bg-inset);
+    padding: 1px 5px;
+    border-radius: 3px;
+    min-width: 18px;
+    text-align: center
+}
+
+.vendor-plugins .plug-row {
+    padding-left: 28px
+}
+
+/* ────────────────────────────────────────────────────── */
+
 .modal-footer {
     display: flex;
     align-items: center;

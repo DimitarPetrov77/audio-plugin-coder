@@ -22,6 +22,8 @@ $RootPath = (Get-Item "$PSScriptRoot\..").FullName
 $BuildDir = "$RootPath\build"
 $StatusJson = Join-Path $RootPath "plugins\$PluginName\status.json"
 $UseVisage = $false
+# TargetName = CMake target prefix (from plugin_name in status.json, falls back to folder name)
+$TargetName = $PluginName
 
 if (Test-Path $StatusJson) {
     try {
@@ -29,12 +31,16 @@ if (Test-Path $StatusJson) {
         if ($state.ui_framework -eq "visage") {
             $UseVisage = $true
         }
+        # Read the actual product name used by juce_add_plugin (may differ from folder name)
+        if ($state.plugin_name -and $state.plugin_name -ne "") {
+            $TargetName = $state.plugin_name
+        }
     } catch {
         Write-Warning "Could not read status.json; proceeding without framework hints."
     }
 }
 
-Write-Host "--- APC BUILDER: $PluginName ---" -ForegroundColor Cyan
+Write-Host "--- APC BUILDER: $PluginName (target: $TargetName) ---" -ForegroundColor Cyan
 if ($UseVisage) {
     Write-Host "Framework: visage" -ForegroundColor DarkGray
 }
@@ -48,7 +54,7 @@ if ($state.current_phase -ne "code_complete" -and -not $SkipTests) {
 # 1. Configure with error monitoring
 Write-Host "Configuring build..." -ForegroundColor Yellow
 $visageFlag = if ($UseVisage) { "-DAPC_ENABLE_VISAGE:BOOL=ON" } else { "" }
-$configureCommand = "cmake -S `"$RootPath`" -B `"$BuildDir`" -G `"Visual Studio 17 2022`" -A x64 --fresh $visageFlag"
+$configureCommand = "cmake -S `"$RootPath`" -B `"$BuildDir`" -G `"Visual Studio 18 2026`" -A x64 --fresh $visageFlag"
 $configResult = Invoke-MonitoredCommand -Command $configureCommand -ShowOutput -ThrowOnError
 
 if ($configResult.Errors.Count -gt 0) {
@@ -64,7 +70,7 @@ if ($configResult.Errors.Count -gt 0) {
 
 # 2. Build VST3 with error monitoring
 Write-Host "Compiling VST3..." -ForegroundColor Yellow
-$buildVst3Command = "cmake --build `"$BuildDir`" --config Release --target `"$($PluginName)_VST3`""
+$buildVst3Command = "cmake --build `"$BuildDir`" --config Release --target `"$($TargetName)_VST3`""
 $vst3Result = Invoke-MonitoredCommand -Command $buildVst3Command -ShowOutput -ThrowOnError
 
 if ($vst3Result.Errors.Count -gt 0) {
@@ -88,7 +94,7 @@ if ($vst3Result.Errors.Count -gt 0) {
 
 # 3. Build Standalone with error monitoring
 Write-Host "Compiling Standalone..." -ForegroundColor Yellow
-$buildStandaloneCommand = "cmake --build `"$BuildDir`" --config Release --target `"$($PluginName)_Standalone`""
+$buildStandaloneCommand = "cmake --build `"$BuildDir`" --config Release --target `"$($TargetName)_Standalone`""
 $standaloneResult = Invoke-MonitoredCommand -Command $buildStandaloneCommand -ShowOutput -ThrowOnError
 
 if ($standaloneResult.Errors.Count -gt 0) {
@@ -115,9 +121,9 @@ if (-not $SkipTests) {
     Write-Host "Running PluginVal validation..." -ForegroundColor Yellow
 
     # Find the built VST3 plugin
-    $vst3Path = Get-ChildItem -Path "$BuildDir" -Recurse -Filter "$PluginName.vst3" | Select-Object -First 1
+    $vst3Path = Get-ChildItem -Path "$BuildDir" -Recurse -Filter "$TargetName.vst3" | Select-Object -First 1
     if ($vst3Path) {
-        $pluginvalResult = Test-WithPluginVal -PluginPath $vst3Path.FullName -PluginName $PluginName -Strict:$Strict
+        $pluginvalResult = Test-WithPluginVal -PluginPath $vst3Path.FullName -PluginName $TargetName -Strict:$Strict
 
         if (-not $pluginvalResult.Passed -and -not $pluginvalResult.Skipped) {
             Write-Host "PluginVal tests failed" -ForegroundColor Red
@@ -135,7 +141,7 @@ if (-not $SkipTests) {
 # 5. Install VST3
 if (-not $NoInstall) {
     Write-Host "Installing VST3..." -ForegroundColor Yellow
-    $Vst = Get-ChildItem -Path "$BuildDir" -Recurse -Filter "$($PluginName).vst3" | Select-Object -First 1
+    $Vst = Get-ChildItem -Path "$BuildDir" -Recurse -Filter "$($TargetName).vst3" | Select-Object -First 1
     if ($Vst) {
         $Dest = "C:\Program Files\Common Files\VST3\$($Vst.Name)"
         try {
@@ -148,7 +154,7 @@ if (-not $NoInstall) {
     }
 
     # Locate Standalone
-    $Exe = Get-ChildItem -Path "$BuildDir" -Recurse -Filter "$($PluginName).exe" | Select-Object -First 1
+    $Exe = Get-ChildItem -Path "$BuildDir" -Recurse -Filter "$($TargetName).exe" | Select-Object -First 1
     if ($Exe) {
         Write-Host "STANDALONE built at: $($Exe.FullName)" -ForegroundColor Green
 

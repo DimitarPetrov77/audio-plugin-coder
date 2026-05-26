@@ -24,6 +24,42 @@
   #define LOG_TO_FILE(msg) do {} while(0)
 #endif
 
+// Scan logger — always writes to disk in ALL build types (Debug and Release).
+// Used for plugin scan diagnostics so crashes can be identified even in Release builds.
+// Output: %APPDATA%\DimitarPetrov\Hostesa\scan_log.txt
+#include <fstream>
+#include <chrono>
+#include <iomanip>
+inline void hostesaScanLog (const std::string& msg)
+{
+    try {
+        auto logDir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                          .getChildFile ("DimitarPetrov/Hostesa");
+        logDir.createDirectory();
+        auto logFile = logDir.getChildFile ("scan_log.txt");
+
+        // Timestamp prefix
+        auto now   = std::chrono::system_clock::now();
+        auto time  = std::chrono::system_clock::to_time_t (now);
+        std::tm tm_buf{};
+      #ifdef _WIN32
+        localtime_s (&tm_buf, &time);
+      #else
+        localtime_r (&time, &tm_buf);
+      #endif
+        std::ostringstream line;
+        line << std::put_time (&tm_buf, "[%H:%M:%S] ") << msg << "\n";
+
+        std::ofstream f (logFile.getFullPathName().toStdString(), std::ios::app);
+        f << line.str();
+        f.flush(); // flush immediately — process may die on next line
+    } catch (...) {}
+}
+#define SCAN_LOG(msg) do { \
+    std::ostringstream _sl; _sl << msg; \
+    hostesaScanLog (_sl.str()); \
+} while(0)
+
 //==============================================================================
 /**
  * Hostesa - Multi-Plugin Parameter Host
@@ -243,6 +279,11 @@ public:
     /** Delete the plugin scan cache — forces a full rescan on next call */
     void clearPluginCache();
 
+    /** Return cached plugin list instantly (no scanning, reads known_plugins.xml).
+     *  Returns empty if no cache exists yet. Used by JS on startup so the
+     *  plugin browser is populated immediately without triggering a scan. */
+    std::vector<ScannedPlugin> getCachedPlugins();
+
     /** Get current scan progress for UI feedback */
     struct ScanProgress { juce::String currentPlugin; float progress; bool scanning; };
     ScanProgress getScanProgress();
@@ -252,6 +293,32 @@ public:
     juce::String scanProgressName;
     std::atomic<float> scanProgressFraction { 0.0f };
     std::atomic<bool>  scanActive { false };
+
+    // ── Scan Blacklist ────────────────────────────────────────────────────────
+    // Persistent list of plugin paths that have caused process-level crashes.
+    // Loaded from / saved to: %APPDATA%\DimitarPetrov\Hostesa\scan_blacklist.txt
+    // Thread-safe: guarded by scanBlacklistMutex.
+
+    /** Return path to the blacklist file */
+    static juce::File getScanBlacklistFile();
+
+    /** Load blacklist from disk into memory (called once at scan start) */
+    void loadScanBlacklist();
+
+    /** Add a path to the blacklist and persist it immediately */
+    void addToScanBlacklist (const juce::String& pluginPath);
+
+    /** Remove a path from the blacklist (called from JS UI) */
+    void removeFromScanBlacklist (const juce::String& pluginPath);
+
+    /** Return all blacklisted paths (for the UI) */
+    juce::StringArray getScanBlacklist();
+
+    /** Harvest entries from JUCE's dead man's pedal into our blacklist */
+    void harvestDeadMansPedal (const juce::File& pedalFile);
+
+    std::mutex         scanBlacklistMutex;
+    juce::StringArray  scanBlacklistEntries;   // in-memory copy, loaded at scan start
 
     /** Load a VST3 plugin by file path, returns the hosted plugin ID or -1 */
     int loadPlugin (const juce::String& pluginPath);

@@ -144,6 +144,108 @@ bool sehDestroyInstance (juce::AudioPluginInstance* rawInstance)
 }
 #endif
 
+//==============================================================================
+// SCAN BLACKLIST
+//==============================================================================
+
+juce::File HostesaAudioProcessor::getScanBlacklistFile()
+{
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+               .getChildFile ("DimitarPetrov/Hostesa/scan_blacklist.txt");
+}
+
+void HostesaAudioProcessor::loadScanBlacklist()
+{
+    std::lock_guard<std::mutex> lk (scanBlacklistMutex);
+    scanBlacklistEntries.clear();
+
+    auto f = getScanBlacklistFile();
+    if (! f.existsAsFile()) return;
+
+    juce::StringArray lines;
+    lines.addLines (f.loadFileAsString());
+    for (auto& line : lines)
+    {
+        line = line.trim();
+        if (line.isNotEmpty())
+            scanBlacklistEntries.addIfNotAlreadyThere (line);
+    }
+    SCAN_LOG ("Blacklist loaded: " + juce::String (scanBlacklistEntries.size()).toStdString() + " entries");
+}
+
+void HostesaAudioProcessor::addToScanBlacklist (const juce::String& pluginPath)
+{
+    if (pluginPath.isEmpty()) return;
+
+    {
+        std::lock_guard<std::mutex> lk (scanBlacklistMutex);
+        scanBlacklistEntries.addIfNotAlreadyThere (pluginPath);
+    }
+
+    // Persist immediately — the process may be about to crash, so flush now
+    auto f = getScanBlacklistFile();
+    f.getParentDirectory().createDirectory();
+    juce::StringArray current;
+    if (f.existsAsFile())
+        current.addLines (f.loadFileAsString());
+    current.addIfNotAlreadyThere (pluginPath);
+    current.removeEmptyStrings();
+    f.replaceWithText (current.joinIntoString ("\n") + "\n");
+
+    SCAN_LOG ("*** BLACKLISTED: " + pluginPath.toStdString());
+}
+
+void HostesaAudioProcessor::removeFromScanBlacklist (const juce::String& pluginPath)
+{
+    {
+        std::lock_guard<std::mutex> lk (scanBlacklistMutex);
+        scanBlacklistEntries.removeString (pluginPath);
+    }
+
+    auto f = getScanBlacklistFile();
+    if (! f.existsAsFile()) return;
+    juce::StringArray lines;
+    lines.addLines (f.loadFileAsString());
+    lines.removeString (pluginPath);
+    lines.removeEmptyStrings();
+    f.replaceWithText (lines.joinIntoString ("\n") + (lines.isEmpty() ? "" : "\n"));
+
+    SCAN_LOG ("Blacklist entry removed: " + pluginPath.toStdString());
+}
+
+juce::StringArray HostesaAudioProcessor::getScanBlacklist()
+{
+    std::lock_guard<std::mutex> lk (scanBlacklistMutex);
+    return scanBlacklistEntries;
+}
+
+void HostesaAudioProcessor::harvestDeadMansPedal (const juce::File& pedalFile)
+{
+    // JUCE's dead man's pedal may have multiple lines from repeated crashes.
+    // Harvest every non-empty line into our persistent blacklist, then clear it
+    // so JUCE starts fresh (it will rewrite on next scan attempt).
+    if (! pedalFile.existsAsFile()) return;
+
+    juce::StringArray lines;
+    lines.addLines (pedalFile.loadFileAsString());
+    lines.removeEmptyStrings();
+
+    for (auto& path : lines)
+    {
+        path = path.trim();
+        if (path.isNotEmpty())
+        {
+            SCAN_LOG ("Harvesting dead man's pedal entry -> blacklist: " + path.toStdString());
+            addToScanBlacklist (path);
+        }
+    }
+
+    // Clear the pedal file — JUCE will re-create it as needed
+    pedalFile.deleteFile();
+}
+
+//==============================================================================
+
 std::vector<ScannedPlugin> HostesaAudioProcessor::scanForPlugins (
     const juce::StringArray& paths)
 {
@@ -151,6 +253,19 @@ std::vector<ScannedPlugin> HostesaAudioProcessor::scanForPlugins (
     juce::StringArray seen;
 
     LOG_TO_FILE ("scanForPlugins: filesystem scan + knownPlugins enrichment");
+    SCAN_LOG ("========================================");
+    SCAN_LOG ("scanForPlugins called — paths: " + [&]{ std::string s; for (auto& p : paths) s += p.toStdString() + "; "; return s; }());
+
+    // Load blacklist from disk (and harvest any lingering dead man's pedal entries)
+    auto deadMansPedalEarly = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                                  .getChildFile ("DimitarPetrov/Hostesa/scan_deadmanspedal.txt");
+    harvestDeadMansPedal (deadMansPedalEarly);   // absorb previous crash victims
+    loadScanBlacklist();                          // load full blacklist into memory
+
+    auto currentBlacklist = getScanBlacklist();
+    if (currentBlacklist.size() > 0)
+        SCAN_LOG ("Active blacklist (" + juce::String (currentBlacklist.size()).toStdString()
+                  + " entries): " + currentBlacklist.joinIntoString (", ").toStdString());
 
     // Phase 1: Fast filesystem scan for immediate results
     for (const auto& scanDir : paths)
@@ -235,11 +350,109 @@ std::vector<ScannedPlugin> HostesaAudioProcessor::scanForPlugins (
                 deadMansPedal
             );
 
+            SCAN_LOG ("--- Deep scan started (format: "
+                      + format->getName().toStdString() + ") ---");
+
             juce::String name;
             int scannedCount = 0;
             bool scanning = true;
             while (scanning)
             {
+                // ── Get the next file BEFORE scanning ────────────────────────
+                // If the process dies inside sehScanOneFile this is the last
+                // flushed log line, identifying the culprit plugin.
+                juce::String nextFile = scanner.getNextPluginFileThatWillBeScanned();
+
+                // ── Blacklist check ──────────────────────────────────────────
+                // If this plugin has crashed before, tell the scanner to skip it
+                // and advance without ever loading its DLL.
+                if (nextFile.isNotEmpty())
+                {
+                    bool isBlacklisted = false;
+                    {
+                        std::lock_guard<std::mutex> lk (scanBlacklistMutex);
+                        isBlacklisted = scanBlacklistEntries.contains (nextFile);
+                    }
+                    if (isBlacklisted)
+                    {
+                        SCAN_LOG ("[BLACKLIST-SKIP] " + nextFile.toStdString());
+                        LOG_TO_FILE ("  [BLACKLIST-SKIP] " << nextFile.toStdString());
+                        // Advance the scanner past this file without loading it
+                        scanner.skipNextFile();
+                        continue;
+                    }
+                }
+
+                // ── moduleinfo.json safety check ────────────────────────────
+                // JUCE 8 has two paths for VST3 scanning:
+                //   FAST (safe)   : reads Contents/Resources/moduleinfo.json — no DLL load
+                //   SLOW (danger) : calls GetPluginFactory() — loads the DLL — can call abort()
+                // JUCE falls through to SLOW when moduleinfo.json is absent.
+                // We intercept here: if moduleinfo.json is missing, inject filesystem-only
+                // metadata directly into knownPlugins and skip the DLL load entirely.
+                // This makes scanning 100% crash-proof.
+                if (nextFile.isNotEmpty())
+                {
+                    juce::File vst3Bundle (nextFile);
+                    bool hasModuleInfo =
+                        vst3Bundle.getChildFile ("Contents/Resources/moduleinfo.json").existsAsFile()
+                     || vst3Bundle.getChildFile ("Contents/moduleinfo.json").existsAsFile();
+
+                    if (! hasModuleInfo)
+                    {
+                        float preProgress = scanner.getProgress();
+                        SCAN_LOG ("[NO-MODULEINFO] ("
+                                  + juce::String (int (preProgress * 100)).toStdString()
+                                  + "%) " + nextFile.toStdString()
+                                  + " — using filesystem metadata, skipping DLL load");
+                        LOG_TO_FILE ("  [NO-MODULEINFO] " << nextFile.toStdString()
+                                     << " — filesystem-only metadata");
+
+                        // Inject a stub PluginDescription so this plugin is visible
+                        // in the browser (UI list is built from knownPlugins).
+                        // Mark uniqueId = 0 as a sentinel: "no real UID yet — needs
+                        // a single-file DLL scan at instantiation time."
+                        // findPluginDescription skips stubs (uniqueId == 0) and falls
+                        // through to the targeted single-file scan that gets the real UID.
+                        juce::PluginDescription fsDesc;
+                        fsDesc.name                = vst3Bundle.getFileNameWithoutExtension();
+                        fsDesc.pluginFormatName    = "VST3";
+                        fsDesc.fileOrIdentifier    = nextFile;
+                        fsDesc.manufacturerName    = vst3Bundle.getParentDirectory().getFileName();
+                        fsDesc.category            = "fx";
+                        fsDesc.isInstrument        = false;
+                        fsDesc.numInputChannels    = 2;
+                        fsDesc.numOutputChannels   = 2;
+                        fsDesc.uniqueId            = 0;   // sentinel: stub, no real UID
+                        knownPlugins.addType (fsDesc);
+
+                        { std::lock_guard<std::mutex> lk (scanProgressMutex);
+                          scanProgressName = nextFile; }
+                        scanProgressFraction.store (preProgress);
+
+                        // Advance the JUCE scanner past this file (no DLL load)
+                        scanner.skipNextFile();
+                        ++scannedCount;
+                        continue;
+                    }
+                }
+
+                // ── Pre-scan log (written + flushed before DLL load) ─────────
+                // Only reached for plugins that HAVE moduleinfo.json — safe path.
+                if (nextFile.isNotEmpty())
+                {
+                    float preProgress = scanner.getProgress();
+                    SCAN_LOG ("[PRE-SCAN] ("
+                              + juce::String (int (preProgress * 100)).toStdString()
+                              + "%) " + nextFile.toStdString());
+                    LOG_TO_FILE ("  [PRE-SCAN] ("
+                                 << (int)(preProgress * 100) << "%) "
+                                 << nextFile.toStdString());
+                    { std::lock_guard<std::mutex> lk (scanProgressMutex);
+                      scanProgressName = nextFile; }
+                    scanProgressFraction.store (preProgress);
+                }
+
                 try
                 {
 #ifdef _WIN32
@@ -247,14 +460,24 @@ std::vector<ScannedPlugin> HostesaAudioProcessor::scanForPlugins (
                     if (r == 0)
                         scanning = false; // normal completion
                     else if (r < 0)
-                        continue; // SEH crash on this plugin -- skip it, keep scanning
+                    {
+                        // SEH-catchable crash on a plugin that HAD moduleinfo.json
+                        // (rare — malformed JSON fell through to slow path).
+                        SCAN_LOG ("[SEH-CRASH] " + nextFile.toStdString() + " — blacklisted");
+                        LOG_TO_FILE ("  [SEH-CRASH] " << nextFile.toStdString() << " — blacklisted");
+                        addToScanBlacklist (nextFile);
+                        continue;
+                    }
 #else
                     scanning = scanner.scanNextFile (true, name);
 #endif
                 }
                 catch (...)
                 {
-                    continue; // exception on this plugin -- skip it, keep scanning
+                    SCAN_LOG ("[C++-EXCEPTION] " + nextFile.toStdString() + " — blacklisted");
+                    LOG_TO_FILE ("  [C++-EXCEPTION] " << nextFile.toStdString() << " — blacklisted");
+                    addToScanBlacklist (nextFile);
+                    continue;
                 }
 
                 ++scannedCount;
@@ -265,8 +488,29 @@ std::vector<ScannedPlugin> HostesaAudioProcessor::scanForPlugins (
                 scanProgressFraction.store (prog);
 
                 if (scannedCount % 20 == 0)
+                {
                     LOG_TO_FILE ("  Deep scan progress: " << scannedCount
                                  << " files (" << (int)(prog * 100) << "%)");
+                    SCAN_LOG ("Progress: " + juce::String (scannedCount).toStdString()
+                              + " files (" + juce::String (int (prog * 100)).toStdString() + "%)");
+                }
+
+                // Progressive cache save every 50 plugins.
+                // If the process crashes mid-scan the partial cache survives,
+                // so the next launch loads what was scanned so far and skips
+                // the deep scan entirely (only missing the tail of plugins).
+                if (scannedCount % 50 == 0 && knownPlugins.getNumTypes() > 0)
+                {
+                    auto partialXml = knownPlugins.createXml();
+                    if (partialXml != nullptr)
+                    {
+                        cacheFile.getParentDirectory().createDirectory();
+                        partialXml->writeTo (cacheFile);
+                        SCAN_LOG ("Partial cache saved: "
+                                  + juce::String (knownPlugins.getNumTypes()).toStdString()
+                                  + " plugins");
+                    }
+                }
             }
             LOG_TO_FILE ("  Format '" << format->getName().toStdString()
                          << "': scanned " << scannedCount << " files");
@@ -340,6 +584,57 @@ std::vector<ScannedPlugin> HostesaAudioProcessor::scanForPlugins (
 
     LOG_TO_FILE ("scanForPlugins complete: " << results.size() << " plugins found ("
                  << knownPlugins.getNumTypes() << " with metadata)");
+    SCAN_LOG ("scanForPlugins complete: " + juce::String ((int) results.size()).toStdString() + " plugins");
+    return results;
+}
+
+//==============================================================================
+// GET CACHED PLUGINS — instant, no scanning
+// Reads known_plugins.xml from disk and returns the list without touching any
+// plugin DLL. Called from JS on startup so the browser is populated immediately.
+//==============================================================================
+std::vector<ScannedPlugin> HostesaAudioProcessor::getCachedPlugins()
+{
+    std::vector<ScannedPlugin> results;
+
+    auto cacheFile = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                         .getChildFile ("DimitarPetrov/Hostesa/known_plugins.xml");
+
+    if (! cacheFile.existsAsFile())
+        return results;   // no cache yet — JS will show "no plugins" + manual scan button
+
+    juce::KnownPluginList tempList;
+    auto xml = juce::parseXML (cacheFile);
+    if (xml == nullptr)
+        return results;
+
+    tempList.recreateFromXml (*xml);
+
+    juce::StringArray seen;
+    for (const auto& desc : tempList.getTypes())
+    {
+        if (seen.contains (desc.fileOrIdentifier)) continue;
+        seen.add (desc.fileOrIdentifier);
+
+        ScannedPlugin sp;
+        sp.name   = desc.name;
+        sp.vendor = desc.manufacturerName;
+        sp.path   = desc.fileOrIdentifier;
+        sp.format = desc.pluginFormatName;
+
+        auto cat = desc.category.toLowerCase();
+        if (desc.isInstrument)                                               sp.category = "synth";
+        else if (cat.contains ("instrument") || cat.contains ("synth"))      sp.category = "synth";
+        else if (cat.contains ("sampler"))                                   sp.category = "sampler";
+        else if (cat.contains ("analyzer") || cat.contains ("analyser")
+              || cat.contains ("tools")    || cat.contains ("mastering")
+              || cat.contains ("meter"))                                     sp.category = "utility";
+        else                                                                 sp.category = "fx";
+
+        results.push_back (sp);
+    }
+
+    LOG_TO_FILE ("getCachedPlugins: " << results.size() << " plugins from cache");
     return results;
 }
 
@@ -369,9 +664,14 @@ bool HostesaAudioProcessor::findPluginDescription (
 {
     auto pluginFileName = juce::File (pluginPath).getFileNameWithoutExtension();
 
-    // Check knownPlugins cache first (fast, no disk I/O)
+    // Check knownPlugins cache first (fast, no disk I/O).
+    // Skip stubs (uniqueId == 0) — those are NO-MODULEINFO placeholders that have
+    // no real factory UID. Using them for instantiation would cause createPluginInstance
+    // to fail. Fall through to the real single-file DLL scan below instead.
     for (const auto& d : knownPlugins.getTypes())
     {
+        if (d.uniqueId == 0)
+            continue; // stub — needs real scan
         if (d.fileOrIdentifier == pluginPath || d.name == pluginPath
             || d.fileOrIdentifier.containsIgnoreCase (pluginFileName))
         {
@@ -380,8 +680,10 @@ bool HostesaAudioProcessor::findPluginDescription (
         }
     }
 
-    // Not cached - scan single file (disk I/O)
-    LOG_TO_FILE ("  Plugin not in known list, scanning single file...");
+    // Not cached — do a targeted single-file DLL scan to get the real UID.
+    // PluginDirectoryScanner takes a directory, so we give it the parent dir
+    // but skip every file that isn't exactly the one we want.
+    LOG_TO_FILE ("  Plugin not in known list, scanning single file: " << pluginPath.toStdString());
 
     for (int fi = 0; fi < formatManager.getNumFormats(); ++fi)
     {
@@ -391,32 +693,44 @@ bool HostesaAudioProcessor::findPluginDescription (
 
         juce::PluginDirectoryScanner scanner (
             knownPlugins, *format, singlePath,
-            false, // not recursive
+            false, // not recursive — sibling directories are irrelevant
             juce::File()
         );
 
         juce::String name;
-        // SEH + C++ guard: some VST3 factories crash during enumeration
         try
         {
 #ifdef _WIN32
             while (true)
             {
+                // Peek at the next file the scanner would process
+                juce::String nextF = scanner.getNextPluginFileThatWillBeScanned();
+
+                // Skip any sibling that isn't our target — avoids loading their DLLs
+                if (nextF.isNotEmpty() && nextF != pluginPath)
+                {
+                    scanner.skipNextFile();
+                    continue;
+                }
+
                 int r = sehScanOneFile (&scanner, &name);
                 if (r < 0)
-                    LOG_TO_FILE ("  SEH FAULT during plugin scan: " << pluginPath.toStdString());
+                    LOG_TO_FILE ("  SEH FAULT scanning: " << pluginPath.toStdString());
                 if (r <= 0) break;
             }
 #else
-            while (scanner.scanNextFile (true, name))
+            while (true)
             {
-                LOG_TO_FILE ("  Single-file scan: " << name.toStdString());
+                juce::String nextF = scanner.getNextPluginFileThatWillBeScanned();
+                if (nextF.isNotEmpty() && nextF != pluginPath)
+                    { scanner.skipNextFile(); continue; }
+                if (!scanner.scanNextFile (true, name)) break;
             }
 #endif
         }
         catch (...)
         {
-            LOG_TO_FILE ("  EXCEPTION during plugin scan: " << pluginPath.toStdString());
+            LOG_TO_FILE ("  EXCEPTION scanning: " << pluginPath.toStdString());
         }
 
         for (const auto& d : knownPlugins.getTypes())

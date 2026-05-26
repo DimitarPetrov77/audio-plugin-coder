@@ -131,6 +131,57 @@ HostesaAudioProcessorEditor::HostesaAudioProcessorEditor (
                 }
             )
             .withNativeFunction (
+                // Returns [{path, name}] — the list of blacklisted plugins
+                "getScanBlacklist",
+                [this] (const juce::Array<juce::var>&,
+                        juce::WebBrowserComponent::NativeFunctionCompletion completion)
+                {
+                    auto entries = audioProcessor.getScanBlacklist();
+                    juce::Array<juce::var> list;
+                    for (const auto& path : entries)
+                    {
+                        auto* obj = new juce::DynamicObject();
+                        obj->setProperty ("path", path);
+                        obj->setProperty ("name", juce::File (path).getFileNameWithoutExtension());
+                        list.add (juce::var (obj));
+                    }
+                    completion (juce::var (list));
+                }
+            )
+            .withNativeFunction (
+                // args[0] = plugin path string to un-blacklist
+                "removeScanBlacklistEntry",
+                [this] (const juce::Array<juce::var>& args,
+                        juce::WebBrowserComponent::NativeFunctionCompletion completion)
+                {
+                    if (args.size() > 0)
+                        audioProcessor.removeFromScanBlacklist (args[0].toString());
+                    completion (juce::var ("ok"));
+                }
+            )
+            .withNativeFunction (
+                // Returns cached plugin list instantly — no scanning, reads known_plugins.xml.
+                // Call on JS init to populate the browser without triggering a scan.
+                "getCachedPlugins",
+                [this] (const juce::Array<juce::var>&,
+                        juce::WebBrowserComponent::NativeFunctionCompletion completion)
+                {
+                    auto cached = audioProcessor.getCachedPlugins();
+                    juce::Array<juce::var> list;
+                    for (const auto& sp : cached)
+                    {
+                        auto* obj = new juce::DynamicObject();
+                        obj->setProperty ("name",     sp.name);
+                        obj->setProperty ("vendor",   sp.vendor);
+                        obj->setProperty ("category", sp.category);
+                        obj->setProperty ("path",     sp.path);
+                        obj->setProperty ("format",   sp.format);
+                        list.add (juce::var (obj));
+                    }
+                    completion (juce::var (list));
+                }
+            )
+            .withNativeFunction (
                 "saveUiState",
                 [this] (const juce::Array<juce::var>& args,
                         juce::WebBrowserComponent::NativeFunctionCompletion completion)

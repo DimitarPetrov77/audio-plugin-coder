@@ -296,6 +296,7 @@
                     <button class="modal-tab" data-cat="fx">FX</button>
                     <button class="modal-tab" data-cat="sampler">Samplers</button>
                     <button class="modal-tab" data-cat="utility">Utility</button>
+                    <button class="modal-tab" data-cat="vendor">By Vendor</button>
                 </div>
             </div>
             <div class="scan-paths" id="scanPaths">
@@ -306,7 +307,8 @@
             <div class="modal-body" id="modalBody"></div>
             <div class="modal-footer">
                 <span class="modal-footer-info" id="modalInfo">0 plugins found</span>
-                <button class="scan-btn" id="scanToggle">&#9881; Scan Paths</button>
+                <button class="scan-btn" id="scanNowBtn" onclick="doScanPlugins(true)" title="Scan for new plugins">&#8635; Scan</button>
+                <button class="scan-btn" id="scanToggle">&#9881; Paths</button>
             </div>
         </div>
     </div>

@@ -331,6 +331,7 @@ document.addEventListener('keydown', function (e) {
 }, true); // CAPTURE phase — intercept before WebView2 native handlers
 // Plugin browser modal logic
 var modalCat = 'all', modalQuery = '';
+var vendorExpanded = {}; // tracks which vendor sections are open in "By Vendor" view
 var _scanPollId = 0;
 function doScanPlugins(forceRescan) {
     if (!window.__JUCE__ || !window.__JUCE__.backend || scanInProgress) return;
@@ -418,16 +419,30 @@ function renderModalScanningState(pluginName, pct) {
             return parts[parts.length - 1] || parts[parts.length - 2] || p;
         }).join(' \u00B7 ') + '</div></div>';
 }
+function renderModalNoPlugins() {
+    var mInfo = document.getElementById('modalInfo');
+    var mBody = document.getElementById('modalBody');
+    if (mInfo) mInfo.textContent = 'No plugins found';
+    if (mBody) mBody.innerHTML =
+        '<div style="padding:32px;text-align:center;color:var(--text-muted)">' +
+        '<div style="font-size:28px;margin-bottom:12px">🔎</div>' +
+        '<div style="margin-bottom:8px;color:var(--text-primary)">No plugin cache yet</div>' +
+        '<div style="font-size:11px;margin-bottom:20px">Run a scan to discover your installed plugins.</div>' +
+        '<button onclick="doScanPlugins(true)" style="padding:8px 20px;background:var(--accent-base);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px">' +
+        'Scan Now</button></div>';
+}
 function openPluginBrowser() {
     modalCat = 'all'; modalQuery = '';
     document.getElementById('modalSearch').value = '';
     document.getElementById('scanPaths').classList.remove('vis');
     renderModalTabs();
-    // If scanning, show scanning state; else render list (auto-scan if empty)
+    // If scanning, show scanning state; else render list.
+    // No longer auto-scan on empty — cache is loaded at startup.
+    // If cache is genuinely empty, show a prompt so user can trigger manually.
     if (scanInProgress) {
         renderModalScanningState();
     } else if (scannedPlugins.length === 0) {
-        doScanPlugins();
+        renderModalNoPlugins();
     } else {
         renderModalList();
     }
@@ -448,32 +463,87 @@ function renderModalTabs() {
         t.className = 'modal-tab' + (t.dataset.cat === modalCat ? ' on' : '');
     });
 }
+function buildPlugRow(p) {
+    var catLabels = { synth: 'Instrument', fx: 'Effect', sampler: 'Sampler', utility: 'Utility' };
+    var initials = p.name.split(' ').map(function (w) { return w[0]; }).join('').substring(0, 2).toUpperCase();
+    var vendorLine = (p.vendor || '') + (p.fmt && p.fmt !== 'VST3' ? (p.vendor ? ' \u00B7 ' : '') + p.fmt : '');
+    var ppath = (p.path || p.name).replace(/"/g, '&quot;');
+    return '<div class="plug-row" data-ppath="' + ppath + '">'
+        + '<div class="plug-icon">' + initials + '</div>'
+        + '<div class="plug-info"><div class="plug-name">' + escHtml(p.name) + '</div>'
+        + '<div class="plug-meta">' + escHtml(vendorLine) + '</div></div>'
+        + '<span class="plug-type ' + (p.cat || 'fx') + '">' + (catLabels[p.cat] || p.cat) + '</span>'
+        + '</div>';
+}
 function renderModalList() {
     var body = document.getElementById('modalBody');
-    // If still scanning, show scanning state
     if (scanInProgress) { renderModalScanningState(); return; }
     var q = modalQuery.toLowerCase();
+
+    // In vendor mode we filter by search query only (no cat filter)
+    var isVendor = (modalCat === 'vendor');
     var filtered = scannedPlugins.filter(function (p) {
-        if (modalCat !== 'all' && p.cat !== modalCat) return false;
-        if (q && p.name.toLowerCase().indexOf(q) === -1 && p.vendor.toLowerCase().indexOf(q) === -1) return false;
+        if (!isVendor && modalCat !== 'all' && p.cat !== modalCat) return false;
+        if (q && p.name.toLowerCase().indexOf(q) === -1 && (p.vendor || '').toLowerCase().indexOf(q) === -1) return false;
         return true;
     });
+
     document.getElementById('modalInfo').textContent = filtered.length + ' plugin' + (filtered.length !== 1 ? 's' : '') + ' found';
     if (filtered.length === 0) { body.innerHTML = '<div class="no-results">No plugins found. Click \u2699 Scan Paths to configure.</div>'; return; }
-    var catLabels = { synth: 'Instrument', fx: 'Effect', sampler: 'Sampler', utility: 'Utility' };
-    var h = '';
-    filtered.forEach(function (p) {
-        var initials = p.name.split(' ').map(function (w) { return w[0]; }).join('').substring(0, 2);
-        var vendorLine = (p.vendor || '') + (p.fmt && p.fmt !== 'VST3' ? (p.vendor ? ' \u00B7 ' : '') + p.fmt : '');
-        h += '<div class="plug-row" data-ppath="' + (p.path || p.name).replace(/"/g, '&quot;') + '">';
-        h += '<div class="plug-icon">' + initials + '</div>';
-        h += '<div class="plug-info"><div class="plug-name">' + p.name + '</div><div class="plug-meta">' + vendorLine + '</div></div>';
-        h += '<span class="plug-type ' + p.cat + '">' + (catLabels[p.cat] || p.cat) + '</span>';
-        h += '</div>';
-    });
-    body.innerHTML = h;
+
+    if (isVendor) {
+        // Group by vendor, sort vendors alphabetically
+        var groups = {};
+        filtered.forEach(function (p) {
+            var v = p.vendor && p.vendor.trim() ? p.vendor.trim() : '(Unknown Vendor)';
+            if (!groups[v]) groups[v] = [];
+            groups[v].push(p);
+        });
+        var sortedVendors = Object.keys(groups).sort(function (a, b) {
+            if (a === '(Unknown Vendor)') return 1;
+            if (b === '(Unknown Vendor)') return -1;
+            return a.toLowerCase().localeCompare(b.toLowerCase());
+        });
+        var h = '';
+        sortedVendors.forEach(function (vendor) {
+            var plugins = groups[vendor];
+            // Collapsed by default; auto-expand when searching
+            var isOpen = q ? true : (vendorExpanded[vendor] === true);
+            var chevron = isOpen ? '&#9660;' : '&#9654;';
+            var safeVendor = escHtml(vendor);
+            h += '<div class="vendor-section" data-vendor="' + safeVendor + '">';
+            h += '<div class="vendor-header" data-vendor="' + safeVendor + '">'
+                + '<span class="vendor-chevron">' + chevron + '</span>'
+                + '<span class="vendor-name">' + safeVendor + '</span>'
+                + '<span class="vendor-count">' + plugins.length + '</span>'
+                + '</div>';
+            h += '<div class="vendor-plugins" style="display:' + (isOpen ? 'block' : 'none') + '">';
+            plugins.forEach(function (p) { h += buildPlugRow(p); });
+            h += '</div>';
+            h += '</div>';
+        });
+        body.innerHTML = h;
+
+        // Vendor header toggle — only affects manual state, not search-driven open
+        body.querySelectorAll('.vendor-header').forEach(function (hdr) {
+            hdr.onclick = function () {
+                var vendor = hdr.dataset.vendor;
+                // Toggle: if currently open → close, if closed → open
+                var currentlyOpen = q ? true : (vendorExpanded[vendor] === true);
+                vendorExpanded[vendor] = !currentlyOpen;
+                renderModalList();
+            };
+        });
+    } else {
+        var h = '';
+        filtered.forEach(function (p) { h += buildPlugRow(p); });
+        body.innerHTML = h;
+    }
+
+    // Wire click on plugin rows to add plugin
     body.querySelectorAll('.plug-row').forEach(function (row) {
-        row.onclick = function () {
+        row.onclick = function (e) {
+            e.stopPropagation(); // don't bubble to vendor header
             addPlugin(row.dataset.ppath);
             closePluginBrowser();
         };
