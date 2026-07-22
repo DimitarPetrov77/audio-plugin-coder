@@ -569,6 +569,21 @@ function setupRtDataListener() {
                                                 // curve 1 = linear, no change
                                             }
                                         }
+                                        // Drift parameters (mirror C++ ProcessBlock.cpp) — per-snapshot
+                                        // drift/range/scale, tied to loop length, faded near hold zones.
+                                        var _dNorm = (snapB.drift || 0) / 50.0;
+                                        var _dAmt = Math.abs(_dNorm);
+                                        var _dRange = (snapB.driftRange != null ? snapB.driftRange : 5) / 100.0;
+                                        var _driftActive = (_dAmt > 0.001 && _dRange > 0.001);
+                                        var _dFreq = 0, _dSharp = 0, _dGain = 0;
+                                        if (_driftActive) {
+                                            var _dBase = _dNorm > 0 ? (1 + _dAmt * 2) : (4 + _dAmt * 10);
+                                            var _dsBeats = laneBeatsPerDiv(snapB.driftScale || lane.driftScale || '1/1');
+                                            var _dPhaseScale = 4.0 / Math.max(0.25, _dsBeats);
+                                            _dSharp = Math.max(0, (_dAmt - 0.7) / 0.3);
+                                            _dFreq = _dBase * (1 + _dSharp * 2) * _dPhaseScale;
+                                            _dGain = 0.15 + 0.85 * Math.sin(blend * Math.PI);
+                                        }
                                         // Only interpolate VISIBLE pids — the rest are handled by C++ audio thread.
                                         // laneModOutputs is only read by getModArcInfo() for visible params.
                                         var _anyChanged = false;
@@ -597,6 +612,22 @@ function setupRtDataListener() {
                                                     var sSteps = snapB.steps || 0;
                                                     if (sSteps >= 2) {
                                                         morphed = Math.round(morphed * (sSteps - 1)) / (sSteps - 1);
+                                                    }
+                                                    // Per-param drift (mirrors C++): unique organic wiggle,
+                                                    // faded near hold so the arc matches the automated value.
+                                                    if (_driftActive) {
+                                                        var _pp = PMap[pid];
+                                                        if (_pp && _pp.hostId !== undefined) {
+                                                            var _seed = laneHashI((_pp.hostId | 0) * 1000 + (_pp.realIndex | 0)) * 100.0;
+                                                            var _q1 = pos * _dFreq + _seed;
+                                                            var _q2 = pos * _dFreq * 2.37 + 7.13 + _seed;
+                                                            var _nz = laneSmoothNoise(_q1) * 0.7 + laneSmoothNoise(_q2) * 0.3;
+                                                            if (_dSharp > 0.01) {
+                                                                var _q3 = pos * _dFreq * 5.19 + 13.7 + _seed;
+                                                                _nz = _nz * (1 - _dSharp * 0.3) + laneSmoothNoise(_q3) * _dSharp * 0.3;
+                                                            }
+                                                            morphed = morphed + _nz * _dRange * _dGain;
+                                                        }
                                                     }
                                                     lnb.laneModOutputs[pid] = Math.max(0, Math.min(1, morphed));
                                                     _anyChanged = true;

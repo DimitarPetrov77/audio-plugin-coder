@@ -122,6 +122,37 @@ function laneLoopBeats(lane) {
     return BEAT_MAP[lane.loopLen] || 4;
 }
 
+// ── Drift replication (mirrors C++ ProcessBlock.cpp exactly) ──
+// Used by realtime.js so the morph visualization matches the audio thread's drift.
+// Beats-per-division for Drift Scale strings (matches parseBeatsPerDiv in C++).
+var LANE_DRIFT_BEATS = {
+    '1/16': 0.25, '1/8': 0.5, '1/4': 1, '1/2': 2,
+    '1/1': 4, '2/1': 8, '4/1': 16, '8/1': 32, '16/1': 64, '32/1': 128
+};
+function laneBeatsPerDiv(div) {
+    var b = LANE_DRIFT_BEATS[div];
+    return (b != null) ? b : 4;
+}
+// Integer hash → deterministic float -1..+1. uint32 math via Math.imul to match C++.
+function laneHashI(n) {
+    var h = n >>> 0;
+    h ^= h >>> 16; h = Math.imul(h, 0x45d9f3b);
+    h ^= h >>> 16; h = Math.imul(h, 0x45d9f3b);
+    h ^= h >>> 16;
+    return ((h & 0xFFFF) / 32768.0) - 1.0;
+}
+// Hermite-interpolated value noise (matches C++ smoothNoise).
+function laneSmoothNoise(phase) {
+    var i0 = Math.floor(phase);
+    var frac = phase - i0;
+    var v0 = laneHashI(i0 - 1), v1 = laneHashI(i0);
+    var v2 = laneHashI(i0 + 1), v3 = laneHashI(i0 + 2);
+    var a = -0.5 * v0 + 1.5 * v1 - 1.5 * v2 + 0.5 * v3;
+    var b = v0 - 2.5 * v1 + 2.0 * v2 - 0.5 * v3;
+    var c = -0.5 * v0 + 0.5 * v2;
+    return ((a * frac + b) * frac + c) * frac + v1;
+}
+
 // Scale overlay points for different loop lengths (tile or crop)
 // ratio = laneLoopBeats(currentLane) / laneLoopBeats(overlayLane)
 //   ratio > 1 => overlay is shorter, tile it

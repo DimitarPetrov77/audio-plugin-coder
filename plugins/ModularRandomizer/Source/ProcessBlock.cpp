@@ -1721,7 +1721,10 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                     float baseFreq = (snapDriftNorm > 0.0f)
                                         ? (1.0f + driftAmt * 2.0f)
                                         : (4.0f + driftAmt * 10.0f);
-                                    float phaseScale = lc.loopLenBeats / std::max(0.25f, snapB.driftScaleBeats);
+                                    // Drift now scales with the lane loop length: cycles are measured
+                                    // against a 1-bar (4-beat) reference — Drift Scale sets detail
+                                    // *within* the loop — so a longer loop drifts proportionally slower.
+                                    float phaseScale = 4.0f / std::max(0.25f, snapB.driftScaleBeats);
                                     float sharpness = std::max(0.0f, (driftAmt - 0.7f) / 0.3f);
                                     float freq = baseFreq * (1.0f + sharpness * 2.0f) * phaseScale;
 
@@ -1737,7 +1740,11 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                         noise = noise * (1.0f - sharpness * 0.3f) + smoothNoise(p3) * sharpness * 0.3f;
                                     }
 
-                                    morphed = juce::jlimit(0.0f, 1.0f, morphed + noise * driftRangeNorm);
+                                    // Fade drift toward the hold zones so held snapshots settle.
+                                    // blend is exactly 0/1 inside a hold zone → gain floors at 0.15
+                                    // (settled but a little organic life); peaks mid-transition.
+                                    float driftGain = 0.15f + 0.85f * std::sin (blend * juce::MathConstants<float>::pi);
+                                    morphed = juce::jlimit(0.0f, 1.0f, morphed + noise * driftRangeNorm * driftGain);
                                 }
 
                                 writeModBase(pA.pluginId, pA.paramIndex, morphed);
@@ -1868,8 +1875,10 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                 ? (1.0f + driftAmt * 2.0f)   // slow: 1-3 cycles per scale period
                                 : (4.0f + driftAmt * 10.0f); // jitter: 4-14 cycles per scale period
 
-                            // Phase scaling: drift operates on driftScale time, not loop time
-                            float phaseScale = lc.loopLenBeats / std::max(0.25f, lc.driftScaleBeats);
+                            // Drift scales with the lane loop length: cycles measured against a
+                            // 1-bar (4-beat) reference — Drift Scale sets detail *within* the loop —
+                            // so a longer loop drifts proportionally slower.
+                            float phaseScale = 4.0f / std::max(0.25f, lc.driftScaleBeats);
 
                             // Above 70%: boost frequency for sharper character (up to 3x)
                             float sharpness = std::max(0.0f, (driftAmt - 0.7f) / 0.3f);
