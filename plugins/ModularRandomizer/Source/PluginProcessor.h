@@ -423,6 +423,12 @@ public:
     /** WrongEQ: receive EQ curve data from JS */
     void setEqCurve (const juce::String& jsonData);
 
+    /** WrongEQ: receive the editor's own internal LFO/drift/Q-mod OFFSETS so they
+        drive the audio (previously the internal EQ modulation was visual-only).
+        Payload: JSON array indexed by point — [{f:HzOffset, g:dBOffset, q:offset}, ...].
+        Points beyond the array (or all-zero) have their UI modulation cleared. */
+    void setEqUiMod (const juce::String& jsonData);
+
     /** WrongEQ fast path: update a single field on one EQ point (no JSON, no alloc).
         field: "freq", "gain", "q", "solo", "mute", "type", "slope", "drift", "stereo" */
     void setEqPointFast (int pointIndex, const juce::String& field, double value);
@@ -665,19 +671,36 @@ private:
     static constexpr int maxEqChannels = 2;
 
     struct SVFEqFilter {
+        // TPT State Variable Filter (Cytomic / Andrew Simper topology).
+        //
+        // Every filter type is realised with ONE unified output mix:
+        //     out = m0*in + m1*bp + m2*lp
+        // where (bp, lp) come from the standard TPT recursion. Only the
+        // prewarped g, the damping k, and the mix (m0,m1,m2) differ per type.
+        // This is exactly the canonical Cytomic form, so the analytic transfer
+        // function (mirrored in the JS curve renderer) matches the audio to the dB.
+        //
+        //   Bell      : g=tan(w), k=1/(Q*A),     m=(1,       k*(A^2-1),   0      )   // proportional-Q
+        //   Low-pass  : g=tan(w), k=1/Q,         m=(0,       0,           1      )
+        //   High-pass : g=tan(w), k=1/Q,         m=(1,      -k,          -1      )
+        //   Notch     : g=tan(w), k=1/Q,         m=(1,      -k,           0      )
+        //   Low shelf : g=tan(w)/sqrt(A), k=1/Q, m=(1,       k*(A-1),     A^2-1  )
+        //   High shelf: g=tan(w)*sqrt(A), k=1/Q, m=(A^2,     k*(1-A)*A,   1-A^2  )
+        //   Band-pass : g=tan(w), k=1/Q,         m=(0,       k,           0      )   // unity-peak (Solo)
+        //
         float ic1eq = 0.0f, ic2eq = 0.0f; // integrator states
 
         // Current interpolated coefficients (advanced per sample via deltas)
-        float g = 0.0f, k = 1.0f, a1c = 1.0f, a2c = 0.0f, a3c = 0.0f;
-        float A = 1.0f;
-        int   cachedType = 0;
+        float k = 1.0f, a1c = 1.0f, a2c = 0.0f, a3c = 0.0f;
+        float m0 = 1.0f, m1 = 0.0f, m2 = 0.0f;
 
         // Target coefficients (computed once per buffer from target params)
-        float tgt_g = 0.0f, tgt_k = 1.0f, tgt_a1c = 1.0f, tgt_a2c = 0.0f, tgt_a3c = 0.0f;
-        float tgt_A = 1.0f;
+        float tgt_k = 1.0f, tgt_a1c = 1.0f, tgt_a2c = 0.0f, tgt_a3c = 0.0f;
+        float tgt_m0 = 1.0f, tgt_m1 = 0.0f, tgt_m2 = 0.0f;
 
         // Per-sample deltas for linear interpolation
-        float dg = 0.0f, dk = 0.0f, da1c = 0.0f, da2c = 0.0f, da3c = 0.0f, dA = 0.0f;
+        float dk = 0.0f, da1c = 0.0f, da2c = 0.0f, da3c = 0.0f;
+        float dm0 = 0.0f, dm1 = 0.0f, dm2 = 0.0f;
 
         bool paramsSet = false; // false until first setTarget call
 
@@ -685,51 +708,70 @@ private:
         // Does NOT update current coefficients — those advance per-sample via step().
         inline void setTarget (float freqHz, float gainDB, float Q, int filterType, float sampleRate, int nSamples)
         {
-            cachedType = filterType;
-            tgt_g = std::tan (juce::MathConstants<float>::pi * freqHz / sampleRate);
-            tgt_A = std::pow (10.0f, gainDB / 40.0f);
-            tgt_k = 1.0f / Q; // constant-Q for all types
-            tgt_a1c = 1.0f / (1.0f + tgt_g * (tgt_g + tgt_k));
-            tgt_a2c = tgt_g * tgt_a1c;
-            tgt_a3c = tgt_g * tgt_a2c;
+            const float A  = std::pow (10.0f, gainDB / 40.0f);
+            const float gt = std::tan (juce::MathConstants<float>::pi * freqHz / sampleRate);
+            float g, kk, mm0, mm1, mm2;
+
+            switch (filterType)
+            {
+                case 1:  g = gt;                    kk = 1.0f / Q;       mm0 = 0.0f;   mm1 = 0.0f;               mm2 = 1.0f;               break; // Low-pass
+                case 2:  g = gt;                    kk = 1.0f / Q;       mm0 = 1.0f;   mm1 = -kk;                mm2 = -1.0f;              break; // High-pass
+                case 3:  g = gt;                    kk = 1.0f / Q;       mm0 = 1.0f;   mm1 = -kk;                mm2 = 0.0f;               break; // Notch
+                case 4:  g = gt / std::sqrt (A);    kk = 1.0f / Q;       mm0 = 1.0f;   mm1 = kk * (A - 1.0f);    mm2 = (A * A - 1.0f);     break; // Low shelf
+                case 5:  g = gt * std::sqrt (A);    kk = 1.0f / Q;       mm0 = A * A;  mm1 = kk * (1.0f - A) * A; mm2 = (1.0f - A * A);    break; // High shelf
+                case 6:  g = gt;                    kk = 1.0f / Q;       mm0 = 0.0f;   mm1 = kk;                 mm2 = 0.0f;               break; // Band-pass (Solo listen)
+                case 0:  // Bell
+                default: g = gt;                    kk = 1.0f / (Q * A); mm0 = 1.0f;   mm1 = kk * (A * A - 1.0f); mm2 = 0.0f;             break;
+            }
+
+            tgt_k   = kk;
+            tgt_a1c = 1.0f / (1.0f + g * (g + kk));
+            tgt_a2c = g * tgt_a1c;
+            tgt_a3c = g * tgt_a2c;
+            tgt_m0  = mm0;
+            tgt_m1  = mm1;
+            tgt_m2  = mm2;
 
             if (! paramsSet)
             {
                 // First call: snap current to target (no interpolation)
-                g = tgt_g; k = tgt_k; a1c = tgt_a1c; a2c = tgt_a2c; a3c = tgt_a3c; A = tgt_A;
-                dg = dk = da1c = da2c = da3c = dA = 0.0f;
+                k = tgt_k; a1c = tgt_a1c; a2c = tgt_a2c; a3c = tgt_a3c;
+                m0 = tgt_m0; m1 = tgt_m1; m2 = tgt_m2;
+                dk = da1c = da2c = da3c = dm0 = dm1 = dm2 = 0.0f;
                 paramsSet = true;
             }
             else
             {
-                // Compute per-sample deltas for linear interpolation
+                // Compute per-sample deltas for linear interpolation → zipper-free
                 float inv = 1.0f / (float) juce::jmax (1, nSamples);
-                dg   = (tgt_g   - g)   * inv;
                 dk   = (tgt_k   - k)   * inv;
                 da1c = (tgt_a1c - a1c) * inv;
                 da2c = (tgt_a2c - a2c) * inv;
                 da3c = (tgt_a3c - a3c) * inv;
-                dA   = (tgt_A   - A)   * inv;
+                dm0  = (tgt_m0  - m0)  * inv;
+                dm1  = (tgt_m1  - m1)  * inv;
+                dm2  = (tgt_m2  - m2)  * inv;
             }
         }
 
         // Advance coefficients by one sample (linear interpolation step)
         inline void step()
         {
-            g   += dg;
             k   += dk;
             a1c += da1c;
             a2c += da2c;
             a3c += da3c;
-            A   += dA;
+            m0  += dm0;
+            m1  += dm1;
+            m2  += dm2;
         }
 
         // Process one sample using current (interpolated) coefficients. No transcendentals.
         inline float tick (float in)
         {
             float v3 = in - ic2eq;
-            float v1 = a1c * ic1eq + a2c * v3;
-            float v2 = ic2eq + a2c * ic1eq + a3c * v3;
+            float v1 = a1c * ic1eq + a2c * v3;   // bandpass
+            float v2 = ic2eq + a2c * ic1eq + a3c * v3; // lowpass
             ic1eq = 2.0f * v1 - ic1eq;
             ic2eq = 2.0f * v2 - ic2eq;
 
@@ -744,29 +786,14 @@ private:
                 return in;
             }
 
-            float lp = v2;
-            float bp = v1;
-            float hp = in - k * bp - lp;
-            float invA = (A > 0.001f) ? (1.0f / A) : 0.0f;
-            float gainMix = A - invA; // constant-Q bell: (A - 1/A)
-
-            switch (cachedType)
-            {
-                case 0:  return in + gainMix * k * bp;        // Bell (constant-Q)
-                case 1:  return lp;                            // Low-pass
-                case 2:  return hp;                            // High-pass
-                case 3:  return lp + hp;                       // Notch
-                case 4:  return in + gainMix * lp;             // Low shelf
-                case 5:  return in + gainMix * hp;             // High shelf
-                case 6:  return k * bp;                        // Band-pass (Solo)
-                default: return in + gainMix * k * bp;
-            }
+            return m0 * in + m1 * v1 + m2 * v2;
         }
 
         // Snap current coefficients to target (call at end of buffer to prevent drift)
         inline void snapToTarget()
         {
-            g = tgt_g; k = tgt_k; a1c = tgt_a1c; a2c = tgt_a2c; a3c = tgt_a3c; A = tgt_A;
+            k = tgt_k; a1c = tgt_a1c; a2c = tgt_a2c; a3c = tgt_a3c;
+            m0 = tgt_m0; m1 = tgt_m1; m2 = tgt_m2;
         }
 
         void reset() { ic1eq = ic2eq = 0.0f; paramsSet = false; }
@@ -802,10 +829,31 @@ private:
         // Modulation offsets (additive, from setEqParam / proxy params).
         // Applied ON TOP of base values during audio processing.
         // This separates JS drift (which writes base values) from C++ modulation.
+        // These are reset to zero at the top of each block and re-applied by the
+        // audio-thread meta-modulation pass (external logic blocks).
         std::atomic<float> modFreqHz { 0.0f };  // offset in Hz (added to freqHz)
         std::atomic<float> modGainDB { 0.0f };  // offset in dB (added to gainDB)
         std::atomic<float> modQ      { 0.0f };  // offset (added to q)
         std::atomic<bool>  modActive { false };  // true = modulation is applied
+
+        // UI-modulation offsets — written by the editor (message thread) from the EQ's
+        // OWN internal LFO/drift/Q-mod engine. Unlike modFreqHz above, these are NOT
+        // reset per block; they persist until the editor updates them, so audio-rate
+        // reads pick up the latest value and the per-sample SVF interpolation smooths
+        // between the ~60 Hz editor updates. Zero when the internal modulation is off →
+        // the audio path is byte-identical to before for un-modulated sessions.
+        std::atomic<float> uiModFreqHz { 0.0f };
+        std::atomic<float> uiModGainDB { 0.0f };
+        std::atomic<float> uiModQ      { 0.0f };
+        std::atomic<bool>  uiModActive { false };
+
+        // Display snapshot — the ACTUAL modulated point position the audio is using this
+        // block (base + external modulation + internal LFO), written once per block after
+        // all modulation is resolved. The editor reads this to glide the on-screen point
+        // in lock-step with the audio, without ever mutating the saved base values.
+        std::atomic<float> dispFreqHz { 1000.0f };
+        std::atomic<float> dispGainDB { 0.0f };
+        std::atomic<float> dispQ      { 0.707f };
     };
     EqPointData eqPoints[maxEqBands];
     std::atomic<int> numEqPoints { 0 };
@@ -861,7 +909,8 @@ private:
 public:
     // ── WrongEQ readback for editor timer ──
     struct WeqReadbackPoint {
-        float freqHz, gainDB, q, driftPct;
+        float freqHz, gainDB, q, driftPct;      // base (logical) values
+        float dispFreqHz, dispGainDB, dispQ;    // modulated display position (base + mod)
     };
     int getWeqReadback (WeqReadbackPoint* out, int maxPts) const
     {
@@ -870,10 +919,13 @@ public:
         if (n > maxEqBands) n = maxEqBands;
         for (int i = 0; i < n; ++i)
         {
-            out[i].freqHz   = eqPoints[i].freqHz.load (std::memory_order_relaxed);
-            out[i].gainDB   = eqPoints[i].gainDB.load (std::memory_order_relaxed);
-            out[i].q        = eqPoints[i].q.load (std::memory_order_relaxed);
-            out[i].driftPct = eqPoints[i].driftPct.load (std::memory_order_relaxed);
+            out[i].freqHz     = eqPoints[i].freqHz.load (std::memory_order_relaxed);
+            out[i].gainDB     = eqPoints[i].gainDB.load (std::memory_order_relaxed);
+            out[i].q          = eqPoints[i].q.load (std::memory_order_relaxed);
+            out[i].driftPct   = eqPoints[i].driftPct.load (std::memory_order_relaxed);
+            out[i].dispFreqHz = eqPoints[i].dispFreqHz.load (std::memory_order_relaxed);
+            out[i].dispGainDB = eqPoints[i].dispGainDB.load (std::memory_order_relaxed);
+            out[i].dispQ      = eqPoints[i].dispQ.load (std::memory_order_relaxed);
         }
         return n;
     }
@@ -1165,6 +1217,7 @@ private:
         float lfoDepth = 0.8f;
         float lfoRotation = 0.0f;
         float morphSpeed = 0.5f;
+        float morphHz = 0.5f;     // free rate in Hz (unified Hz|Sync)
         juce::String morphAction;
         MorphAction morphActionE = MorphAction::Jump;
         juce::String stepOrder;
@@ -1199,6 +1252,7 @@ private:
         float shapeSize = 0.8f;
         float shapeSpin = 0.0f;
         float shapeSpeed = 0.5f;
+        float shapeHz = 0.5f;     // free rate in Hz (unified Hz|Sync)
         float shapePhaseOffset = 0.0f;  // User phase offset (0..1 = 0..360°)
         float shapeDepth = 0.5f;
         juce::String shapeRange;

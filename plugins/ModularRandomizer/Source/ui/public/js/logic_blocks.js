@@ -54,7 +54,7 @@ function buildShapeOptions(field, b) {
     h += '</optgroup><optgroup label="Special">';
     h += '<option value="cat"' + sel('cat') + '>Cat</option>';
     h += '<option value="butterfly"' + sel('butterfly') + '>Butterfly</option>';
-    h += '<option value="infinityKnot"' + sel('infinityKnot') + '>Infinity Knot</option>';
+    h += '<option value="infinityKnot"' + sel('infinityKnot') + '>Trefoil</option>';
     h += '</optgroup>';
     return h;
 }
@@ -113,6 +113,13 @@ function renderBeatDivSelect(blockId, field, currentVal, divList) {
     h += '</select>';
     return h;
 }
+// ── Hz rate input (unified Hz|Sync free mode) ──
+// A precise numeric frequency field. Class 'hz-input' gives it a float-aware handler
+// (the generic .sub-input handler is integer-only and would truncate a Hz value).
+function renderHzInput(blockId, field, val) {
+    var v = (val != null) ? val : 0.5;
+    return '<input class="sub-input hz-input" type="number" step="0.01" min="0.01" max="20" value="' + v + '" data-b="' + blockId + '" data-f="' + field + '" title="Rate in Hz" style="width:54px"><span class="sub-lbl" style="min-width:auto;margin-left:2px">Hz</span>';
+}
 // Convert morphSpeed (0-100) to display string
 function morphSpeedDisplay(sp) {
     return Math.round(sp) + '%';
@@ -122,8 +129,8 @@ function addBlock(mode) {
     if (!mode) mode = 'randomize'; var id = ++bc;
     var blk = {
         id: id, mode: mode, enabled: true, targets: new Set(), targetBases: {}, targetRanges: {}, targetRangeBases: {}, colorIdx: bc - 1, trigger: 'manual', beatDiv: '1/4', midiMode: 'any_note', midiNote: 60, midiCC: 1, midiCh: 0, velScale: false, threshold: -12, audioSrc: 'main', rMin: 0, rMax: 100, rangeMode: 'relative', polarity: 'bipolar', quantize: false, qSteps: 12, movement: 'instant', glideMs: 200, envAtk: 10, envRel: 100, envSens: 50, envInvert: false, envFilterMode: 'flat', envFilterFreq: 50, envFilterBW: 5, loopMode: 'loop', sampleSpeed: 1.0, sampleReverse: false, jumpMode: 'restart', sampleName: '', sampleWaveform: null, expanded: true, clockSource: 'daw',
-        snapshots: [], playheadX: 0.5, playheadY: 0.5, morphMode: 'manual', exploreMode: 'wander', lfoShape: 'circle', lfoDepth: 80, lfoRotation: 0, morphSpeed: 50, morphAction: 'jump', stepOrder: 'cycle', morphSource: 'midi', jitter: 0, morphGlide: 200, morphTempoSync: false, morphSyncDiv: '1/4', snapRadius: 100,
-        shapeType: 'circle', shapeTracking: 'horizontal', shapeSize: 80, shapeSpin: 0, shapeSpeed: 50, shapePhaseOffset: 0, shapeRange: 'relative', shapePolarity: 'bipolar', shapeTempoSync: false, shapeSyncDiv: '1/4', shapeTrigger: 'free',
+        snapshots: [], playheadX: 0.5, playheadY: 0.5, morphMode: 'manual', exploreMode: 'wander', lfoShape: 'circle', lfoDepth: 80, lfoRotation: 0, morphSpeed: 50, morphHz: 0.5, morphAction: 'jump', stepOrder: 'cycle', morphSource: 'midi', jitter: 0, morphGlide: 200, morphTempoSync: false, morphSyncDiv: '1/4', snapRadius: 100,
+        shapeType: 'circle', shapeTracking: 'horizontal', shapeSize: 80, shapeSpin: 0, shapeSpeed: 50, shapeHz: 0.5, shapePhaseOffset: 0, shapeRange: 'relative', shapePolarity: 'bipolar', shapeTempoSync: false, shapeSyncDiv: '1/4', shapeTrigger: 'free',
         laneTool: 'draw', laneGrid: '1/8', lanes: [],
         linkSources: [], linkMin: {}, linkMax: {}, linkBases: {}, linkSmoothMs: 0
     };
@@ -764,6 +771,20 @@ function renderSampleBody(b) {
 
     return h;
 }
+// Per-shape fit normalization: 1 / (natural peak radius). Scales each shape so its
+// peak radius is exactly R, i.e. at max Size it perfectly touches the circle.
+// Keep in lockstep with kShapeNorm in ProcessBlock.cpp (visual must equal audio).
+var WEQ_SHAPE_NORM = {
+    circle: 1, sweepX: 1, sweepY: 1,
+    triangle: 1, square: 1, hexagon: 1,   // inscribed polygons: vertices already touch R
+    pentagram: 1, hexagram: 1,            // star outlines: outer points at R
+    rose4: 1, spiral: 1,
+    figure8: 0.800000,
+    lissajous: 1.059776,
+    butterfly: 1.172923,
+    infinityKnot: 1.428571,
+    cat: 0.854701
+};
 // Shared shape computation — matches C++ computeShapeXY exactly
 // Returns {dx, dy} offsets from center for a given shape, phase t, and radius R
 function computeShapeDxDy(shape, t, R) {
@@ -798,16 +819,23 @@ function computeShapeDxDy(shape, t, R) {
         dx = R * (Math.cos(a0) + segT * (Math.cos(a1) - Math.cos(a0)));
         dy = R * (Math.sin(a0) + segT * (Math.sin(a1) - Math.sin(a0)));
     } else if (shape === 'hexagram') {
-        // Star of David: trace two interlocked triangles (0,2,4,1,3,5)
-        var starOrder = [0, 2, 4, 1, 3, 5];
-        var segF = t * 6 / twoPi;
-        var seg = Math.floor(segF) % 6;
+        // Star of David — the OUTLINE of a hexagram: 12 vertices alternating between
+        // the 6 outer points (radius R) and the 6 inner hexagon corners (R/√3).
+        // The previous version walked {0,2,4,1,3,5} with uneven steps, which drew an
+        // asymmetric scribble rather than a six-pointed star.
+        var HEX_INNER = 0.5773502692; // 1/√3
+        var segF = t * 12 / twoPi;
+        var seg = Math.floor(segF) % 12;
         var segT = segF - Math.floor(segF);
-        var fromIdx = starOrder[seg], toIdx = starOrder[(seg + 1) % 6];
-        var aFrom = twoPi * fromIdx / 6 - halfPi;
-        var aTo = twoPi * toIdx / 6 - halfPi;
-        dx = R * (Math.cos(aFrom) + segT * (Math.cos(aTo) - Math.cos(aFrom)));
-        dy = R * (Math.sin(aFrom) + segT * (Math.sin(aTo) - Math.sin(aFrom)));
+        var hv = function (i) {
+            var idx = ((i % 12) + 12) % 12;
+            var rad = (idx % 2 === 0) ? 1.0 : HEX_INNER;
+            var ang = twoPi * idx / 12 - halfPi;
+            return [rad * Math.cos(ang), rad * Math.sin(ang)];
+        };
+        var hA = hv(seg), hB = hv(seg + 1);
+        dx = R * (hA[0] + segT * (hB[0] - hA[0]));
+        dy = R * (hA[1] + segT * (hB[1] - hA[1]));
     } else if (shape === 'rose4') {
         var r = R * Math.cos(2 * t);
         dx = r * Math.cos(t); dy = r * Math.sin(t);
@@ -820,47 +848,33 @@ function computeShapeDxDy(shape, t, R) {
         var sA = t * 3;
         dx = sR * Math.cos(sA); dy = sR * Math.sin(sA);
     } else if (shape === 'cat') {
-        // Cat face: polar contour with ears, eyes, nose, mouth
-        var bodyR = R * 0.52;
+        // Cat head SILHOUETTE: round head + two pointed ears + a slight chin tuck.
+        // (The old version also added tiny radial bumps for "eyes/nose/mouth" — interior
+        // features can't exist on a closed outline, so they only made it look lumpy.)
         var pi = Math.PI;
         var angDist = function (a, b) {
             var d = Math.abs(a - b);
             return d > pi ? twoPi - d : d;
         };
-        var bump = 0;
-        var dE;
-        // -- Ears: sharp triangular bumps at ~55deg and ~125deg --
-        var earR = R * 0.42, earW = 0.32, earTipW = 0.09;
-        dE = angDist(t, pi * 0.31); // right ear ~56deg
+        var bump = 0, dE;
+        var earW = 0.30;
+        // Ears at ~56° and ~124° (upper left/right) — quadratic flank + sharp tip
+        dE = angDist(t, pi * 0.31);
         if (dE < earW) {
-            var x = 1 - dE / earW;
-            bump += earR * x * x;
-            if (dE < earTipW) bump += R * 0.18 * (1 - dE / earTipW);
+            var xr = 1 - dE / earW;
+            bump += 0.38 * xr * xr;
+            if (dE < 0.085) bump += 0.17 * (1 - dE / 0.085);
         }
-        dE = angDist(t, pi * 0.69); // left ear ~124deg
+        dE = angDist(t, pi * 0.69);
         if (dE < earW) {
-            var x = 1 - dE / earW;
-            bump += earR * x * x;
-            if (dE < earTipW) bump += R * 0.18 * (1 - dE / earTipW);
+            var xl = 1 - dE / earW;
+            bump += 0.38 * xl * xl;
+            if (dE < 0.085) bump += 0.17 * (1 - dE / 0.085);
         }
-        // -- Eyes: small outward bumps at ~320deg and ~220deg --
-        var eyeR = R * 0.08, eyeW = 0.18;
-        dE = angDist(t, pi * 1.78); // right eye ~320deg
-        if (dE < eyeW) bump += eyeR * Math.pow(1 - dE / eyeW, 2);
-        dE = angDist(t, pi * 1.22); // left eye ~220deg
-        if (dE < eyeW) bump += eyeR * Math.pow(1 - dE / eyeW, 2);
-        // -- Nose: small inward dip at ~270deg --
+        // Chin: gentle flat tuck at the bottom
         dE = angDist(t, pi * 1.5);
-        if (dE < 0.12) bump -= R * 0.06 * (1 - dE / 0.12);
-        // -- Mouth: W-shape at bottom (~255deg and ~285deg bumps, ~270deg dip) --
-        dE = angDist(t, pi * 1.42); // left mouth corner ~255deg
-        if (dE < 0.1) bump += R * 0.04 * (1 - dE / 0.1);
-        dE = angDist(t, pi * 1.58); // right mouth corner ~285deg
-        if (dE < 0.1) bump += R * 0.04 * (1 - dE / 0.1);
-        // -- Chin: slight flat tuck --
-        dE = angDist(t, pi * 1.5);
-        if (dE < 0.35) bump -= R * 0.03 * Math.pow(1 - dE / 0.35, 2);
-        var totalR = bodyR + bump;
+        if (dE < 0.40) { var xc = 1 - dE / 0.40; bump -= 0.05 * xc * xc; }
+        var totalR = R * (0.62 + bump);
         dx = totalR * Math.cos(t); dy = totalR * Math.sin(t);
     } else if (shape === 'butterfly') {
         // Butterfly curve: r = e^cos(t) - 2*cos(4t), closes in one 2pi cycle
@@ -873,6 +887,15 @@ function computeShapeDxDy(shape, t, R) {
     } else {
         dx = R * Math.cos(t); dy = R * Math.sin(t);
     }
+    // ── Fit normalization ──
+    // Each parametric formula has its own natural peak radius, so at max Size some
+    // shapes overflowed the circle (figure8 reached 1.25R) while others barely filled
+    // it (trefoil only 0.70R). These factors scale every shape so its peak radius is
+    // exactly R → at Size 100 each one touches the circle perfectly.
+    // Values = 1/peak, measured numerically over a full cycle. MUST stay identical to
+    // WEQ_SHAPE_NORM in ProcessBlock.cpp or the drawn shape won't match the audio.
+    var k = WEQ_SHAPE_NORM[shape];
+    if (k !== undefined && k !== 1) { dx *= k; dy *= k; }
     return { dx: dx, dy: dy };
 }
 // Build SVG path visualizing the LFO shape on the morph pad
@@ -944,21 +967,23 @@ function renderShapesBody(b) {
     h += '</div>';
     // Speed + Spin + Size knobs
     var sizeVal = b.shapeSize != null ? b.shapeSize : 80;
-    var speedVal = b.shapeSpeed || 50;
     var spinVal = b.shapeSpin || 0;
     var phaseVal = b.shapePhaseOffset || 0;
+    // Migrate legacy % speed → explicit Hz (unified Hz|Sync)
+    if (b.shapeHz == null) b.shapeHz = 0.02 + Math.pow((b.shapeSpeed != null ? b.shapeSpeed : 50) / 100, 3) * 4.98;
     h += buildKnobRow(
-        buildBlockKnob(speedVal, 1, 100, 36, 'shapes', 'shapeSpeed', b.id, 'Speed', '%', null, b.shapeTempoSync) +
         buildBlockKnob(spinVal, -100, 100, 36, 'shapes', 'shapeSpin', b.id, 'Spin', 'Â±') +
         buildBlockKnob(sizeVal, 1, 100, 36, 'shapes', 'shapeSize', b.id, 'Size', '%') +
         buildBlockKnob(phaseVal, 0, 360, 36, 'shapes', 'shapePhaseOffset', b.id, 'Phase', 'Â°')
     );
-    // Sync toggle
-    h += '<div class="behaviour-row"><div class="tgl ' + (b.shapeTempoSync ? 'on' : '') + '" data-b="' + b.id + '" data-f="shapeTempoSync"></div><span class="tgl-lbl">Sync</span>';
+    // ── Rate: Hz (free) or Sync (beat division) ──
+    h += '<div class="behaviour-row"><span class="sub-lbl">Rate</span><div class="tgl ' + (b.shapeTempoSync ? 'on' : '') + '" data-b="' + b.id + '" data-f="shapeTempoSync"></div><span class="tgl-lbl">Sync</span>';
     if (b.shapeTempoSync) {
         var divs = [{ v: '4/1', label: '4 Bars' }, { v: '2/1', label: '2 Bars' }].concat(BEAT_DIVS);
         h += renderBeatDivSelect(b.id, 'shapeSyncDiv', b.shapeSyncDiv, divs);
         h += '<div class="seg-inline" data-b="' + b.id + '" data-f="clockSource"><button class="' + ((b.clockSource || 'daw') === 'daw' ? 'on' : '') + '" data-v="daw">DAW</button><button class="' + (b.clockSource === 'internal' ? 'on' : '') + '" data-v="internal">Int</button></div>';
+    } else {
+        h += renderHzInput(b.id, 'shapeHz', b.shapeHz);
     }
     h += '</div>';
     h += '</div></div>';
@@ -1017,21 +1042,23 @@ function renderShapesRangeBody(b) {
     h += '<button class="' + (b.shapeTracking === 'vertical' ? 'on' : '') + '" data-v="vertical">Vertical</button>';
     h += '<button class="' + (b.shapeTracking === 'distance' ? 'on' : '') + '" data-v="distance">Distance</button>';
     h += '</div>';
-    // Speed + Spin knobs (no Size knob â€” always max for shapes_range)
-    var speedVal = b.shapeSpeed || 50;
+    // Spin + Phase knobs (no Size — always max for shapes_range; no Speed — rate is Hz|Sync below)
     var spinVal = b.shapeSpin || 0;
     var phaseVal = b.shapePhaseOffset || 0;
+    // Migrate legacy % speed → explicit Hz (unified Hz|Sync)
+    if (b.shapeHz == null) b.shapeHz = 0.02 + Math.pow((b.shapeSpeed != null ? b.shapeSpeed : 50) / 100, 3) * 4.98;
     h += buildKnobRow(
-        buildBlockKnob(speedVal, 1, 100, 36, 'shapes', 'shapeSpeed', b.id, 'Speed', '%', null, b.shapeTempoSync) +
         buildBlockKnob(spinVal, -100, 100, 36, 'shapes', 'shapeSpin', b.id, 'Spin', 'Â±') +
         buildBlockKnob(phaseVal, 0, 360, 36, 'shapes', 'shapePhaseOffset', b.id, 'Phase', 'Â°')
     );
-    // Sync toggle
-    h += '<div class="behaviour-row"><div class="tgl ' + (b.shapeTempoSync ? 'on' : '') + '" data-b="' + b.id + '" data-f="shapeTempoSync"></div><span class="tgl-lbl">Sync</span>';
+    // ── Rate: Hz (free) or Sync (beat division) ──
+    h += '<div class="behaviour-row"><span class="sub-lbl">Rate</span><div class="tgl ' + (b.shapeTempoSync ? 'on' : '') + '" data-b="' + b.id + '" data-f="shapeTempoSync"></div><span class="tgl-lbl">Sync</span>';
     if (b.shapeTempoSync) {
         var divs = [{ v: '4/1', label: '4 Bars' }, { v: '2/1', label: '2 Bars' }].concat(BEAT_DIVS);
         h += renderBeatDivSelect(b.id, 'shapeSyncDiv', b.shapeSyncDiv, divs);
         h += '<div class="seg-inline" data-b="' + b.id + '" data-f="clockSource"><button class="' + ((b.clockSource || 'daw') === 'daw' ? 'on' : '') + '" data-v="daw">DAW</button><button class="' + (b.clockSource === 'internal' ? 'on' : '') + '" data-v="internal">Int</button></div>';
+    } else {
+        h += renderHzInput(b.id, 'shapeHz', b.shapeHz);
     }
     h += '</div>';
     h += '</div></div>';
@@ -1279,6 +1306,8 @@ function renderMorphBody(b) {
         h += '</div>';
         // Shape selector (shapes explore only)
         var morphSynced = !!b.morphTempoSync;
+        // Migrate legacy % speed → explicit Hz (unified Hz|Sync)
+        if (b.morphHz == null) b.morphHz = 0.02 + Math.pow((b.morphSpeed != null ? b.morphSpeed : 50) / 100, 2) * 4.0;
         if (b.exploreMode === 'shapes') {
             h += '<select class="sub-sel" data-b="' + b.id + '" data-f="lfoShape">';
             h += buildShapeOptions('lfoShape', b);
@@ -1286,19 +1315,17 @@ function renderMorphBody(b) {
             // LFO knobs: Size, Spin, Speed
             h += buildKnobRow(
                 buildBlockKnob(b.lfoDepth != null ? b.lfoDepth : 80, 0, 100, 36, 'morph', 'lfoDepth', b.id, 'Size', '%') +
-                buildBlockKnob(b.lfoRotation || 0, -100, 100, 36, 'morph', 'lfoRotation', b.id, 'Spin', '\u00b1') +
-                buildBlockKnob(b.morphSpeed, 0, 100, 36, 'morph', 'morphSpeed', b.id, 'Speed', '%', null, morphSynced)
+                buildBlockKnob(b.lfoRotation || 0, -100, 100, 36, 'morph', 'lfoRotation', b.id, 'Spin', '\u00b1')
             );
         }
-        if (b.exploreMode !== 'shapes') {
-            // Speed slider for non-shapes auto explore modes
-            h += '<div class="sl-row' + (morphSynced ? ' sync-disabled' : '') + '"><span class="sl-lbl">Speed</span><input type="range" min="0" max="100" value="' + b.morphSpeed + '" data-b="' + b.id + '" data-f="morphSpeed"' + (morphSynced ? ' disabled' : '') + '><span class="sl-val">' + b.morphSpeed + '%</span></div>';
-        }
-        // Tempo Sync toggle + beat division
-        h += '<div class="behaviour-row"><div class="tgl ' + (b.morphTempoSync ? 'on' : '') + '" data-b="' + b.id + '" data-f="morphTempoSync"></div><span class="tgl-lbl">Sync</span>';
+        // (rate is the unified Hz|Sync control below \u2014 % speed knob/slider removed)
+        // \u2500\u2500 Rate: Hz (free) or Sync (beat division) \u2500\u2500
+        h += '<div class="behaviour-row"><span class="sub-lbl">Rate</span><div class="tgl ' + (b.morphTempoSync ? 'on' : '') + '" data-b="' + b.id + '" data-f="morphTempoSync"></div><span class="tgl-lbl">Sync</span>';
         if (b.morphTempoSync) {
             h += renderBeatDivSelect(b.id, 'morphSyncDiv', b.morphSyncDiv, MORPH_DIVS);
             h += '<div class="seg-inline" data-b="' + b.id + '" data-f="clockSource"><button class="' + ((b.clockSource || 'daw') === 'daw' ? 'on' : '') + '" data-v="daw">DAW</button><button class="' + (b.clockSource === 'internal' ? 'on' : '') + '" data-v="internal">Int</button></div>';
+        } else {
+            h += renderHzInput(b.id, 'morphHz', b.morphHz);
         }
         h += '</div>';
     }
@@ -2070,7 +2097,9 @@ function wireBlocks() {
             renderSingleBlock(bId); debouncedSync();
         }, { passive: false });
     });
-    document.querySelectorAll('.sub-input').forEach(function (inp) { if (!inp.dataset.b) return; inp.onchange = function () { var b = findBlock(parseInt(inp.dataset.b)); if (b) { b[inp.dataset.f] = Math.max(0, Math.min(128, parseInt(inp.value) || 0)); syncBlocksToHost(); } }; });
+    document.querySelectorAll('.sub-input').forEach(function (inp) { if (!inp.dataset.b || inp.classList.contains('hz-input')) return; inp.onchange = function () { var b = findBlock(parseInt(inp.dataset.b)); if (b) { b[inp.dataset.f] = Math.max(0, Math.min(128, parseInt(inp.value) || 0)); syncBlocksToHost(); } }; });
+    // Hz rate inputs (float, 0.01–20 Hz) — unified Hz|Sync free mode
+    document.querySelectorAll('.hz-input').forEach(function (inp) { if (!inp.dataset.b) return; inp.onchange = function () { var b = findBlock(parseInt(inp.dataset.b)); if (b) { b[inp.dataset.f] = Math.max(0.01, Math.min(20, parseFloat(inp.value) || 0.5)); renderSingleBlock(parseInt(inp.dataset.b)); syncBlocksToHost(); } }; });
     document.querySelectorAll('.fire').forEach(function (btn) { btn.onclick = function (e) { e.stopPropagation(); btn.classList.add('flash'); setTimeout(function () { btn.classList.remove('flash'); }, 250); var bId = parseInt(btn.dataset.b); var blk = findBlock(bId); if (blk) { var ov = []; blk.targets.forEach(function (pid) { var p = PMap[pid]; if (p && !p.lk && !p.alk) ov.push({ id: pid, val: p.v }); }); randomize(bId); if (ov.length) pushMultiParamUndo(ov); } flashDot('midiD'); }; });
     // .tx (remove) and .tgt-name (locate) handlers are wired inline in _buildTargetRow
     // Target search filter (compatible with virtual scroll)
@@ -3325,6 +3354,7 @@ function syncBlocksToHost() {
             obj.lfoDepth = (b.lfoDepth != null ? b.lfoDepth : 80) / 100;
             obj.lfoRotation = (b.lfoRotation || 0) / 100;
             obj.morphSpeed = (b.morphSpeed || 50) / 100;
+            obj.morphHz = b.morphHz != null ? b.morphHz : 0.5; // unified Hz|Sync free rate
             obj.morphAction = b.morphAction || 'jump';
             obj.stepOrder = b.stepOrder || 'cycle';
             obj.morphSource = b.morphSource || 'midi';
@@ -3340,6 +3370,7 @@ function syncBlocksToHost() {
             obj.shapeSize = b.mode === 'shapes_range' ? 1.0 : (b.shapeSize != null ? b.shapeSize : 80) / 100;
             obj.shapeSpin = (b.shapeSpin || 0) / 100;
             obj.shapeSpeed = (b.shapeSpeed || 50) / 100;
+            obj.shapeHz = b.shapeHz != null ? b.shapeHz : 0.5; // unified Hz|Sync free rate
             obj.shapeDepth = b.mode === 'shapes_range' ? 1.0 : (b.shapeSize != null ? b.shapeSize : 80) / 200;
             obj.shapeRange = b.mode === 'shapes_range' ? 'relative' : (b.shapeRange || 'relative');
             obj.shapePolarity = b.shapePolarity || 'bipolar';

@@ -367,18 +367,24 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                     dx = R * (std::cos(a0) + segT * (std::cos(a1) - std::cos(a0)));
                     dy = R * (std::sin(a0) + segT * (std::sin(a1) - std::sin(a0)));
                 } else if (shape == LfoShape::Hexagram) {
-                    // Star of David: trace two interlocked triangles
-                    // First triangle (0,2,4), then second triangle (1,3,5)
-                    // Full path: 0→2→4→0→1→3→5→1 (normalized to 6 segments)
-                    constexpr int starOrder[6] = {0, 2, 4, 1, 3, 5};
-                    float segF = t * 6.0f / twoPi;
-                    int seg = ((int)segF) % 6;
+                    // Star of David — the OUTLINE of a hexagram: 12 vertices alternating
+                    // between the 6 outer points (radius R) and the 6 inner hexagon
+                    // corners (R/√3). The old {0,2,4,1,3,5} walk had uneven steps and
+                    // drew an asymmetric scribble, not a six-pointed star.
+                    constexpr float kHexInner = 0.5773502692f; // 1/√3
+                    float segF = t * 12.0f / twoPi;
+                    int seg = ((int)segF) % 12;
                     float segT = segF - std::floor(segF);
-                    int fromIdx = starOrder[seg], toIdx = starOrder[(seg+1)%6];
-                    float aFrom = twoPi * fromIdx / 6.0f - halfPi;
-                    float aTo   = twoPi * toIdx   / 6.0f - halfPi;
-                    dx = R * (std::cos(aFrom) + segT * (std::cos(aTo) - std::cos(aFrom)));
-                    dy = R * (std::sin(aFrom) + segT * (std::sin(aTo) - std::sin(aFrom)));
+                    auto hv = [twoPi, halfPi](int i, float& vx, float& vy) {
+                        int idx = ((i % 12) + 12) % 12;
+                        float rad = (idx % 2 == 0) ? 1.0f : kHexInner;
+                        float ang = twoPi * (float)idx / 12.0f - halfPi;
+                        vx = rad * std::cos(ang); vy = rad * std::sin(ang);
+                    };
+                    float ax, ay, bx, by;
+                    hv(seg, ax, ay); hv(seg + 1, bx, by);
+                    dx = R * (ax + segT * (bx - ax));
+                    dy = R * (ay + segT * (by - ay));
                 } else if (shape == LfoShape::Rose4) {
                     float r = R * std::cos(2.0f * t);
                     dx = r * std::cos(t); dy = r * std::sin(t);
@@ -391,56 +397,34 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                     float sA = t * 3.0f;
                     dx = sR * std::cos(sA); dy = sR * std::sin(sA);
                 } else if (shape == LfoShape::Cat) {
-                    // Cat face: polar contour with ears, eyes, nose, mouth
-                    float bodyR = R * 0.52f;
+                    // Cat head SILHOUETTE: round head + two pointed ears + slight chin
+                    // tuck. (The old version also added tiny radial bumps for
+                    // "eyes/nose/mouth" — interior features can't exist on a closed
+                    // outline, so they only made the contour lumpy.)
                     float pi = juce::MathConstants<float>::pi;
-
-                    // Angular distance helper (wraps around)
-                    auto angDist = [twoPi](float a, float b) {
+                    auto angDist = [twoPi, pi](float a, float b) {
                         float d = std::abs(a - b);
-                        return d > juce::MathConstants<float>::pi ? twoPi - d : d;
+                        return d > pi ? twoPi - d : d;
                     };
-
-                    float bump = 0.0f;
-
-                    // -- Ears: sharp triangular bumps at ~55deg and ~125deg --
-                    float earR = R * 0.42f, earW = 0.32f, earTipW = 0.09f;
-                    float dE;
-                    dE = angDist(t, pi * 0.31f); // right ear ~56deg
+                    float bump = 0.0f, dE;
+                    constexpr float earW = 0.30f;
+                    // Ears at ~56° and ~124° — quadratic flank + sharp tip
+                    dE = angDist(t, pi * 0.31f);
                     if (dE < earW) {
-                        float x = 1.0f - dE / earW;
-                        bump += earR * x * x;
-                        if (dE < earTipW) bump += R * 0.18f * (1.0f - dE / earTipW);
+                        float xr = 1.0f - dE / earW;
+                        bump += 0.38f * xr * xr;
+                        if (dE < 0.085f) bump += 0.17f * (1.0f - dE / 0.085f);
                     }
-                    dE = angDist(t, pi * 0.69f); // left ear ~124deg
+                    dE = angDist(t, pi * 0.69f);
                     if (dE < earW) {
-                        float x = 1.0f - dE / earW;
-                        bump += earR * x * x;
-                        if (dE < earTipW) bump += R * 0.18f * (1.0f - dE / earTipW);
+                        float xl = 1.0f - dE / earW;
+                        bump += 0.38f * xl * xl;
+                        if (dE < 0.085f) bump += 0.17f * (1.0f - dE / 0.085f);
                     }
-
-                    // -- Eyes: small outward bumps at ~320deg and ~220deg --
-                    float eyeR = R * 0.08f, eyeW = 0.18f;
-                    dE = angDist(t, pi * 1.78f); // right eye ~320deg
-                    if (dE < eyeW) bump += eyeR * (1.0f - dE / eyeW) * (1.0f - dE / eyeW);
-                    dE = angDist(t, pi * 1.22f); // left eye ~220deg
-                    if (dE < eyeW) bump += eyeR * (1.0f - dE / eyeW) * (1.0f - dE / eyeW);
-
-                    // -- Nose: small inward dip at ~270deg --
+                    // Chin: gentle flat tuck at the bottom
                     dE = angDist(t, pi * 1.5f);
-                    if (dE < 0.12f) bump -= R * 0.06f * (1.0f - dE / 0.12f);
-
-                    // -- Mouth: W-shape at bottom (~255deg and ~285deg bumps, ~270deg dip) --
-                    dE = angDist(t, pi * 1.42f); // left mouth corner ~255deg
-                    if (dE < 0.1f) bump += R * 0.04f * (1.0f - dE / 0.1f);
-                    dE = angDist(t, pi * 1.58f); // right mouth corner ~285deg
-                    if (dE < 0.1f) bump += R * 0.04f * (1.0f - dE / 0.1f);
-
-                    // -- Chin: slight flat tuck --
-                    dE = angDist(t, pi * 1.5f);
-                    if (dE < 0.35f) bump -= R * 0.03f * (1.0f - dE / 0.35f) * (1.0f - dE / 0.35f);
-
-                    float totalR = bodyR + bump;
+                    if (dE < 0.40f) { float xc = 1.0f - dE / 0.40f; bump -= 0.05f * xc * xc; }
+                    float totalR = R * (0.62f + bump);
                     dx = totalR * std::cos(t); dy = totalR * std::sin(t);
                 } else if (shape == LfoShape::Butterfly) {
                     // Butterfly curve: r = e^cos(t) - 2*cos(4t), closes in one 2pi cycle
@@ -454,6 +438,24 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 } else {
                     dx = R * std::cos(t); dy = R * std::sin(t);
                 }
+
+                // ── Fit normalization ──
+                // Each formula has its own natural peak radius, so without this some
+                // shapes overshoot the circle (figure8 peaked at 1.25R) and others barely
+                // fill it (trefoil 0.70R). Scale so every shape's peak radius is exactly R.
+                // Values = 1/peak, measured numerically over a full cycle. MUST stay
+                // identical to WEQ_SHAPE_NORM in logic_blocks.js (audio must equal visual).
+                float kNorm = 1.0f;
+                switch (shape)
+                {
+                    case LfoShape::Figure8:      kNorm = 0.800000f; break;
+                    case LfoShape::Lissajous:    kNorm = 1.059776f; break;
+                    case LfoShape::Butterfly:    kNorm = 1.172923f; break;
+                    case LfoShape::InfinityKnot: kNorm = 1.428571f; break;
+                    case LfoShape::Cat:          kNorm = 0.854701f; break;
+                    default: break; // circle/sweeps/polygons/stars/rose/spiral already peak at R
+                }
+                if (kNorm != 1.0f) { dx *= kNorm; dy *= kNorm; }
 
                 return { dx, dy };
             };
@@ -795,9 +797,8 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                         }
                         else
                         {
-                            // morphSpeed 0..1 â†’ 0.02 Hz .. 4 Hz
-                            float sp = lb.morphSpeed;
-                            cyclesPerSec = 0.02f + sp * sp * 4.0f;
+                            // Unified Hz|Sync: the free rate is now an explicit frequency.
+                            cyclesPerSec = juce::jlimit(0.01f, 20.0f, lb.morphHz);
                         }
 
                         // Phase delta per buffer (radians) â€” cap at Ï€ to avoid aliasing
@@ -1150,7 +1151,8 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                     }
                     else
                     {
-                        speedHz = 0.02f + lb.shapeSpeed * lb.shapeSpeed * lb.shapeSpeed * 4.98f; // exponential: 0.02â€“5 Hz, most range in slow end
+                        // Unified Hz|Sync: the free rate is now an explicit frequency.
+                        speedHz = juce::jlimit(0.01f, 20.0f, lb.shapeHz);
                     }
                     float phaseDelta = speedHz * twoPi * secsPerBuffer;
                     lb.shapePhase += phaseDelta;
@@ -2462,6 +2464,14 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                         gainBase += eqPoints[i].modGainDB.load (std::memory_order_relaxed);
                         qBase    += eqPoints[i].modQ.load (std::memory_order_relaxed);
                     }
+                    // Editor's internal LFO/drift/Q-mod (persistent UI offset). Zero when
+                    // the EQ's own modulation is off → no change to un-modulated audio.
+                    if (eqPoints[i].uiModActive.load (std::memory_order_relaxed))
+                    {
+                        freqBase += eqPoints[i].uiModFreqHz.load (std::memory_order_relaxed);
+                        gainBase += eqPoints[i].uiModGainDB.load (std::memory_order_relaxed);
+                        qBase    += eqPoints[i].uiModQ.load (std::memory_order_relaxed);
+                    }
                     float gain  = juce::jlimit (-maxDB, maxDB, gainBase) * depthScale;
 
                     // Apply global warp to target gain
@@ -2499,6 +2509,12 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                     eqFreqs[i]  = juce::jlimit (20.0f, sr * 0.49f, freqBase);
                     eqGains[i]  = isMuted ? 0.0f : gain;
                     eqQs[i]     = juce::jlimit (0.025f, 40.0f, qBase);
+
+                    // Display snapshot for the UI: the modulated point position (pre-depth/
+                    // warp/steps — those are global curve transforms the editor applies itself).
+                    eqPoints[i].dispFreqHz.store (eqFreqs[i], std::memory_order_relaxed);
+                    eqPoints[i].dispGainDB.store (juce::jlimit (-maxDB, maxDB, gainBase), std::memory_order_relaxed);
+                    eqPoints[i].dispQ.store (eqQs[i], std::memory_order_relaxed);
                     // Solo effectively transforms the point into a Listen Band-Pass (type 6)
                     eqTypes[i]  = (anyEqSolo && isSoloed) ? 6 : eqPoints[i].filterType.load();
                     eqStages[i] = juce::jlimit (1, maxBiquadStages, eqPoints[i].slope.load());
@@ -2921,14 +2937,17 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
         // Discover which buses are active (have at least one non-skipped plugin)
         bool busActive[maxBuses] = {};
-        bool busHasSynth[maxBuses] = {}; // true if first active plugin on bus is an instrument
+        bool busHasSynth[maxBuses] = {}; // true if ANY active plugin on the bus is an instrument
         for (auto& hp : hostedPlugins)
         {
             int b = juce::jlimit (0, maxBuses - 2, hp->busId); // clamp, reserve last for rollback
             if (hp->instance && hp->prepared && !hp->bypassed && !hp->crashed)
             {
-                if (! busActive[b] && hp->isInstrument)
-                    busHasSynth[b] = true; // first active plugin on this bus is a synth
+                // Any instrument on the bus makes it a synth bus (it must start from
+                // silence). Previously only the FIRST plugin was checked, so a synth
+                // placed after an effect left the bus seeded with input audio.
+                if (hp->isInstrument)
+                    busHasSynth[b] = true;
                 busActive[b] = true;
             }
         }
@@ -2948,89 +2967,77 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             effectiveBusCount++;
         }
 
-        if (effectiveBusCount <= 1)
+        if (effectiveBusCount == 0)
         {
-            // Only one effective bus (or none) — process sequentially, no split/sum overhead
-            // If the bus starts with a synth, zero the buffer first
-            int activeBusIdx = -1;
-            for (int i = 0; i < maxBuses - 1; ++i)
-            {
-                if (busActive[i] && !busMute[i].load() && (!anySolo || busSolo[i].load()))
-                { activeBusIdx = i; break; }
-            }
-            if (activeBusIdx >= 0 && busHasSynth[activeBusIdx])
-                buffer.clear();
-
-            for (auto& hp : hostedPlugins)
-            {
-                int b = juce::jlimit (0, maxBuses - 2, hp->busId);
-                if (busMute[b].load()) continue;
-                if (anySolo && ! busSolo[b].load()) continue;
-                processOnePlugin (*hp, buffer, midiMessages);
-            }
-            // Apply bus volume for the single active bus
-            if (effectiveBusCount == 1)
-            {
-                for (int i = 0; i < maxBuses - 1; ++i)
-                {
-                    if (! busActive[i]) continue;
-                    if (busMute[i].load()) continue;
-                    if (anySolo && ! busSolo[i].load()) continue;
-                    float vol = busVolume[i].load();
-                    if (std::abs (vol - 1.0f) > 0.001f)
-                        buffer.applyGain (vol);
-                    break;
-                }
-            }
+            // Nothing audible (no active buses, or everything muted) — leave the input
+            // untouched so the plugin passes audio through rather than muting the track.
         }
         else
         {
-            // Initialize each active bus buffer:
-            // - Synth buses: zeroed (synths generate from MIDI)
-            // - FX buses: copy of input audio (effects process it)
+            // ── Unified per-bus render (instrument-rack semantics) ──
+            // For every bus: instruments are rendered from silence and LAYERED (summed),
+            // each fed its OWN private copy of the incoming MIDI, then the bus's effects
+            // run serially on the result. Finally all buses are summed with their volumes.
+            // This is what makes "two synths playing the same MIDI in parallel" work —
+            // previously synths sharing a bus overwrote each other's output and shared one
+            // MIDI buffer, so only the last one was audible.
+            int scratchCh  = juce::jmin (numChannels, synthAccum.getNumChannels());
+            // Guard against a host block larger than what prepareToPlay allocated.
+            int scratchSmp = juce::jmin (numSamples,  synthAccum.getNumSamples());
+
             for (int b = 0; b < maxBuses - 1; ++b)
             {
                 if (! busActive[b]) continue;
                 if (busMute[b].load()) continue;
                 if (anySolo && ! busSolo[b].load()) continue;
 
+                int busCh = juce::jmin (numChannels, busBuffers[b].getNumChannels());
+
                 if (busHasSynth[b])
                 {
-                    // Synth bus: zero the buffer — synth will generate from MIDI
-                    for (int ch = 0; ch < juce::jmin (numChannels, busBuffers[b].getNumChannels()); ++ch)
+                    // Start the bus from silence, then layer every instrument on it.
+                    for (int ch = 0; ch < busCh; ++ch)
                         busBuffers[b].clear (ch, 0, numSamples);
+
+                    for (auto& hp : hostedPlugins)
+                    {
+                        if (! hp->isInstrument) continue;
+                        if (juce::jlimit (0, maxBuses - 2, hp->busId) != b) continue;
+                        if (hp->instance == nullptr || ! hp->prepared || hp->bypassed || hp->crashed) continue;
+
+                        // Render this synth into a zeroed scratch buffer (alias limited to
+                        // the current block length) with its own MIDI copy, then add it in.
+                        synthAccum.clear (0, scratchSmp);
+                        float* scratchPtrs[8] = {};
+                        for (int ch = 0; ch < juce::jmin (scratchCh, 8); ++ch)
+                            scratchPtrs[ch] = synthAccum.getWritePointer (ch);
+                        juce::AudioBuffer<float> scratch (scratchPtrs, juce::jmin (scratchCh, 8), scratchSmp);
+
+                        juce::MidiBuffer midiCopy (midiMessages);
+                        processOnePlugin (*hp, scratch, midiCopy);
+
+                        for (int ch = 0; ch < juce::jmin (busCh, scratchCh); ++ch)
+                            busBuffers[b].addFrom (ch, 0, synthAccum, ch, 0, scratchSmp);
+                    }
                 }
                 else
                 {
-                    // FX bus: copy input audio for processing
-                    for (int ch = 0; ch < juce::jmin (numChannels, busBuffers[b].getNumChannels()); ++ch)
+                    // FX-only bus: start from the input audio (buffer still holds the input;
+                    // it isn't cleared until every bus has been rendered).
+                    for (int ch = 0; ch < busCh; ++ch)
                         busBuffers[b].copyFrom (ch, 0, buffer, ch, 0, numSamples);
                 }
-            }
 
-            // Process each bus's plugin chain
-            for (auto& hp : hostedPlugins)
-            {
-                int b = juce::jlimit (0, maxBuses - 2, hp->busId);
-                if (busMute[b].load()) continue;
-                if (anySolo && ! busSolo[b].load()) continue;
-
-                // Instruments: give each synth its OWN copy of MIDI so one
-                // consuming the buffer doesn't starve the next.
-                // Effects: pass the original (they typically don't consume MIDI).
-                if (hp->isInstrument)
+                // This bus's effects, in order, over the bus buffer.
+                for (auto& hp : hostedPlugins)
                 {
-                    juce::MidiBuffer midiCopy (midiMessages);
-                    processOnePlugin (*hp, busBuffers[b], midiCopy);
-                }
-                else
-                {
+                    if (hp->isInstrument) continue; // already layered above
+                    if (juce::jlimit (0, maxBuses - 2, hp->busId) != b) continue;
                     processOnePlugin (*hp, busBuffers[b], midiMessages);
                 }
             }
 
-            // Sum all active bus outputs into main buffer — UNITY GAIN
-            // Each bus applies its own volume. No automatic gain compensation.
+            // Sum all effective bus outputs — UNITY GAIN, each bus applies its own volume.
             buffer.clear();
             for (int b = 0; b < maxBuses - 1; ++b)
             {
@@ -3038,7 +3045,8 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 if (busMute[b].load()) continue;
                 if (anySolo && ! busSolo[b].load()) continue;
                 float vol = busVolume[b].load();
-                for (int ch = 0; ch < numChannels; ++ch)
+                int busCh = juce::jmin (numChannels, busBuffers[b].getNumChannels());
+                for (int ch = 0; ch < busCh; ++ch)
                     buffer.addFrom (ch, 0, busBuffers[b], ch, 0, numSamples, vol);
             }
         }

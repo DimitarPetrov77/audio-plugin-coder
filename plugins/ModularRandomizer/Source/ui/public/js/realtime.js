@@ -676,11 +676,18 @@ function setupRtDataListener() {
                 // The weqReadback mechanism below syncs C++ values back to JS for canvas display.
 
                 // ── WrongEQ readback: sync C++ eqPoints to JS wrongEqPoints ──
-                if (data.weqReadback && data.weqReadback.length && typeof wrongEqPoints !== 'undefined') {
+                // While the EQ's internal LFO/drift/Q-mod animation is running, JS owns the
+                // point positions (weqAnimTick), so skip the base-value readback to avoid it
+                // fighting the animation. Readback resumes the moment animation stops.
+                var _weqAnimating = (typeof weqAnimRafId !== 'undefined' && weqAnimRafId);
+                if (!_weqAnimating && data.weqReadback && data.weqReadback.length && typeof wrongEqPoints !== 'undefined') {
                     var _weqRbChanged = false;
                     for (var wi = 0; wi < data.weqReadback.length && wi < wrongEqPoints.length; wi++) {
                         var rb = data.weqReadback[wi];
                         var pt = wrongEqPoints[wi];
+                        // Never let the (slightly stale) base readback fight the point the user
+                        // is actively dragging — that caused the point to rubber-band and lag.
+                        if (typeof weqDragPt !== 'undefined' && wi === weqDragPt) continue;
                         // Update JS point position from C++ freq/gain
                         if (typeof weqFreqToX === 'function') {
                             var newX = weqFreqToX(rb.freq);
@@ -704,15 +711,33 @@ function setupRtDataListener() {
                             pt.drift = rb.drift;
                             _weqRbChanged = true;
                         }
+                        // ── Live modulation display (external lane/shape/envelope → EQ band) ──
+                        // C++ sends the actual modulated position (df/dg/dq). Drive the point's
+                        // DISPLAY position (never the base) so it glides with the audio; clear
+                        // it when modulation ends so the point snaps back to its user-set spot.
+                        if (rb.df !== undefined && typeof weqFreqToX === 'function') {
+                            var dX = weqFreqToX(rb.df);
+                            var dY = weqDBtoY(rb.dg);
+                            var dQ = rb.dq;
+                            var modActive = Math.abs(dX - weqFreqToX(rb.freq)) > 0.0005
+                                          || Math.abs(dY - weqDBtoY(rb.gain)) > 0.0015
+                                          || Math.abs(dQ - rb.q) > 0.01;
+                            if (modActive) {
+                                if (pt._dispX !== dX || pt._dispY !== dY || pt._dispQ !== dQ) {
+                                    pt._dispX = dX; pt._dispY = dY; pt._dispQ = dQ;
+                                    _weqRbChanged = true;
+                                }
+                            } else if (pt._dispX != null || pt._dispY != null || pt._dispQ != null) {
+                                pt._dispX = null; pt._dispY = null; pt._dispQ = null;
+                                _weqRbChanged = true;
+                            }
+                        }
                     }
                     if (_weqRbChanged) {
                         // Update virtual param displays
                         if (typeof weqSyncVirtualParams === 'function') weqSyncVirtualParams();
-                        // Redraw canvas if visible
-                        if (typeof weqDrawCanvas === 'function') {
-                            var _rbOverlay = document.getElementById('weqOverlay');
-                            if (_rbOverlay && _rbOverlay.classList.contains('visible')) weqDrawCanvas();
-                        }
+                        // Coalesced redraw (at most one repaint per frame)
+                        if (typeof weqRequestDraw === 'function') weqRequestDraw();
                     }
                 }
 
@@ -738,10 +763,7 @@ function setupRtDataListener() {
                     }
                     if (_gChanged) {
                         if (typeof weqSyncVirtualParams === 'function') weqSyncVirtualParams();
-                        if (typeof weqDrawCanvas === 'function') {
-                            var _gOverlay = document.getElementById('weqOverlay');
-                            if (_gOverlay && _gOverlay.classList.contains('visible')) weqDrawCanvas();
-                        }
+                        if (typeof weqRequestDraw === 'function') weqRequestDraw();
                     }
                 }
 

@@ -623,6 +623,13 @@ void HostesaAudioProcessor::updateLogicBlocks(const juce::String &jsonData) {
                          ? (float)(double)obj->getProperty("lfoRotation")
                          : 0.0f;
     lb.morphSpeed = (float)(double)obj->getProperty("morphSpeed");
+    // Free rate in Hz (unified Hz|Sync). Migrate from legacy morphSpeed if absent.
+    if (obj->hasProperty("morphHz"))
+      lb.morphHz = (float)(double)obj->getProperty("morphHz");
+    else {
+      float sp = (lb.morphSpeed > 1.5f) ? lb.morphSpeed * 0.01f : lb.morphSpeed; // normalize
+      lb.morphHz = 0.02f + sp * sp * 4.0f;
+    }
     lb.morphAction = obj->getProperty("morphAction").toString();
     lb.stepOrder = obj->getProperty("stepOrder").toString();
     lb.morphSource = obj->getProperty("morphSource").toString();
@@ -672,6 +679,13 @@ void HostesaAudioProcessor::updateLogicBlocks(const juce::String &jsonData) {
     lb.shapeSize = (float)(double)obj->getProperty("shapeSize");
     lb.shapeSpin = (float)(double)obj->getProperty("shapeSpin");
     lb.shapeSpeed = (float)(double)obj->getProperty("shapeSpeed");
+    // Free rate in Hz (unified Hz|Sync). Migrate from legacy shapeSpeed if absent.
+    if (obj->hasProperty("shapeHz"))
+      lb.shapeHz = (float)(double)obj->getProperty("shapeHz");
+    else {
+      float sp = (lb.shapeSpeed > 1.5f) ? lb.shapeSpeed * 0.01f : lb.shapeSpeed; // normalize
+      lb.shapeHz = 0.02f + sp * sp * sp * 4.98f;
+    }
     lb.shapePhaseOffset = (float)(double)obj->getProperty("shapePhaseOffset");
     lb.shapeDepth = (float)(double)obj->getProperty("shapeDepth");
     lb.shapeRange = obj->getProperty("shapeRange").toString();
@@ -1307,6 +1321,12 @@ int HostesaAudioProcessor::getSpectrumBins(float *outBins, int maxBins) {
   if (sr < 1.0f)
     sr = 44100.0f;
 
+  // Silence gate: when the input has no meaningful signal (~below -60 dBFS RMS), pin
+  // every bin hard to the floor sentinel (-200) so the UI can suppress the line entirely
+  // — no flat floor line, no noise-floor jitter. Real signals sit well above -60 dBFS and
+  // return the analyzer instantly. (Tunable: raise for noisier inputs, lower to show more.)
+  const bool silentInput = (currentRmsLevel.load() < 1.0e-3f);
+
   for (int b = 0; b < numBins; ++b) {
     // Frequency edges for this log-spaced output bin
     float t0 = (b > 0) ? ((float)(b - 0.5f) / (float)(numBins - 1)) : 0.0f;
@@ -1359,6 +1379,14 @@ int HostesaAudioProcessor::getSpectrumBins(float *outBins, int maxBins) {
     // Convert to dB (normalize by FFT size)
     float targetDb = rms > 0.0f ? 20.0f * std::log10(rms / (float)fftCurrentSize) : -100.0f;
     targetDb = juce::jlimit(-100.0f, 20.0f, targetDb);
+    if (silentInput) {
+        // No meaningful input → snap to a sub-floor sentinel. The UI treats anything
+        // this low as "no signal" and draws NO spectrum line at all (its own temporal
+        // smoothing eases the curve out on the way down, so it fades then vanishes).
+        spectrumBinsOut[b] = -200.0f;
+        outBins[b] = -200.0f;
+        continue;
+    }
 
     // Temporal smoothing: Fast attack, slow decay (prevents jiggling)
     float currentDb = spectrumBinsOut[b];
@@ -1602,6 +1630,35 @@ void HostesaAudioProcessor::randomizeParams(
         }
       }
       break;
+    }
+  }
+}
+
+void HostesaAudioProcessor::setEqUiMod(const juce::String &jsonData) {
+  // Editor pushes the EQ's own internal LFO/drift/Q-mod as per-point OFFSETS.
+  // Format: [{f:HzOffset, g:dBOffset, q:offset}, ...] indexed by EQ point.
+  // Persistent (not reset per block); the audio thread adds them on top of base +
+  // external modulation, and the per-sample SVF interpolation smooths between updates.
+  auto parsed = juce::JSON::parse(jsonData);
+  int n = numEqPoints.load(std::memory_order_relaxed);
+  int arrN = parsed.isArray() ? parsed.size() : 0;
+  for (int i = 0; i < maxEqBands; ++i) {
+    if (i < arrN && i < n) {
+      auto *obj = parsed[i].getDynamicObject();
+      float f = obj ? (float)(double)obj->getProperty("f") : 0.0f;
+      float g = obj ? (float)(double)obj->getProperty("g") : 0.0f;
+      float q = obj ? (float)(double)obj->getProperty("q") : 0.0f;
+      bool active = (std::abs(f) > 1e-6f || std::abs(g) > 1e-6f || std::abs(q) > 1e-6f);
+      eqPoints[i].uiModFreqHz.store(f, std::memory_order_relaxed);
+      eqPoints[i].uiModGainDB.store(g, std::memory_order_relaxed);
+      eqPoints[i].uiModQ.store(q, std::memory_order_relaxed);
+      eqPoints[i].uiModActive.store(active, std::memory_order_relaxed);
+    } else {
+      // Not in payload → clear (animation stopped or point removed)
+      eqPoints[i].uiModActive.store(false, std::memory_order_relaxed);
+      eqPoints[i].uiModFreqHz.store(0.0f, std::memory_order_relaxed);
+      eqPoints[i].uiModGainDB.store(0.0f, std::memory_order_relaxed);
+      eqPoints[i].uiModQ.store(0.0f, std::memory_order_relaxed);
     }
   }
 }

@@ -94,6 +94,19 @@ function weqYToDB(y) {
 function weqYtoCanvas(y, H) { return WEQ_Y_PAD + y * (H - 2 * WEQ_Y_PAD); }
 function weqCanvasToY(py, H) { return Math.max(0, Math.min(1, (py - WEQ_Y_PAD) / (H - 2 * WEQ_Y_PAD))); }
 
+// ── Display position (base + live modulation) ──
+// A point's on-canvas position may be modulated by a lane/shape/envelope. C++ streams the
+// actual modulated position into p._dispX/_dispY/_dispQ via readback; these accessors use
+// it for DRAWING only and fall back to the logical base when there's no modulation. The
+// base (p.x/p.y/p.q) is never touched by modulation, so saved & synced state stays clean.
+function _weqDX(p) { return (p._dispX != null) ? p._dispX : p.x; }
+function _weqDY(p) { return (p._dispY != null) ? p._dispY : p.y; }
+function _weqDQ(p) { return (p._dispQ != null) ? p._dispQ : (p.q != null ? p.q : 0.707); }
+function _weqDisplayBand(p) {
+    if (p._dispX == null && p._dispY == null && p._dispQ == null) return p; // no mod → no alloc
+    return { x: _weqDX(p), y: _weqDY(p), q: _weqDQ(p), type: p.type, slope: p.slope, mute: p.mute, solo: p.solo };
+}
+
 // Format frequency for display
 function weqFmtFreq(hz) {
     if (hz >= 10000) return (hz / 1000).toFixed(1) + 'k';
@@ -756,8 +769,41 @@ function _weqRefreshShapeSvg(wrapperId, shapeMap, selectedKey) {
     el.innerHTML = svg;
 }
 
+// Push the internal EQ modulation (LFO/drift/Q-mod) to the audio engine as per-point
+// OFFSETS from the base positions, so what you SEE moving is what you HEAR. The offset
+// is persistent in C++ until the next call; _weqSendUiMod(true) clears it on stop.
+var _weqUiModFn = null, _weqUiModFnChecked = false, _weqUiModCounter = 0;
+function _weqSendUiMod(clear) {
+    if (!window.__JUCE__ || !window.__JUCE__.backend) return;
+    if (!_weqUiModFnChecked) {
+        _weqUiModFnChecked = true;
+        try { _weqUiModFn = window.__juceGetNativeFunction('setEqUiMod'); }
+        catch (e) { _weqUiModFn = null; }
+    }
+    if (!_weqUiModFn) return;
+    if (clear) { _weqUiModFn('[]'); return; }
+    var arr = [];
+    for (var i = 0; i < wrongEqPoints.length; i++) {
+        var p = wrongEqPoints[i];
+        var bx = (i < weqAnimBaseX.length) ? weqAnimBaseX[i] : p.x;
+        var by = (i < weqAnimBaseY.length) ? weqAnimBaseY[i] : p.y;
+        var bq = (i < weqAnimBaseQ.length) ? weqAnimBaseQ[i] : (p.q != null ? p.q : 0.707);
+        arr.push({
+            f: weqXToFreq(p.x) - weqXToFreq(bx),                        // Hz offset
+            g: weqYToDB(p.y) - weqYToDB(by),                            // dB offset
+            q: (p.q != null ? p.q : 0.707) - bq                        // Q offset
+        });
+    }
+    _weqUiModFn(JSON.stringify(arr));
+}
+
 function weqAnimStart() {
     if (weqAnimRafId) return;
+    // Internal LFO drives point positions directly; drop any external-mod display offsets
+    // so they don't override the animation (external+internal combo isn't shown at once).
+    for (var _ci = 0; _ci < wrongEqPoints.length; _ci++) {
+        wrongEqPoints[_ci]._dispX = wrongEqPoints[_ci]._dispY = wrongEqPoints[_ci]._dispQ = null;
+    }
     weqAnimBaseY = wrongEqPoints.map(function (p) { return p.y; });
     weqAnimBaseX = wrongEqPoints.map(function (p) { return p.x; });
     weqAnimBaseQ = wrongEqPoints.map(function (p) { return p.q || 0.707; });
@@ -780,6 +826,7 @@ function weqAnimStop() {
     }
     weqAnimPhase = 0;
     _weqDriftTimeAccum = 0;
+    _weqSendUiMod(true); // clear audio modulation → EQ returns to base positions
     weqDrawCanvas();
     weqSyncToHost();
 }
@@ -924,6 +971,12 @@ function weqAnimTick(now) {
                 wrongEqPoints[i].q = weqAnimBaseQ[i];
             }
         }
+
+        // Push modulation to the audio engine (~30 Hz — every other frame). The DSP's
+        // per-sample coefficient interpolation smooths between these updates, so the EQ
+        // is HEARD moving exactly as it's drawn.
+        _weqUiModCounter++;
+        if ((_weqUiModCounter & 1) === 0) _weqSendUiMod(false);
 
         // Redraw canvas only when popup is visible (save CPU)
         var overlay = document.getElementById('weqOverlay');
@@ -1614,107 +1667,99 @@ function _weqBiquadDB(b0, b1, b2, a0, a1, a2, w) {
 }
 
 // ── Evaluate single band's dB contribution ──
-function _weqBandDB(xPos, band) {
-    var gainDB = weqYToDB(band.y);
+// Uses the EXACT analytic transfer function of the Cytomic TPT-SVF the DSP runs
+// (Source/PluginProcessor.h SVFEqFilter), so the drawn curve matches the audio to
+// the dB. For a filter with prewarped corner g0, damping k and mix (m0,m1,m2):
+//     Ω = tan(π·f/fs) / g0
+//     D = (1 − Ω²) + j·k·Ω        (lp = 1/D,  bp = jΩ/D)
+//     H = m0 + m1·bp + m2·lp
+//     dB = 20·log10(|H|)
+// gainOverride (optional) lets weqEvalAtX feed a depth/warp/steps-processed gain,
+// exactly as the DSP does per-band before building coefficients.
+// Build the CONSTANT filter coefficients for a band (independent of eval frequency).
+// Hoisting this out of the per-pixel sweep is the key perf win: the expensive tan/pow/
+// switch runs once per band per frame instead of once per band PER PIXEL.
+function _weqBandCoeffs(band, gainOverride) {
+    var gainDB = (gainOverride !== undefined) ? gainOverride : weqYToDB(band.y);
     var type = band.type || 'Bell';
     var Q = Math.max(0.025, band.q || 0.707);
     var f0 = weqXToFreq(band.x);
+    var fs = _WEQ_REF_FS;
+    var nyq = fs * 0.499;
+    var A = Math.pow(10, gainDB / 40);
+    var gCorner = Math.tan(Math.PI * Math.min(f0, nyq) / fs);
+    // Bell/shelf at ~0 dB is transparent; LP/HP/Notch always shape.
+    var skip = ((type === 'Bell' || type === 'LShf' || type === 'HShf') && Math.abs(gainDB) < 0.1);
+
+    var k, m0, m1, m2;
+    switch (type) {
+        case 'LP':    k = 1 / Q;       m0 = 0;     m1 = 0;             m2 = 1;         break;
+        case 'HP':    k = 1 / Q;       m0 = 1;     m1 = -k;            m2 = -1;        break;
+        case 'Notch': k = 1 / Q;       m0 = 1;     m1 = -k;            m2 = 0;         break;
+        case 'LShf':  k = 1 / Q;       gCorner /= Math.sqrt(A); m0 = 1; m1 = k * (A - 1);     m2 = (A * A - 1); break;
+        case 'HShf':  k = 1 / Q;       gCorner *= Math.sqrt(A); m0 = A * A; m1 = k * (1 - A) * A; m2 = (1 - A * A); break;
+        case 'BP':    k = 1 / Q;       m0 = 0;     m1 = k;             m2 = 0;         break;
+        case 'Bell':
+        default:      k = 1 / (Q * A); m0 = 1;     m1 = k * (A * A - 1); m2 = 0;       break;
+    }
+    if (gCorner < 1e-9) gCorner = 1e-9;
+    return { fs: fs, nyq: nyq, gCorner: gCorner, k: k, m0: m0, m1: m1, m2: m2, skip: skip };
+}
+
+// Cheap per-frequency evaluation using precomputed coefficients (SVF analytic response).
+function _weqBandDBAt(c, xPos) {
+    if (c.skip) return 0;
     var f = weqXToFreq(xPos);
+    var ge = Math.tan(Math.PI * Math.min(f, c.nyq) / c.fs);
+    var Om = ge / c.gCorner;
+    var Dre = 1 - Om * Om;
+    var Dim = c.k * Om;
+    var Dmag2 = Dre * Dre + Dim * Dim;
+    if (Dmag2 < 1e-30) Dmag2 = 1e-30;
+    // lp = 1/D = conj(D)/|D|²   ;   bp = jΩ/D = Ω·(Dim + j·Dre)/|D|²
+    var lpRe = Dre / Dmag2, lpIm = -Dim / Dmag2;
+    var bpRe = Om * Dim / Dmag2, bpIm = Om * Dre / Dmag2;
+    var Hre = c.m0 + c.m1 * bpRe + c.m2 * lpRe;
+    var Him = c.m1 * bpIm + c.m2 * lpIm;
+    var magSq = Hre * Hre + Him * Him;
+    if (magSq < 1e-30) return -200;
+    return 10 * Math.log10(magSq);
+}
 
-    // LP/HP are unity-gain filters — gain has no effect on DSP.
-    // Skip the gain check for LP/HP; always evaluate their response.
-    if ((type === 'Bell' || type === 'LShf' || type === 'HShf') && Math.abs(gainDB) < 0.1) return 0;
+// Backward-compatible single-shot evaluation (builds coeffs + evaluates).
+function _weqBandDB(xPos, band, gainOverride) {
+    return _weqBandDBAt(_weqBandCoeffs(band, gainOverride), xPos);
+}
 
-    var w0 = 2 * Math.PI * f0 / _WEQ_REF_FS;
-    var w = 2 * Math.PI * f / _WEQ_REF_FS;
-    var sw0 = Math.sin(w0), cw0 = Math.cos(w0);
-    var b0, b1, b2, a0, a1, a2;
-
-    if (type === 'Bell') {
-        // Peaking EQ — A = 10^(dBgain/40)
-        var A = Math.pow(10, gainDB / 40);
-        var alpha = sw0 / (2 * Q);
-        b0 = 1 + alpha * A;
-        b1 = -2 * cw0;
-        b2 = 1 - alpha * A;
-        a0 = 1 + alpha / A;
-        a1 = -2 * cw0;
-        a2 = 1 - alpha / A;
-        return _weqBiquadDB(b0, b1, b2, a0, a1, a2, w);
+// Apply the global WARP mapping to a single band's gain — matches the DSP
+// (ProcessBlock.cpp), which warps each point's gain BEFORE building coefficients.
+function _weqApplyWarp(gain) {
+    if (Math.abs(weqGlobalWarp) <= 0.5) return gain;
+    var maxDB = weqDBRangeMax;
+    var norm = (gain + maxDB) / (maxDB * 2);
+    var w = weqGlobalWarp / 100;
+    if (w > 0) {
+        var mid = norm * 2 - 1;
+        norm = 0.5 + 0.5 * Math.tanh(w * 3 * mid) / Math.tanh(w * 3);
+    } else {
+        var aw = -w;
+        var c = norm * 2 - 1;
+        var sv = c >= 0 ? 1 : -1;
+        norm = 0.5 + 0.5 * sv * Math.pow(Math.abs(c), 1 / (1 + aw * 3));
     }
-    if (type === 'LP') {
-        // Low-pass: unity-gain, gain parameter is ignored (matches C++ DSP).
-        // Q controls resonance at cutoff.
-        var alphaLP = sw0 / (2 * Q);
-        b0 = (1 - cw0) / 2;
-        b1 = 1 - cw0;
-        b2 = (1 - cw0) / 2;
-        a0 = 1 + alphaLP;
-        a1 = -2 * cw0;
-        a2 = 1 - alphaLP;
-        return _weqBiquadDB(b0, b1, b2, a0, a1, a2, w);
-    }
-    if (type === 'HP') {
-        // High-pass: unity-gain, gain parameter is ignored (matches C++ DSP).
-        // Q controls resonance at cutoff.
-        var alphaHP = sw0 / (2 * Q);
-        b0 = (1 + cw0) / 2;
-        b1 = -(1 + cw0);
-        b2 = (1 + cw0) / 2;
-        a0 = 1 + alphaHP;
-        a1 = -2 * cw0;
-        a2 = 1 - alphaHP;
-        return _weqBiquadDB(b0, b1, b2, a0, a1, a2, w);
-    }
-    if (type === 'Notch') {
-        // Band-reject: full depth, Q controls width
-        var alphaN = sw0 / (2 * Q);
-        b0 = 1;
-        b1 = -2 * cw0;
-        b2 = 1;
-        a0 = 1 + alphaN;
-        a1 = -2 * cw0;
-        a2 = 1 - alphaN;
-        return _weqBiquadDB(b0, b1, b2, a0, a1, a2, w);
-    }
-    if (type === 'LShf') {
-        // Low Shelf — Audio EQ Cookbook S (slope) form
-        // Q knob value is reinterpreted as shelf slope S.
-        // S=1 = steepest monotonic shelf, S>1 = shelf bump/overshoot.
-        // Cookbook: 2*sqrt(A)*alpha = sin(w0) * sqrt((A+1/A)*(1/S-1)+2)
-        var A = Math.pow(10, gainDB / 40);
-        var S = Q; // reinterpret Q as slope
-        var twoSqrtAalpha = sw0 * Math.sqrt(Math.max(0, (A + 1 / A) * (1 / S - 1) + 2));
-        if (!isFinite(twoSqrtAalpha) || twoSqrtAalpha < 1e-10) twoSqrtAalpha = 1e-10;
-        b0 = A * ((A + 1) - (A - 1) * cw0 + twoSqrtAalpha);
-        b1 = 2 * A * ((A - 1) - (A + 1) * cw0);
-        b2 = A * ((A + 1) - (A - 1) * cw0 - twoSqrtAalpha);
-        a0 = (A + 1) + (A - 1) * cw0 + twoSqrtAalpha;
-        a1 = -2 * ((A - 1) + (A + 1) * cw0);
-        a2 = (A + 1) + (A - 1) * cw0 - twoSqrtAalpha;
-        return _weqBiquadDB(b0, b1, b2, a0, a1, a2, w);
-    }
-    if (type === 'HShf') {
-        // High Shelf — Audio EQ Cookbook S (slope) form
-        var A = Math.pow(10, gainDB / 40);
-        var S = Q; // reinterpret Q as slope
-        var twoSqrtAalpha = sw0 * Math.sqrt(Math.max(0, (A + 1 / A) * (1 / S - 1) + 2));
-        if (!isFinite(twoSqrtAalpha) || twoSqrtAalpha < 1e-10) twoSqrtAalpha = 1e-10;
-        b0 = A * ((A + 1) + (A - 1) * cw0 + twoSqrtAalpha);
-        b1 = -2 * A * ((A - 1) + (A + 1) * cw0);
-        b2 = A * ((A + 1) + (A - 1) * cw0 - twoSqrtAalpha);
-        a0 = (A + 1) - (A - 1) * cw0 + twoSqrtAalpha;
-        a1 = 2 * ((A - 1) - (A + 1) * cw0);
-        a2 = (A + 1) - (A - 1) * cw0 - twoSqrtAalpha;
-        return _weqBiquadDB(b0, b1, b2, a0, a1, a2, w);
-    }
-    return 0;
+    return -maxDB + norm * (maxDB * 2);
+}
+function _weqApplySteps(gain) {
+    if (weqGlobalSteps < 2) return gain;
+    var stepSize = (weqDBRangeMax * 2) / (weqGlobalSteps - 1);
+    return Math.round(gain / stepSize) * stepSize;
 }
 
 // ── Evaluate total curve dB at a given X position (0-1 log freq) — additive bands ──
-// Warp/Steps/Tilt are applied to the SUMMED gain-based curve (post-sum).
-// C++ matches this: depth per-biquad, warp/steps per-biquad (close approx),
-// tilt as a separate post-EQ filter.
+// Mirrors the DSP signal flow exactly:
+//   per gain-based band → depth → warp → steps → filter (coefficients built from
+//   the processed gain), then all bands cascade (dB add), then the post-EQ tilt
+//   filter is applied to the whole curve. This makes the drawn curve == audio.
 function weqEvalAtX(xPos) {
     var pts = wrongEqPoints;
     if (!pts || pts.length === 0) return 0;
@@ -1723,53 +1768,93 @@ function weqEvalAtX(xPos) {
     // Solo is an audio-only concept handled by C++ ProcessBlock — the visual curve
     // must always reflect the full EQ shape.
     var depthScale = weqGlobalDepth / 100;
-    var gainDB = 0;  // All gain-based: EQ bands — subject to depth, warp, steps, tilt
-    var unityDB = 0; // LP, HP, Notch — always at full strength, no warp
+    var total = 0;
     for (var i = 0; i < pts.length; i++) {
         if (pts[i].mute) continue;
         var pt = pts[i].type || 'Bell';
         var isGainBased = (pt === 'Bell' || pt === 'LShf' || pt === 'HShf');
         // Slope cascading: N identical biquads → N × single_biquad_dB
         var slopeN = pts[i].slope || 1;
-        var bandDB = _weqBandDB(xPos, pts[i]) * slopeN;
         if (isGainBased) {
-            gainDB += bandDB * depthScale;
+            // Per-band depth → warp → steps on the gain, exactly like the DSP.
+            var g = weqYToDB(pts[i].y) * depthScale;
+            g = Math.max(-weqDBRangeMax, Math.min(weqDBRangeMax, g));
+            g = _weqApplyWarp(g);
+            g = _weqApplySteps(g);
+            total += _weqBandDB(xPos, pts[i], g) * slopeN;
         } else {
-            unityDB += bandDB;
+            total += _weqBandDB(xPos, pts[i]) * slopeN;
         }
     }
 
-    // Apply global warp to gain-based portion
-    if (Math.abs(weqGlobalWarp) > 0.5) {
-        var norm = (gainDB - (-weqDBRangeMax)) / (weqDBRangeMax * 2);
-        var w = weqGlobalWarp / 100;
-        if (w > 0) {
-            var mid = norm * 2 - 1;
-            norm = 0.5 + 0.5 * Math.tanh(w * 3 * mid) / Math.tanh(w * 3);
-        } else {
-            var aw = -w;
-            var c = norm * 2 - 1;
-            var sv = c >= 0 ? 1 : -1;
-            norm = 0.5 + 0.5 * sv * Math.pow(Math.abs(c), 1 / (1 + aw * 3));
-        }
-        gainDB = (-weqDBRangeMax) + norm * (weqDBRangeMax * 2);
-    }
-
-    // Apply global steps
-    if (weqGlobalSteps >= 2) {
-        var stepSize = (weqDBRangeMax * 2) / (weqGlobalSteps - 1);
-        gainDB = Math.round(gainDB / stepSize) * stepSize;
-    }
-
-    // Apply global tilt: frequency-dependent gain offset across the whole curve
+    // Post-EQ tilt: exact magnitude of the DSP's 1st-order LP/HP split at 632 Hz.
+    //   low band × 10^(-tiltDB/20), high band × 10^(+tiltDB/20)
+    // |H(f)| = sqrt(gLow² + gHigh²·r²) / sqrt(1 + r²),  r = f/632
     if (Math.abs(weqGlobalTilt) > 0.5) {
-        var xFreq = weqXToFreq(xPos);
-        var logPos = Math.log2(xFreq / 632);
-        var tiltDB = logPos * (weqGlobalTilt / 100) * 12;
-        gainDB = Math.max(-weqDBRangeMax, Math.min(weqDBRangeMax, gainDB + tiltDB));
+        var f = weqXToFreq(xPos);
+        var tiltDB = (weqGlobalTilt / 100) * 12;
+        var gLow = Math.pow(10, -tiltDB / 20);
+        var gHigh = Math.pow(10, tiltDB / 20);
+        var r = f / 632;
+        var mag = Math.sqrt((gLow * gLow + gHigh * gHigh * r * r) / (1 + r * r));
+        total += 20 * Math.log10(mag);
     }
 
-    return gainDB + unityDB;
+    return total;
+}
+
+// Compile a fast total-curve evaluator ONCE per frame: every band's constant coefficients
+// (with global depth/warp/steps folded into gain) and the tilt terms are precomputed, so
+// the x-sweep in weqDrawCanvas is just cheap arithmetic per pixel. Mirrors weqEvalAtX
+// exactly. Returns a function(xNorm) → dB.
+function _weqBuildCurveEval() {
+    var pts = wrongEqPoints;
+    var depthScale = weqGlobalDepth / 100;
+    var ctxs = [];
+    for (var i = 0; i < pts.length; i++) {
+        if (pts[i].mute) continue;
+        var dp = _weqDisplayBand(pts[i]); // follow live modulation on the canvas
+        var t = dp.type || 'Bell';
+        var gainBased = (t === 'Bell' || t === 'LShf' || t === 'HShf');
+        var gOverride;
+        if (gainBased) {
+            var g = weqYToDB(dp.y) * depthScale;
+            g = Math.max(-weqDBRangeMax, Math.min(weqDBRangeMax, g));
+            g = _weqApplyWarp(g);
+            g = _weqApplySteps(g);
+            gOverride = g;
+        }
+        var c = _weqBandCoeffs(dp, gOverride);
+        c.slope = dp.slope || 1;
+        ctxs.push(c);
+    }
+    var tiltActive = Math.abs(weqGlobalTilt) > 0.5;
+    var tiltDB = (weqGlobalTilt / 100) * 12;
+    var gLow = Math.pow(10, -tiltDB / 20);
+    var gHigh = Math.pow(10, tiltDB / 20);
+    return function (xNorm) {
+        var total = 0;
+        for (var b = 0; b < ctxs.length; b++) total += _weqBandDBAt(ctxs[b], xNorm) * ctxs[b].slope;
+        if (tiltActive) {
+            var f = weqXToFreq(xNorm);
+            var r = f / 632;
+            var mag = Math.sqrt((gLow * gLow + gHigh * gHigh * r * r) / (1 + r * r));
+            total += 20 * Math.log10(mag);
+        }
+        return total;
+    };
+}
+
+// Coalesced redraw: many things can request a redraw within a single frame (EQ readback,
+// spectrum frame, global-param readback, modulation). Funnel them through one rAF so the
+// canvas repaints at most once per display frame instead of several times synchronously.
+var _weqDrawPending = false;
+function weqRequestDraw() {
+    if (_weqDrawPending) return;
+    var overlay = document.getElementById('weqOverlay');
+    if (!overlay || !overlay.classList.contains('visible')) return; // don't paint when hidden
+    _weqDrawPending = true;
+    requestAnimationFrame(function () { _weqDrawPending = false; weqDrawCanvas(); });
 }
 
 // ── Main canvas draw ──
@@ -1796,7 +1881,16 @@ function weqDrawCanvas() {
 
         // ── Spectrum analyzer (behind everything) ──
         // Uses independent dB scale: 0dB (full scale) → top, floor → bottom
+        // Silence suppression: when the input is silent the DSP pins every bin to a
+        // sub-floor sentinel (-200 dB). If nothing rises above -99 dB we draw NO spectrum
+        // at all — no floor line, no noise-floor jitter. Real signal returns it instantly.
+        var _specHasSignal = false;
         if (weqSpecVisible && weqSpectrumSmooth && weqSpectrumSmooth.length > 0) {
+            for (var _sk = 0; _sk < weqSpectrumSmooth.length; _sk++) {
+                if (weqSpectrumSmooth[_sk] > -99.0) { _specHasSignal = true; break; }
+            }
+        }
+        if (_specHasSignal) {
             var specBins = weqSpectrumSmooth.length;
             var specFloor = weqSpecFloor;      // configurable noise floor
             var specCeil  = weqSpecCeil;        // 0 dBFS = top of display
@@ -2206,77 +2300,58 @@ function weqDrawCanvas() {
                 ctx.lineWidth = isSoloed ? 2.5 : (isSelBand ? 1.5 : 1);
                 ctx.lineJoin = 'round';
                 ctx.lineCap = 'round';
-                ctx.beginPath();
+                // Coeffs built ONCE per band (was rebuilt every pixel); depth applied to dB.
+                // Use the display band so the ghost follows live modulation too.
+                var bGainBased = ((band.type || 'Bell') === 'Bell' || band.type === 'LShf' || band.type === 'HShf');
+                var bDepth = bGainBased ? (weqGlobalDepth / 100) : 1;
+                var bCoeffs = _weqBandCoeffs(_weqDisplayBand(band));
+                var ghostPath = new Path2D();
                 for (var bpx = 0; bpx <= ghostRes; bpx++) {
                     var bxN = bpx / ghostRes;
-                    var bGainBased = ((band.type || 'Bell') === 'Bell' || band.type === 'LShf' || band.type === 'HShf');
-                    var bandDB = _weqBandDB(bxN, band) * (bGainBased ? (weqGlobalDepth / 100) : 1);
-                    var bandY = weqDBtoY(bandDB);
-                    var bcy = weqYtoCanvas(bandY, H);
-                    if (bpx === 0) ctx.moveTo(bxN * W, bcy);
-                    else ctx.lineTo(bxN * W, bcy);
+                    var bandDB = _weqBandDBAt(bCoeffs, bxN) * bDepth;
+                    var bcy = weqYtoCanvas(weqDBtoY(bandDB), H);
+                    if (bpx === 0) ghostPath.moveTo(bxN * W, bcy);
+                    else ghostPath.lineTo(bxN * W, bcy);
                 }
-                ctx.stroke();
+                ctx.stroke(ghostPath);
             }
             ctx.globalAlpha = 1;
 
             // ── Compute total curve ONCE, cache for reuse ──
-            var depthMul = weqGlobalDepth / 100;
+            // Compile the per-band coefficients a single time, then sweep cheaply.
             var curveX = new Float32Array(resolution + 1);
             var curveY = new Float32Array(resolution + 1);
+            var _curveEval = _weqBuildCurveEval();
             for (var px = 0; px <= resolution; px++) {
                 var xNorm = px / resolution;
-                // weqEvalAtX already applies global depth, warp, and steps internally
-                var db = weqEvalAtX(xNorm);
+                var db = _curveEval(xNorm);
                 curveX[px] = xNorm * W;
                 curveY[px] = weqYtoCanvas(weqDBtoY(db), H);
             }
 
-            // ── Draw total EQ curve (from cache) — multi-layer glow ──
+            // ── Draw total EQ curve — build the path ONCE, reuse it for every glow
+            // layer and the fill (was 4 separate point loops per frame). Path2D lets the
+            // browser cache/rasterize the geometry once → much cheaper redraws.
             var accentCol = weqCssVar('--accent', '#2D6B3F');
             ctx.lineJoin = 'round';
             ctx.lineCap = 'round';
-            // Layer 1: Diffuse glow
-            ctx.beginPath();
-            for (var cg1 = 0; cg1 <= resolution; cg1++) {
-                if (cg1 === 0) ctx.moveTo(curveX[cg1], curveY[cg1]);
-                else ctx.lineTo(curveX[cg1], curveY[cg1]);
-            }
-            ctx.lineWidth = 5;
-            ctx.strokeStyle = weqHexRgba(accentCol, 0.08);
-            ctx.stroke();
-            // Layer 2: Medium glow
-            ctx.beginPath();
-            for (var cg2 = 0; cg2 <= resolution; cg2++) {
-                if (cg2 === 0) ctx.moveTo(curveX[cg2], curveY[cg2]);
-                else ctx.lineTo(curveX[cg2], curveY[cg2]);
-            }
-            ctx.lineWidth = 3;
-            ctx.strokeStyle = weqHexRgba(accentCol, 0.20);
-            ctx.stroke();
-            // Layer 3: Crisp main line
-            ctx.beginPath();
-            for (var cx = 0; cx <= resolution; cx++) {
-                if (cx === 0) ctx.moveTo(curveX[cx], curveY[cx]);
-                else ctx.lineTo(curveX[cx], curveY[cx]);
-            }
-            ctx.lineWidth = 2.5;
-            ctx.strokeStyle = accentCol;
-            ctx.stroke();
+            var curvePath = new Path2D();
+            curvePath.moveTo(curveX[0], curveY[0]);
+            for (var cpi = 1; cpi <= resolution; cpi++) curvePath.lineTo(curveX[cpi], curveY[cpi]);
+            // Layer 1: diffuse glow · Layer 2: medium glow · Layer 3: crisp line
+            ctx.lineWidth = 5;   ctx.strokeStyle = weqHexRgba(accentCol, 0.08); ctx.stroke(curvePath);
+            ctx.lineWidth = 3;   ctx.strokeStyle = weqHexRgba(accentCol, 0.20); ctx.stroke(curvePath);
+            ctx.lineWidth = 2.5; ctx.strokeStyle = accentCol;                    ctx.stroke(curvePath);
 
-            // Filled area under/over 0dB (reuse cached curve)
+            // Filled area under/over 0 dB (reuse the same path — no extra loop)
             var zeroY = weqYtoCanvas(weqDBtoY(0), H);
+            var curveFill = new Path2D(curvePath);
+            curveFill.lineTo(W, zeroY);
+            curveFill.lineTo(0, zeroY);
+            curveFill.closePath();
             ctx.globalAlpha = 0.08;
-            ctx.beginPath();
-            for (var fx = 0; fx <= resolution; fx++) {
-                if (fx === 0) ctx.moveTo(curveX[fx], curveY[fx]);
-                else ctx.lineTo(curveX[fx], curveY[fx]);
-            }
-            ctx.lineTo(W, zeroY);
-            ctx.lineTo(0, zeroY);
-            ctx.closePath();
-            ctx.fillStyle = weqCssVar('--accent', '#2D6B3F');
-            ctx.fill();
+            ctx.fillStyle = accentCol;
+            ctx.fill(curveFill);
             ctx.globalAlpha = 1;
 
             // ── Ghosted modulation range lines ──
@@ -2459,8 +2534,9 @@ function weqDrawCanvas() {
         for (var pi = 0; pi < sorted.length; pi++) {
             var pt = sorted[pi];
             var realIdx = wrongEqPoints.indexOf(pt);
-            var cx = pt.x * W;
-            var cy = weqYtoCanvas(pt.y, H);
+            // Marker follows the live modulated position (base when unmodulated).
+            var cx = _weqDX(pt) * W;
+            var cy = weqYtoCanvas(_weqDY(pt), H);
             var isSel = (realIdx === weqSelectedPt);
             var col = _weqPointColor(pt);
             var isMutedPt = pt.mute;
@@ -2533,54 +2609,74 @@ function weqDrawCanvas() {
             ctx.strokeStyle = isSel ? col : 'rgba(0,0,0,0.5)';
             ctx.stroke();
 
-            // Q bandwidth visualization for selected point
-            if (isSel && (ptType === 'Bell' || ptType === 'Notch')) {
-                var q = pt.q || 0.707;
-                // Exact Cookbook BW: 1/Q = 2*sinh(ln(2)/2*BW) → BW = 2/ln(2)*asinh(1/(2*Q))
-                var bwOctaves = (2 / Math.LN2) * Math.asinh(1 / (2 * q));
-                var centerFreq = weqXToFreq(pt.x);
-                var loFreq = centerFreq / Math.pow(2, bwOctaves / 2);
-                var hiFreq = centerFreq * Math.pow(2, bwOctaves / 2);
-                // Unclamped positions for bell shape — let canvas clip at edges
-                var xLoFull = weqFreqToX(loFreq) * W;
-                var xHiFull = weqFreqToX(hiFreq) * W;
-                // Clamped positions for dashed edge lines (only draw if visible)
-                var xLo = Math.max(0, xLoFull);
-                var xHi = Math.min(W, xHiFull);
+            // ── Selected-band highlight — the REAL filter response of this band ──
+            // Draws this band's actual magnitude contribution (same math as the total
+            // curve, pixel-locked to it), not a decorative Gaussian. Works for every
+            // type (bell, shelf, notch, LP, HP), so the highlight always tells the truth.
+            if (isSel) {
+                var _selBand = _weqDisplayBand(pt); // follow live modulation
+                var _selGainBased = (ptType === 'Bell' || ptType === 'LShf' || ptType === 'HShf');
+                var _selSlope = _selBand.slope || 1;
+                // Mirror weqEvalAtX's per-band processing so the highlight == this band's
+                // exact contribution to the summed curve.
+                var _selGain;
+                if (_selGainBased) {
+                    _selGain = weqYToDB(_selBand.y) * (weqGlobalDepth / 100);
+                    _selGain = Math.max(-weqDBRangeMax, Math.min(weqDBRangeMax, _selGain));
+                    _selGain = _weqApplyWarp(_selGain);
+                    _selGain = _weqApplySteps(_selGain);
+                }
+                var _selCoeffs = _weqBandCoeffs(_selBand, _selGain); // coeffs once, not per pixel
+                var _selRes = weqAnimRafId ? Math.max(90, Math.floor(W / 3)) : Math.max(160, Math.floor(W / 2));
+                var _selX = new Float32Array(_selRes + 1);
+                var _selY = new Float32Array(_selRes + 1);
+                for (var _sb = 0; _sb <= _selRes; _sb++) {
+                    var _sxN = _sb / _selRes;
+                    var _sdb = _weqBandDBAt(_selCoeffs, _sxN) * _selSlope;
+                    _selX[_sb] = _sxN * W;
+                    _selY[_sb] = weqYtoCanvas(weqDBtoY(_sdb), H);
+                }
                 ctx.save();
-                ctx.globalAlpha = 0.12;
+                // Fill from the response down/up to the 0 dB line
+                ctx.globalAlpha = 0.13;
                 ctx.fillStyle = col;
                 ctx.beginPath();
-                ctx.moveTo(xLoFull, zeroY);
-                // Bell curve approximation — uses full (unclamped) range
-                var bellSteps = 32;
-                for (var bs = 0; bs <= bellSteps; bs++) {
-                    var bx = xLoFull + (xHiFull - xLoFull) * (bs / bellSteps);
-                    var bf = (bs / bellSteps) * 2 - 1; // -1 to 1
-                    var bellY = Math.exp(-bf * bf * 2);
-                    var by = zeroY + (cy - zeroY) * bellY;
-                    ctx.lineTo(bx, by);
-                }
-                ctx.lineTo(xHiFull, zeroY);
+                ctx.moveTo(_selX[0], zeroY);
+                for (var _sf = 0; _sf <= _selRes; _sf++) ctx.lineTo(_selX[_sf], _selY[_sf]);
+                ctx.lineTo(_selX[_selRes], zeroY);
                 ctx.closePath();
                 ctx.fill();
-                ctx.globalAlpha = 0.4;
+                // Crisp outline of the band's real curve
+                ctx.globalAlpha = 0.55;
                 ctx.strokeStyle = col;
-                ctx.lineWidth = 1;
-                ctx.setLineDash([2, 2]);
-                // Only draw edge lines if they're within view
-                if (xLo > 0) {
-                    ctx.beginPath();
-                    ctx.moveTo(xLo, 0); ctx.lineTo(xLo, H);
-                    ctx.stroke();
+                ctx.lineWidth = 1.3;
+                ctx.lineJoin = 'round';
+                ctx.beginPath();
+                for (var _so = 0; _so <= _selRes; _so++) {
+                    if (_so === 0) ctx.moveTo(_selX[_so], _selY[_so]);
+                    else ctx.lineTo(_selX[_so], _selY[_so]);
                 }
-                if (xHi < W) {
-                    ctx.beginPath();
-                    ctx.moveTo(xHi, 0); ctx.lineTo(xHi, H);
-                    ctx.stroke();
-                }
-                ctx.setLineDash([]);
+                ctx.stroke();
                 ctx.restore();
+
+                // Q bandwidth edge markers (Bell/Notch) — genuinely useful, kept as dashed guides
+                if (ptType === 'Bell' || ptType === 'Notch') {
+                    var q = _selBand.q || 0.707;
+                    // Exact Cookbook BW: BW = 2/ln(2)·asinh(1/(2Q))
+                    var bwOctaves = (2 / Math.LN2) * Math.asinh(1 / (2 * q));
+                    var centerFreq = weqXToFreq(_selBand.x);
+                    var xLo = weqFreqToX(centerFreq / Math.pow(2, bwOctaves / 2)) * W;
+                    var xHi = weqFreqToX(centerFreq * Math.pow(2, bwOctaves / 2)) * W;
+                    ctx.save();
+                    ctx.globalAlpha = 0.35;
+                    ctx.strokeStyle = col;
+                    ctx.lineWidth = 1;
+                    ctx.setLineDash([2, 2]);
+                    if (xLo > 0) { ctx.beginPath(); ctx.moveTo(xLo, 0); ctx.lineTo(xLo, H); ctx.stroke(); }
+                    if (xHi < W) { ctx.beginPath(); ctx.moveTo(xHi, 0); ctx.lineTo(xHi, H); ctx.stroke(); }
+                    ctx.setLineDash([]);
+                    ctx.restore();
+                }
             }
 
             // Frequency + type label at top
@@ -3715,7 +3811,25 @@ function weqSetupEvents() {
     // dB Range dropdown
     document.querySelectorAll('[data-wf="dbRange"]').forEach(function (sel) {
         sel.onchange = function () {
-            weqDBRangeMax = parseInt(sel.value);
+            var oldMax = weqDBRangeMax;
+            var newMax = parseInt(sel.value);
+            if (!newMax || newMax === oldMax) { weqDBRangeMax = newMax || oldMax; return; }
+            // The dB range is a ZOOM, not a gain change: preserve each point's actual dB
+            // and recompute its normalized Y against the new range, so the curve rescales
+            // visually while the sound stays identical. (Points beyond the new range clamp
+            // to its edge.) Y is the stored source of truth, so we convert dB→Y explicitly.
+            var toDbOld = function (y) { return (-oldMax) + (1.0 - y) * (oldMax * 2); };
+            weqDBRangeMax = newMax;
+            for (var i = 0; i < wrongEqPoints.length; i++) {
+                var db = Math.max(-newMax, Math.min(newMax, toDbOld(wrongEqPoints[i].y)));
+                wrongEqPoints[i].y = weqDBtoY(db); // uses the NEW weqDBRangeMax
+            }
+            if (weqAnimBaseY && weqAnimBaseY.length) {
+                for (var j = 0; j < weqAnimBaseY.length; j++) {
+                    var dbb = Math.max(-newMax, Math.min(newMax, toDbOld(weqAnimBaseY[j])));
+                    weqAnimBaseY[j] = weqDBtoY(dbb);
+                }
+            }
             weqRenderPanel(); // re-render to update axis + canvas
             weqSyncToHost();
             if (typeof markStateDirty === 'function') markStateDirty();
@@ -4170,6 +4284,8 @@ function weqSetupMouse(wrap) {
         var p = pos(e);
         var dragOrigin = { x: p.x, y: p.y };
         weqDragAxis = null;
+        // Precision-drag state (per drag): Ctrl/Cmd engages fine control.
+        var fineActive = false, fineAnchorRaw = null, fineAnchorPt = null;
 
         if (weqTool === 'draw') {
             var existing = findNearest(p, 14);
@@ -4180,7 +4296,12 @@ function weqSetupMouse(wrap) {
                 weqSelectedPt = existing;
                 weqDrawCanvas();
             } else {
-                // Create new point
+                // Create new point — enforce the 8-band maximum (was only enforced on
+                // double-click, so click-drawing could silently exceed the DSP limit).
+                if (wrongEqPoints.length >= 8) {
+                    if (typeof showToast === 'function') showToast('Max 8 EQ bands', 'info', 1200);
+                    return;
+                }
                 _weqPushUndo();
                 // In split mode, new points are crossover dividers — force 0dB
                 var newY = weqSplitMode ? 0.5 : p.y;
@@ -4201,8 +4322,24 @@ function weqSetupMouse(wrap) {
             // Clamp X to valid frequency range (20Hz – 20kHz)
             var xMin = weqFreqToX(WEQ_MIN_FREQ);
             var xMax = weqFreqToX(WEQ_MAX_FREQ);
-            var newX = Math.max(xMin + 0.001, Math.min(xMax - 0.001, snapFreq(pm.x)));
-            var newY = Math.max(0, Math.min(1, pm.y));
+            // Precision drag: hold Ctrl/Cmd for fine (0.18×) control. Anchors at the
+            // instant the modifier engages so toggling never jumps; snapping is disabled
+            // while fine so you can place a point exactly.
+            var newX, newY;
+            if (ev.ctrlKey || ev.metaKey) {
+                if (!fineActive) {
+                    fineActive = true;
+                    fineAnchorRaw = { x: pm.x, y: pm.y };
+                    fineAnchorPt = { x: wrongEqPoints[weqDragPt].x, y: wrongEqPoints[weqDragPt].y };
+                }
+                var FINE = 0.18;
+                newX = Math.max(xMin + 0.001, Math.min(xMax - 0.001, fineAnchorPt.x + (pm.x - fineAnchorRaw.x) * FINE));
+                newY = Math.max(0, Math.min(1, fineAnchorPt.y + (pm.y - fineAnchorRaw.y) * FINE));
+            } else {
+                fineActive = false;
+                newX = Math.max(xMin + 0.001, Math.min(xMax - 0.001, snapFreq(pm.x)));
+                newY = Math.max(0, Math.min(1, pm.y));
+            }
             if (ev.shiftKey) {
                 if (!weqDragAxis) {
                     var dx = Math.abs(pm.x - dragOrigin.x);
@@ -4240,7 +4377,9 @@ function weqSetupMouse(wrap) {
                 if (weqAnimBaseX[weqDragPt] != null) weqAnimBaseX[weqDragPt] = wrongEqPoints[weqDragPt].x;
                 if (weqAnimBaseQ[weqDragPt] != null) weqAnimBaseQ[weqDragPt] = wrongEqPoints[weqDragPt].q;
             }
-            weqDrawCanvas();
+            // Coalesce to one repaint per frame — mouse-move events can fire far faster
+            // than the display (high-poll mice), and a full redraw per event caused drag lag.
+            weqRequestDraw();
             // Update band card freq + gain in real-time during drag
             if (wrongEqPoints[weqDragPt]) {
                 var dragFreq = weqXToFreq(wrongEqPoints[weqDragPt].x);
@@ -4274,6 +4413,7 @@ function weqSetupMouse(wrap) {
             }
         }
         function onUp() {
+            var draggedIdx = weqDragPt; // capture before reset (was referenced as undefined `nearIdx`)
             weqDragPt = -1;
             weqDragAxis = null;
             wrap.style.cursor = '';
@@ -4281,10 +4421,10 @@ function weqSetupMouse(wrap) {
             document.removeEventListener('mouseup', onUp);
             // Update animation base for ONLY the dragged point — don't re-snapshot
             // all points, as other points have modulated values that would get baked.
-            if (weqAnimRafId && nearIdx >= 0 && nearIdx < wrongEqPoints.length) {
-                if (nearIdx < weqAnimBaseY.length) weqAnimBaseY[nearIdx] = wrongEqPoints[nearIdx].y;
-                if (nearIdx < weqAnimBaseX.length) weqAnimBaseX[nearIdx] = wrongEqPoints[nearIdx].x;
-                if (nearIdx < weqAnimBaseQ.length) weqAnimBaseQ[nearIdx] = wrongEqPoints[nearIdx].q;
+            if (weqAnimRafId && draggedIdx >= 0 && draggedIdx < wrongEqPoints.length) {
+                if (draggedIdx < weqAnimBaseY.length) weqAnimBaseY[draggedIdx] = wrongEqPoints[draggedIdx].y;
+                if (draggedIdx < weqAnimBaseX.length) weqAnimBaseX[draggedIdx] = wrongEqPoints[draggedIdx].x;
+                if (draggedIdx < weqAnimBaseQ.length) weqAnimBaseQ[draggedIdx] = wrongEqPoints[draggedIdx].q;
             }
             weqRenderPanel(); // full re-render on mouseup to update band rows
             weqSyncToHost();
@@ -5063,7 +5203,8 @@ function weqRandomize() {
         wrongEqPoints.push({
             uid: _weqAllocUid(),
             x: 0.05 + (i / (n - 1)) * 0.9,
-            y: weqDBtoY((Math.random() - 0.5) * 24),
+            // Randomize gains within the currently defined dB range (was hardcoded ±12).
+            y: weqDBtoY((Math.random() * 2 - 1) * weqDBRangeMax),
             pluginIds: [], preEq: true,
             seg: null,
             solo: false,

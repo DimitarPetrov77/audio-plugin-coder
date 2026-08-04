@@ -1059,6 +1059,17 @@ HostesaAudioProcessorEditor::HostesaAudioProcessorEditor (
                 }
             )
             .withNativeFunction (
+                "setEqUiMod",
+                [this] (const juce::Array<juce::var>& args,
+                        juce::WebBrowserComponent::NativeFunctionCompletion completion)
+                {
+                    // Editor's internal EQ LFO/drift/Q-mod offsets → audio (persistent).
+                    if (args.size() >= 1 && args[0].isString())
+                        audioProcessor.setEqUiMod (args[0].toString());
+                    completion (juce::var ("ok"));
+                }
+            )
+            .withNativeFunction (
                 "setEqPointFast",
                 [this] (const juce::Array<juce::var>& args,
                         juce::WebBrowserComponent::NativeFunctionCompletion completion)
@@ -1742,10 +1753,10 @@ void HostesaAudioProcessorEditor::timerCallback()
             data->setProperty ("spectrum", juce::var (specArr));
         }
     }
-    // ── WrongEQ readback: push C++ eqPoints atomics to JS (~10Hz) ──
-    // When C++ modulation writes to eqPoints (via setParamDirect), JS needs to know
-    // so it can update canvas + virtual param displays. Only send if there are EQ points.
-    if (timerTickCount % 6 == 0)
+    // ── WrongEQ readback: push C++ eqPoints atomics to JS at the full 60 Hz timer
+    // rate so C++ audio-rate modulation of EQ points renders fluidly on the canvas
+    // (previously 10 Hz → visibly stepped). Payload is tiny (≤8 points × 4 floats),
+    // and emitEventIfBrowserIsVisible skips it entirely when the UI is hidden.
     {
         HostesaAudioProcessor::WeqReadbackPoint weqPts[8];
         int nPts = audioProcessor.getWeqReadback (weqPts, 8);
@@ -1760,12 +1771,18 @@ void HostesaAudioProcessorEditor::timerCallback()
                 pt->setProperty ("gain", (double) weqPts[i].gainDB);
                 pt->setProperty ("q",    (double) weqPts[i].q);
                 pt->setProperty ("drift",(double) weqPts[i].driftPct);
+                pt->setProperty ("df",   (double) weqPts[i].dispFreqHz); // modulated display pos
+                pt->setProperty ("dg",   (double) weqPts[i].dispGainDB);
+                pt->setProperty ("dq",   (double) weqPts[i].dispQ);
                 weqArr.add (juce::var (pt));
             }
             data->setProperty ("weqReadback", juce::var (weqArr));
         }
+    }
 
-        // Send global EQ params too (modulation can change them)
+    // Global EQ params change rarely — keep them at ~10 Hz.
+    if (timerTickCount % 6 == 0)
+    {
         {
             auto wg = audioProcessor.getWeqGlobals();
             auto* gObj = new juce::DynamicObject();
