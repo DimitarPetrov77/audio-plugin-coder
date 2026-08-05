@@ -129,6 +129,20 @@ var HZ_MIN = 0.01, HZ_MAX = 20, HZ_SPAN = 2000; // HZ_MAX / HZ_MIN
 function hzFromPct(p) { return HZ_MIN * Math.pow(HZ_SPAN, Math.max(0, Math.min(100, p)) / 100); }
 function pctFromHz(hz) { return 100 * Math.log(Math.max(HZ_MIN, Math.min(HZ_MAX, hz || 0.5)) / HZ_MIN) / Math.log(HZ_SPAN); }
 function fmtHz(hz) { return (hz < 1 ? hz.toFixed(2) : hz.toFixed(1)) + 'Hz'; }
+// ── Trigger rate row (unified Hz|Sync) ──
+// Sync ON  → musical division (bars/straight/dotted/triplets) + DAW/Int clock
+// Sync OFF → an explicit trigger frequency in Hz, free-running
+function renderTrigRateRow(b, label) {
+    var h = '<span class="sub-lbl">' + (label || 'Rate') + '</span>';
+    h += '<div class="tgl ' + (b.trigFree ? '' : 'on') + '" data-b="' + b.id + '" data-f="trigFreeInv"></div><span class="tgl-lbl">Sync</span>';
+    if (!b.trigFree) {
+        h += renderBeatDivSelect(b.id, 'beatDiv', b.beatDiv);
+        h += '<div class="seg-inline" data-b="' + b.id + '" data-f="clockSource"><button class="' + ((b.clockSource || 'daw') === 'daw' ? 'on' : '') + '" data-v="daw">DAW</button><button class="' + (b.clockSource === 'internal' ? 'on' : '') + '" data-v="internal">Int</button></div>';
+    } else {
+        h += buildBlockKnob(pctFromHz(b.trigHz != null ? b.trigHz : 1), 0, 100, 32, 'rand', 'trigHzPct', b.id, 'Rate', 'Hz', function (p) { return fmtHz(hzFromPct(p)); });
+    }
+    return h;
+}
 // Convert morphSpeed (0-100) to display string
 function morphSpeedDisplay(sp) {
     return Math.round(sp) + '%';
@@ -137,7 +151,7 @@ function morphSpeedDisplay(sp) {
 function addBlock(mode) {
     if (!mode) mode = 'randomize'; var id = ++bc;
     var blk = {
-        id: id, mode: mode, enabled: true, targets: new Set(), targetBases: {}, targetRanges: {}, targetRangeBases: {}, colorIdx: bc - 1, trigger: 'manual', beatDiv: '1/4', midiMode: 'any_note', midiNote: 60, midiCC: 1, midiCh: 0, velScale: false, threshold: -12, audioSrc: 'main', rMin: 0, rMax: 100, rangeMode: 'relative', polarity: 'bipolar', quantize: false, qSteps: 12, movement: 'instant', glideMs: 200, envAtk: 10, envRel: 100, envSens: 50, envInvert: false, envFilterMode: 'flat', envFilterFreq: 50, envFilterBW: 5, loopMode: 'loop', sampleSpeed: 1.0, sampleReverse: false, jumpMode: 'restart', sampleName: '', sampleWaveform: null, expanded: true, clockSource: 'daw',
+        id: id, mode: mode, enabled: true, targets: new Set(), targetBases: {}, targetRanges: {}, targetRangeBases: {}, colorIdx: bc - 1, trigger: 'manual', beatDiv: '1/4', trigFree: false, trigHz: 1, midiMode: 'any_note', midiNote: 60, midiCC: 1, midiCh: 0, velScale: false, threshold: -12, audioSrc: 'main', rMin: 0, rMax: 100, rangeMode: 'relative', polarity: 'bipolar', quantize: false, qSteps: 12, movement: 'instant', glideMs: 200, envAtk: 10, envRel: 100, envSens: 50, envInvert: false, envFilterMode: 'flat', envFilterFreq: 50, envFilterBW: 5, loopMode: 'loop', sampleSpeed: 1.0, sampleReverse: false, jumpMode: 'restart', sampleName: '', sampleWaveform: null, expanded: true, clockSource: 'daw',
         snapshots: [], playheadX: 0.5, playheadY: 0.5, morphMode: 'manual', exploreMode: 'wander', lfoShape: 'circle', lfoDepth: 80, lfoRotation: 0, morphSpeed: 50, morphHz: 0.5, morphAction: 'jump', stepOrder: 'cycle', morphSource: 'midi', jitter: 0, morphGlide: 200, morphTempoSync: false, morphSyncDiv: '1/4', snapRadius: 100,
         shapeType: 'circle', shapeTracking: 'horizontal', shapeSize: 80, shapeSpin: 0, shapeSpeed: 50, shapeHz: 0.5, shapePhaseOffset: 0, shapeRange: 'relative', shapePolarity: 'bipolar', shapeTempoSync: false, shapeSyncDiv: '1/4', shapeTrigger: 'free',
         laneTool: 'draw', laneGrid: '1/8', lanes: [],
@@ -281,6 +295,7 @@ function _buildTargetRow(pid, b, col) {
     if (xBtn) {
         xBtn.onclick = function (e) {
             e.stopPropagation();
+            if (typeof pushUndoSnapshot === 'function') pushUndoSnapshot(); // removing a target is undoable
             b.targets.delete(pid);
             if (typeof cleanBlockAfterUnassign === 'function') cleanBlockAfterUnassign(b, pid);
             renderSingleBlock(b.id); renderAllPlugins(); syncBlocksToHost();
@@ -563,7 +578,7 @@ function renderRndBody(b) {
     h += '<div class="seg-inline" data-b="' + b.id + '" data-f="movement"><button class="' + (b.movement === 'instant' ? 'on' : '') + '" data-v="instant">Instant</button><button class="' + (b.movement === 'glide' ? 'on' : '') + '" data-v="glide">Smooth</button></div>';
     h += '</div>';
     // Sub-options for trigger types
-    h += '<div class="sub ' + (b.trigger === 'tempo' ? 'vis' : '') + '"><div class="sub-row"><span class="sub-lbl">Division</span>' + renderBeatDivSelect(b.id, 'beatDiv', b.beatDiv) + '<div class="seg-inline" data-b="' + b.id + '" data-f="clockSource"><button class="' + ((b.clockSource || 'daw') === 'daw' ? 'on' : '') + '" data-v="daw">DAW</button><button class="' + (b.clockSource === 'internal' ? 'on' : '') + '" data-v="internal">Int</button></div></div></div>';
+    h += '<div class="sub ' + (b.trigger === 'tempo' ? 'vis' : '') + '"><div class="sub-row">' + renderTrigRateRow(b, 'Rate') + '</div></div>';
     h += '<div class="sub ' + (b.trigger === 'midi' ? 'vis' : '') + '"><div class="sub-row"><span class="sub-lbl">Mode</span><select class="sub-sel" data-b="' + b.id + '" data-f="midiMode"><option value="any_note"' + (b.midiMode === 'any_note' ? ' selected' : '') + '>Any Note</option><option value="specific_note"' + (b.midiMode === 'specific_note' ? ' selected' : '') + '>Note</option><option value="cc"' + (b.midiMode === 'cc' ? ' selected' : '') + '>CC</option></select></div>';
     h += '<div class="sub-row"><span class="sub-lbl">Channel</span><select class="sub-sel" data-b="' + b.id + '" data-f="midiCh"><option value="0"' + (b.midiCh === 0 ? ' selected' : '') + '>Any</option>';
     for (var ch = 1; ch <= 16; ch++) h += '<option value="' + ch + '"' + (b.midiCh === ch ? ' selected' : '') + '>' + ch + '</option>';
@@ -752,8 +767,7 @@ function renderSampleBody(b) {
     h += '</div>';
     // Trigger sub-options
     if (b.trigger === 'tempo') {
-        h += '<div class="behaviour-row"><span class="sub-lbl">Div</span>' + renderBeatDivSelect(b.id, 'beatDiv', b.beatDiv);
-        h += '<div class="seg-inline" data-b="' + b.id + '" data-f="clockSource"><button class="' + ((b.clockSource || 'daw') === 'daw' ? 'on' : '') + '" data-v="daw">DAW</button><button class="' + (b.clockSource === 'internal' ? 'on' : '') + '" data-v="internal">Int</button></div></div>';
+        h += '<div class="behaviour-row">' + renderTrigRateRow(b, 'Rate') + '</div>';
         h += '<div class="behaviour-row"><span class="sub-lbl">On jump</span><div class="seg-inline" data-b="' + b.id + '" data-f="jumpMode"><button class="' + (b.jumpMode === 'restart' ? 'on' : '') + '" data-v="restart">Restart</button><button class="' + (b.jumpMode === 'random' ? 'on' : '') + '" data-v="random">Random</button></div></div>';
     } else if (b.trigger === 'midi') {
         h += '<div class="sub-row"><span class="sub-lbl">Mode</span><select class="sub-sel" data-b="' + b.id + '" data-f="midiMode">';
@@ -1362,7 +1376,7 @@ function renderMorphBody(b) {
         h += '</div></div>';
         // Source sub-options
         if (b.morphSource === 'tempo') {
-            h += '<div class="sub-row"><span class="sub-lbl">Div</span>' + renderBeatDivSelect(b.id, 'beatDiv', b.beatDiv) + '<div class="seg-inline" data-b="' + b.id + '" data-f="clockSource"><button class="' + ((b.clockSource || 'daw') === 'daw' ? 'on' : '') + '" data-v="daw">DAW</button><button class="' + (b.clockSource === 'internal' ? 'on' : '') + '" data-v="internal">Int</button></div></div>';
+            h += '<div class="sub-row">' + renderTrigRateRow(b, 'Rate') + '</div>';
         } else if (b.morphSource === 'midi') {
             h += '<div class="sub-row"><span class="sub-lbl">Mode</span><select class="sub-sel" data-b="' + b.id + '" data-f="midiMode">';
             h += '<option value="any_note"' + (b.midiMode === 'any_note' ? ' selected' : '') + '>Any Note</option>';
@@ -1497,7 +1511,7 @@ function wireBlocks() {
     document.querySelectorAll('.lclose').forEach(function (btn) { btn.onclick = function (e) { e.stopPropagation(); var id = parseInt(btn.dataset.id); pushUndoSnapshot(); blocks = blocks.filter(function (b) { return b.id !== id; }); if (actId === id) actId = blocks.length ? blocks[0].id : null; if (assignMode === id) assignMode = null; renderBlocks(); renderAllPlugins(); updCounts(); syncBlocksToHost(); }; });
     document.querySelectorAll('[data-pwr]').forEach(function (btn) { btn.onclick = function (e) { e.stopPropagation(); var bId = parseInt(btn.dataset.pwr); var b = findBlock(bId); if (b) { b.enabled = !b.enabled; renderSingleBlock(bId); renderAllPlugins(); syncBlocksToHost(); } }; });
     document.querySelectorAll('.seg,.seg-inline').forEach(function (seg) { seg.querySelectorAll('button').forEach(function (btn) { btn.onclick = function (e) { e.stopPropagation(); var bId = parseInt(seg.dataset.b); var b = findBlock(bId); if (b) { var oldMode = b[seg.dataset.f]; b[seg.dataset.f] = btn.dataset.v; if (seg.dataset.f === 'mode' && oldMode !== btn.dataset.v) { /* Leaving shapes/shapes_range: restore params to stored bases */ if ((oldMode === 'shapes' || oldMode === 'shapes_range') && b.targets.size > 0) { var basesMap = oldMode === 'shapes_range' ? b.targetRangeBases : b.targetBases; var setFn = (window.__JUCE__ && window.__JUCE__.backend) ? window.__juceGetNativeFunction('setParam') : null; b.targets.forEach(function (pid) { var p = PMap[pid]; if (!p) return; var base = basesMap && basesMap[pid] !== undefined ? basesMap[pid] : p.v; p.v = base; if (setFn && p.hostId !== undefined) setFn(p.hostId, p.realIndex, base); }); } /* Leaving link: restore params to stored link bases */ if (oldMode === 'link' && b.targets.size > 0) { var setFn2 = (window.__JUCE__ && window.__JUCE__.backend) ? window.__juceGetNativeFunction('setParam') : null; b.targets.forEach(function (pid) { var p = PMap[pid]; if (!p) return; var base = b.linkBases && b.linkBases[pid] !== undefined ? b.linkBases[pid] : p.v; p.v = base; if (setFn2 && p.hostId !== undefined) setFn2(p.hostId, p.realIndex, base); }); } /* Entering shapes: capture current param values as bases for existing targets */ if (btn.dataset.v === 'shapes' && b.targets.size > 0) { if (!b.targetBases) b.targetBases = {}; b.targets.forEach(function (pid) { var p = PMap[pid]; if (p && b.targetBases[pid] === undefined) b.targetBases[pid] = p.v; }); } /* Entering link: capture current param values as link bases */ if (btn.dataset.v === 'link' && b.targets.size > 0) { if (!b.linkBases) b.linkBases = {}; b.targets.forEach(function (pid) { var p = PMap[pid]; if (p && b.linkBases[pid] === undefined) b.linkBases[pid] = p.v; }); } } renderSingleBlock(bId); if (seg.dataset.f === 'mode') renderAllPlugins(); syncBlocksToHost(); } }; }); });
-    document.querySelectorAll('.tgl').forEach(function (t) { t.onclick = function (e) { e.stopPropagation(); var bId = parseInt(t.dataset.b); var b = findBlock(bId); if (b) { b[t.dataset.f] = !b[t.dataset.f]; renderSingleBlock(bId); syncBlocksToHost(); } }; });
+    document.querySelectorAll('.tgl').forEach(function (t) { t.onclick = function (e) { e.stopPropagation(); var bId = parseInt(t.dataset.b); var b = findBlock(bId); if (b) { var f = t.dataset.f; if (f === 'trigFreeInv') b.trigFree = !b.trigFree; /* toggle shows Sync, stores Free */ else b[f] = !b[f]; renderSingleBlock(bId); syncBlocksToHost(); } }; });
     document.querySelectorAll('.sub-sel').forEach(function (s) { s.onchange = function () { var bId = parseInt(s.dataset.b); var b = findBlock(bId); if (b) { var val = s.value; if (s.dataset.f === 'midiCh') val = parseInt(val) || 0; else if (s.dataset.f === 'envFilterBW') val = parseFloat(val) || 2; b[s.dataset.f] = val; renderSingleBlock(bId); syncBlocksToHost(); } }; });
     // ── Link: add plugin source button — opens lane-style searchable dropdown ──
     document.querySelectorAll('.link-add-src-plugin').forEach(function (btn) {
@@ -1907,7 +1921,7 @@ function wireBlocks() {
     // Default values for double-click reset
     var knobDefaults = { rMin: 0, rMax: 100, threshold: -12, glideMs: 200, envAtk: 10, envRel: 100, envSens: 50, envFilterFreq: 50, envFilterBW: 5, morphSpeed: 50, morphGlide: 200, jitter: 0, snapRadius: 100, lfoDepth: 80, lfoRotation: 0, sampleSpeedPct: 100, qSteps: 12, shapeSize: 80, shapeSpin: 0, shapeSpeed: 50, shapePhaseOffset: 0, linkSmoothMs: 0,
         // Rate knobs are 0-100 positions; 56 ≈ 0.5 Hz on the exponential Hz curve
-        shapeHzPct: 56, morphHzPct: 56 };
+        shapeHzPct: 56, morphHzPct: 56, trigHzPct: 61 /* ~1 Hz */ };
     document.querySelectorAll('.lbody input[type="range"]').forEach(function (sl) {
         if (!sl.dataset.b) return;
         // Skip link slider types — they have their own handlers
@@ -1963,6 +1977,8 @@ function wireBlocks() {
                 curVal = pctFromHz(b.shapeHz);
             } else if (f === 'morphHzPct') {
                 curVal = pctFromHz(b.morphHz);
+            } else if (f === 'trigHzPct') {
+                curVal = pctFromHz(b.trigHz != null ? b.trigHz : 1);
             } else if (f.indexOf('linkMin__') === 0) {
                 var _pid = f.substring(9);
                 curVal = (b.linkMin && b.linkMin[_pid] != null) ? b.linkMin[_pid] : 0;
@@ -1989,6 +2005,7 @@ function wireBlocks() {
                 // Rate knobs store Hz (applied live, so the change is heard while dragging)
                 else if (f === 'shapeHzPct') b.shapeHz = hzFromPct(nv);
                 else if (f === 'morphHzPct') b.morphHz = hzFromPct(nv);
+                else if (f === 'trigHzPct') b.trigHz = hzFromPct(nv);
                 else if (f.indexOf('linkMin__') === 0) { var _pid = f.substring(9); if (!b.linkMin) b.linkMin = {}; b.linkMin[_pid] = nv; }
                 else if (f.indexOf('linkMax__') === 0) { var _pid = f.substring(9); if (!b.linkMax) b.linkMax = {}; b.linkMax[_pid] = nv; }
                 else if (f.indexOf('linkMacro__') === 0) { var _si = parseInt(f.substring(11)); if (b.linkSources && b.linkSources[_si]) b.linkSources[_si].macroValue = nv; }
@@ -2032,7 +2049,7 @@ function wireBlocks() {
                     else if (f === 'envFilterBW') valEl.textContent = envFmtBw(nv);
                     else if (f === 'morphSpeed') valEl.textContent = morphSpeedDisplay(nv);
                     else if (f === 'sampleSpeedPct') valEl.textContent = b.sampleSpeed.toFixed(1) + 'x';
-                    else if (f === 'shapeHzPct' || f === 'morphHzPct') valEl.textContent = fmtHz(hzFromPct(nv));
+                    else if (f === 'shapeHzPct' || f === 'morphHzPct' || f === 'trigHzPct') valEl.textContent = fmtHz(hzFromPct(nv));
                     else valEl.textContent = nv + '%';
                 }
                 // Live update pad visualizations
@@ -2070,7 +2087,8 @@ function wireBlocks() {
                 // Push undo if value changed
                 var endVal = (f === 'sampleSpeedPct') ? (b.sampleSpeed * 100)
                            : (f === 'shapeHzPct') ? b.shapeHz
-                           : (f === 'morphHzPct') ? b.morphHz : b[f];
+                           : (f === 'morphHzPct') ? b.morphHz
+                           : (f === 'trigHzPct') ? b.trigHz : b[f];
                 if (endVal !== _knobStartVal && _knobUndoSnap) {
                     undoStack.push({ type: 'full', snapshot: _knobUndoSnap });
                     if (undoStack.length > maxUndo) undoStack.shift();
@@ -2099,6 +2117,7 @@ function wireBlocks() {
                 if (f === 'sampleSpeedPct') b.sampleSpeed = def / 100;
                 else if (f === 'shapeHzPct') b.shapeHz = hzFromPct(def);
                 else if (f === 'morphHzPct') b.morphHz = hzFromPct(def);
+                else if (f === 'trigHzPct') b.trigHz = hzFromPct(def);
                 else b[f] = def;
                 undoStack.push({ type: 'full', snapshot: snap });
                 if (undoStack.length > maxUndo) undoStack.shift();
@@ -2118,12 +2137,14 @@ function wireBlocks() {
             var curVal = (f === 'sampleSpeedPct') ? (b.sampleSpeed * 100)
                        : (f === 'shapeHzPct') ? pctFromHz(b.shapeHz)
                        : (f === 'morphHzPct') ? pctFromHz(b.morphHz)
+                       : (f === 'trigHzPct') ? pctFromHz(b.trigHz != null ? b.trigHz : 1)
                        : (b[f] != null ? b[f] : mn);
             var nv = Math.round(Math.max(mn, Math.min(mx, curVal + delta)));
             if (nv === Math.round(curVal)) return;
             if (f === 'sampleSpeedPct') b.sampleSpeed = nv / 100;
             else if (f === 'shapeHzPct') b.shapeHz = hzFromPct(nv);
             else if (f === 'morphHzPct') b.morphHz = hzFromPct(nv);
+            else if (f === 'trigHzPct') b.trigHz = hzFromPct(nv);
             else b[f] = nv;
             renderSingleBlock(bId); debouncedSync();
         }, { passive: false });
@@ -3343,6 +3364,7 @@ function syncBlocksToHost() {
         var obj = {
             id: b.id, mode: b.mode, targets: tList,
             trigger: b.trigger, beatDiv: b.beatDiv,
+            trigFree: !!b.trigFree, trigHz: b.trigHz != null ? b.trigHz : 1,
             midiMode: b.midiMode, midiNote: b.midiNote || 60, midiCC: b.midiCC || 1, midiCh: parseInt(b.midiCh) || 0,
             threshold: b.threshold || -12, audioSrc: b.audioSrc || 'main',
             rMin: b.rMin / 100, rMax: b.rMax / 100,

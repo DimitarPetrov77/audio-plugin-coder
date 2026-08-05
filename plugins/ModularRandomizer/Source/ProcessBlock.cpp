@@ -291,7 +291,20 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 }
 
                 // Tempo trigger
-                if (lb.triggerE == TriggerType::Tempo)
+                if (lb.triggerE == TriggerType::Tempo && lb.trigFree)
+                {
+                    // Free rate: fire every 1/trigHz seconds, independent of tempo/transport.
+                    double secsThisBuffer = (double) numSamples / currentSampleRate;
+                    double period = 1.0 / (double) juce::jlimit (0.01f, 100.0f, lb.trigHz);
+                    lb.trigAccum += secsThisBuffer;
+                    if (lb.trigAccum >= period)
+                    {
+                        // Subtract rather than reset so the average rate stays exact
+                        lb.trigAccum -= period * std::floor (lb.trigAccum / period);
+                        fired = true;
+                    }
+                }
+                else if (lb.triggerE == TriggerType::Tempo)
                 {
                     bool useInternal = (lb.clockSourceE == ClockSource::Internal);
                     if (useInternal && lb.internalBpm > 0.0f)
@@ -2218,6 +2231,8 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             // Still process serial chain so plugins stay fed
             for (auto& hp : hostedPlugins)
                 processOnePlugin (*hp, buffer, midiMessages);
+            // No oversampling ran, so pad to the latency we reported to the host
+            eqLatencyPad.process (buffer, mainBusChannels, numSamples);
         }
         else if (nPts < 1)
         {
@@ -2225,6 +2240,7 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             eqDirty.exchange (false);
             for (auto& hp : hostedPlugins)
                 processOnePlugin (*hp, buffer, midiMessages);
+            eqLatencyPad.process (buffer, mainBusChannels, numSamples);
         }
         else
         {
@@ -2577,9 +2593,15 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
                 if (eqOversamplerReady.load(std::memory_order_acquire) && eqOversampler)
                 {
-                    int osFactor = 1 << eqOversampleOrder;
+                    int osFactor = 1 << eqOversampleOrder.load (std::memory_order_relaxed);
                     float osSR = sr * osFactor;
-                    juce::dsp::AudioBlock<float> inputBlock (buffer);
+                    // Feed ONLY the main-bus channels. The oversampler is allocated for the
+                    // output channel count (2), but `buffer` also carries the sidechain when
+                    // one is connected (4 ch) — passing the whole buffer ran past the
+                    // oversampler's internal arrays (assert in debug, garbage in release).
+                    int osCh = juce::jlimit (1, (int) maxEqChannels, mainBusChannels);
+                    juce::dsp::AudioBlock<float> fullBlock (buffer);
+                    auto inputBlock = fullBlock.getSubsetChannelBlock (0, (size_t) osCh);
                     auto osBlock = eqOversampler->processSamplesUp (inputBlock);
                     int osNumSamples = (int) osBlock.getNumSamples();
                     int osNumChannels = (int) osBlock.getNumChannels();
@@ -3092,6 +3114,9 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         float dry = 1.0f - wet;
         int mixChannels = juce::jmin (mainBusChannels, dryBuffer.getNumChannels());
         int mixSamples  = juce::jmin (buffer.getNumSamples(),  dryBuffer.getNumSamples());
+        // Delay the dry copy by the oversampler's latency so the two paths line up —
+        // without this, any mix below 100% wet comb-filters while oversampling is on.
+        dryAligner.process (dryBuffer, mixChannels, mixSamples);
         for (int ch = 0; ch < mixChannels; ++ch)
         {
             auto* wetData = buffer.getWritePointer (ch);

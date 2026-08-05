@@ -18,7 +18,7 @@ function saveUiStateToHost() {
             return {
                 id: b.id, mode: b.mode, colorIdx: b.colorIdx,
                 targets: Array.from(b.targets), targetBases: b.targetBases || {}, targetRanges: b.targetRanges || {}, targetRangeBases: b.targetRangeBases || {},
-                trigger: b.trigger, beatDiv: b.beatDiv,
+                trigger: b.trigger, beatDiv: b.beatDiv, trigFree: !!b.trigFree, trigHz: b.trigHz != null ? b.trigHz : 1,
                 midiMode: b.midiMode, midiNote: b.midiNote, midiCC: b.midiCC, midiCh: b.midiCh,
                 velScale: b.velScale, threshold: b.threshold, audioSrc: b.audioSrc,
                 rMin: b.rMin, rMax: b.rMax, rangeMode: b.rangeMode,
@@ -252,7 +252,7 @@ function restoreFromHost() {
                         return {
                             id: sb.id, mode: sb.mode || 'randomize', targets: tSet, targetBases: sb.targetBases || {}, targetRanges: sb.targetRanges || {}, targetRangeBases: sb.targetRangeBases || {},
                             colorIdx: sb.colorIdx || 0,
-                            trigger: sb.trigger || 'manual', beatDiv: sb.beatDiv || '1/4',
+                            trigger: sb.trigger || 'manual', beatDiv: sb.beatDiv || '1/4', trigFree: !!sb.trigFree, trigHz: sb.trigHz != null ? sb.trigHz : 1,
                             midiMode: sb.midiMode || 'any_note', midiNote: sb.midiNote != null ? sb.midiNote : 60,
                             midiCC: sb.midiCC != null ? sb.midiCC : 1, midiCh: sb.midiCh != null ? sb.midiCh : 0,
                             velScale: sb.velScale || false, threshold: sb.threshold != null ? sb.threshold : -12,

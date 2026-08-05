@@ -532,6 +532,24 @@
     animation: paramTouch 800ms ease-out;
 }
 
+/* ── Touched parameter (per plugin) ──
+   Sits directly under the plugin's name and shows the parameter last grabbed in that
+   plugin's own UI. Holds a real .pr row, so it looks and behaves like a rack row;
+   only a subtle accent edge marks it as the current one. */
+.pcard-touched {
+    padding: 3px 4px;
+    border-left: 2px solid var(--accent, #2D6B3F);
+    background: rgba(255, 255, 255, 0.025);
+}
+
+.pcard-touched .pr {
+    position: relative !important;
+    top: auto !important;
+    left: auto !important;
+    right: auto !important;
+    margin: 0;
+}
+
 .pr-name {
     font-size: 11px;
     font-weight: 500;

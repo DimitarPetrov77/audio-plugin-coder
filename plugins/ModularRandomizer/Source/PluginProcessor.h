@@ -418,7 +418,11 @@ public:
 
     /** Routing mode: 0=sequential, 1=parallel, 2=wrongeq */
     int  getRoutingMode() const    { return routingMode.load(); }
-    void setRoutingMode (int mode) { routingMode.store (juce::jlimit (0, 2, mode)); }
+    void setRoutingMode (int mode)
+    {
+        routingMode.store (juce::jlimit (0, 2, mode));
+        updateReportedLatency(); // oversampling latency only applies in WrongEQ mode
+    }
 
     /** WrongEQ: receive EQ curve data from JS */
     void setEqCurve (const juce::String& jsonData);
@@ -534,6 +538,61 @@ private:
 
     // Pre-allocated scratch buffers (sized in prepareToPlay, never allocate on audio thread)
     juce::AudioBuffer<float> dryBuffer;      // dry signal copy for wet/dry mix
+
+    /** Fixed integer-sample delay used to keep paths phase-aligned when the EQ
+        oversampler introduces latency. Two uses:
+          • the dry copy, so the internal dry/wet mix doesn't comb
+          • the EQ-mode fallbacks (bypass / no bands), where no oversampling happens,
+            so the plugin's real latency always matches what we report to the host. */
+    struct LatencyAligner
+    {
+        juce::AudioBuffer<float> ring;
+        int pos = 0;
+        int delay = 0;
+
+        void prepare (int numCh, int maxDelay)
+        {
+            ring.setSize (juce::jmax (1, numCh), juce::jmax (16, maxDelay + 8), false, true, true);
+            ring.clear();
+            pos = 0;
+        }
+        void setDelay (int d)
+        {
+            int maxD = juce::jmax (0, ring.getNumSamples() - 4);
+            d = juce::jlimit (0, maxD, d);
+            if (d != delay) { delay = d; ring.clear(); pos = 0; }
+        }
+        /** In-place delay of the first numCh channels by `delay` samples. */
+        void process (juce::AudioBuffer<float>& buf, int numCh, int numSamples)
+        {
+            if (delay <= 0) return;
+            const int len = ring.getNumSamples();
+            if (len <= 0) return;
+            int endPos = pos;
+            for (int ch = 0; ch < juce::jmin (numCh, ring.getNumChannels()); ++ch)
+            {
+                auto* x = buf.getWritePointer (ch);
+                auto* r = ring.getWritePointer (ch);
+                int p = pos;
+                for (int s = 0; s < numSamples; ++s)
+                {
+                    int readIdx = p - delay; if (readIdx < 0) readIdx += len;
+                    float out = r[readIdx];
+                    r[p] = x[s];
+                    x[s] = out;
+                    if (++p >= len) p = 0;
+                }
+                endPos = p; // same for every channel
+            }
+            pos = endPos;
+        }
+    };
+    LatencyAligner dryAligner;   // aligns the dry copy with the oversampled wet path
+    LatencyAligner eqLatencyPad; // keeps latency constant when the OS path is skipped
+
+    /** Recompute and publish the plugin's latency (oversampling only adds latency in
+        WrongEQ mode). Must be called from the message thread. */
+    void updateReportedLatency();
     juce::AudioBuffer<float> synthAccum;     // accumulates layered synth outputs (sequential mode)
     struct MidiTrigEvent { int note; int vel; int ch; bool isCC; };
     std::vector<MidiTrigEvent> blockMidiEvents;  // MIDI events for trigger matching
@@ -896,7 +955,8 @@ private:
     // Factor: 1 = off, 2 = 2× oversampling, 4 = 4× oversampling.
     std::atomic<int> eqOversampleFactor { 1 };
     std::unique_ptr<juce::dsp::Oversampling<float>> eqOversampler;
-    int eqOversampleOrder = 0; // current oversampler order (0=1x, 1=2x, 2=4x)
+    // Atomic: written on the message thread (reconfigure), read on the audio thread.
+    std::atomic<int> eqOversampleOrder { 0 }; // current oversampler order (0=1x, 1=2x, 2=4x)
     std::atomic<bool> eqOversamplerReady { false };
 
 public:
@@ -1096,6 +1156,11 @@ private:
         TriggerType triggerE = TriggerType::Manual;
         juce::String beatDiv;
         float beatDivBeats = 1.0f;  // pre-computed beats-per-trigger
+        // Unified Hz|Sync for the tempo trigger: when trigFree is true the trigger fires
+        // at trigHz (free-running seconds), otherwise on beatDivBeats against the clock.
+        bool  trigFree = false;
+        float trigHz = 1.0f;
+        double trigAccum = 0.0;     // seconds accumulator for free-rate firing
         juce::String midiMode;
         MidiTrigMode midiModeE = MidiTrigMode::AnyNote;
         int midiNote = 60;
@@ -1654,18 +1719,51 @@ private:
     {
         int slot;
         std::atomic<bool> (&touched)[kMaxPlugins][kMaxParams];
+        std::atomic<int>* lastSlot = nullptr;
+        std::atomic<int>* lastIdx  = nullptr;
 
-        GestureListener (int s, std::atomic<bool> (&t)[kMaxPlugins][kMaxParams])
-            : slot (s), touched (t) {}
+        GestureListener (int s, std::atomic<bool> (&t)[kMaxPlugins][kMaxParams],
+                         std::atomic<int>* ls = nullptr, std::atomic<int>* li = nullptr)
+            : slot (s), touched (t), lastSlot (ls), lastIdx (li) {}
 
         void parameterValueChanged (int, float) override {}
         void parameterGestureChanged (int paramIndex, bool starting) override
         {
             if (paramIndex >= 0 && paramIndex < kMaxParams)
+            {
                 touched[slot][paramIndex].store (starting, std::memory_order_release);
+                // Remember the last parameter the user physically grabbed in the hosted
+                // plugin's own UI. Only a real begin-gesture sets this, so programmatic
+                // writes (randomize / modulation / assignment) can never trigger it.
+                // It is intentionally NOT cleared on gesture end — the UI keeps showing
+                // the most recently touched parameter (Bitwig-style).
+                if (starting && lastSlot != nullptr && lastIdx != nullptr)
+                {
+                    lastSlot->store (slot, std::memory_order_release);
+                    lastIdx->store (paramIndex, std::memory_order_release);
+                }
+            }
         }
     };
     std::vector<std::unique_ptr<GestureListener>> gestureListeners;
+
+    // Last parameter touched in a hosted plugin's own UI (gesture-based, never set by
+    // our own writes). Consumed by the editor to drive the "touched parameter" panel.
+    std::atomic<int> lastTouchedSlot { -1 };
+    std::atomic<int> lastTouchedIdx  { -1 };
+public:
+    /** Returns "pluginId:paramIndex" for the last parameter the user grabbed inside a
+        hosted plugin's UI, or an empty string if none. */
+    juce::String getLastTouchedParamKey() const
+    {
+        int s = lastTouchedSlot.load (std::memory_order_acquire);
+        int i = lastTouchedIdx.load (std::memory_order_acquire);
+        if (s < 0 || i < 0 || s >= kMaxPlugins) return {};
+        auto* hp = pluginSlots[s];
+        if (hp == nullptr) return {};
+        return juce::String (hp->id) + ":" + juce::String (i);
+    }
+private:
 
     // Map pluginId → array slot index (pluginId % kMaxPlugins)
     int slotForId (int pluginId) const;

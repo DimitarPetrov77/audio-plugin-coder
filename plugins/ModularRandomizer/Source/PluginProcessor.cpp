@@ -395,7 +395,7 @@ void HostesaAudioProcessor::prepareToPlay(double sampleRate,
   {
     int factor = eqOversampleFactor.load();
     int order = (factor >= 4) ? 2 : (factor >= 2) ? 1 : 0;
-    eqOversampleOrder = order;
+    eqOversampleOrder.store (order, std::memory_order_relaxed);
     if (order > 0) {
       eqOversampler = std::make_unique<juce::dsp::Oversampling<float>>(
           (juce::uint32)numCh, (juce::uint32)order,
@@ -407,6 +407,11 @@ void HostesaAudioProcessor::prepareToPlay(double sampleRate,
       eqOversamplerReady.store(false, std::memory_order_release);
     }
   }
+
+  // Latency alignment buffers (sized generously — IIR oversampling latency is small)
+  dryAligner.prepare(numCh, 512);
+  eqLatencyPad.prepare(numCh, 512);
+  updateReportedLatency();
 
   // Initialize proxy value cache sentinels (-999.0f = no pending update)
   for (int i = 0; i < proxyParamCount; ++i)
@@ -544,6 +549,11 @@ void HostesaAudioProcessor::updateLogicBlocks(const juce::String &jsonData) {
         obj->hasProperty("enabled") ? (bool)obj->getProperty("enabled") : true;
     lb.trigger = obj->getProperty("trigger").toString();
     lb.beatDiv = obj->getProperty("beatDiv").toString();
+    // Unified Hz|Sync for the tempo trigger
+    lb.trigFree = obj->hasProperty("trigFree") ? (bool) obj->getProperty("trigFree") : false;
+    lb.trigHz = obj->hasProperty("trigHz")
+                    ? (float) (double) obj->getProperty("trigHz")
+                    : 1.0f;
     lb.midiMode = obj->getProperty("midiMode").toString();
     lb.midiNote = (int)obj->getProperty("midiNote");
     lb.midiCC = (int)obj->getProperty("midiCC");
@@ -1022,6 +1032,7 @@ void HostesaAudioProcessor::updateLogicBlocks(const juce::String &jsonData) {
       if (existing.id == lb.id) {
         lb.currentEnvValue = existing.currentEnvValue;
         lb.lastBeat = existing.lastBeat;
+        lb.trigAccum = existing.trigAccum; // keep free-rate trigger phase across rebuilds
         lb.lastAudioTrigSample = existing.lastAudioTrigSample;
         lb.internalPpq = existing.internalPpq;
 
@@ -1431,7 +1442,8 @@ void HostesaAudioProcessor::rebuildPluginSlots() {
 
       // Register gesture listeners on all params for hosted-UI touch detection.
       if (hp->instance && slot >= 0) {
-        auto listener = std::make_unique<GestureListener>(slot, paramTouched);
+        auto listener = std::make_unique<GestureListener>(
+            slot, paramTouched, &lastTouchedSlot, &lastTouchedIdx);
         auto &params = hp->instance->getParameters();
         for (auto *p : params)
           p->addListener(listener.get());
@@ -1634,6 +1646,20 @@ void HostesaAudioProcessor::randomizeParams(
   }
 }
 
+void HostesaAudioProcessor::updateReportedLatency() {
+  // The EQ oversampler is the only source of latency, and it only runs in WrongEQ mode.
+  int lat = 0;
+  if (routingMode.load() == 2 &&
+      eqOversamplerReady.load(std::memory_order_acquire) && eqOversampler)
+    lat = (int)std::round(eqOversampler->getLatencyInSamples());
+
+  // Keep the dry copy and the non-oversampled fallbacks aligned to the same figure so
+  // the plugin's real latency always equals what the host is told.
+  dryAligner.setDelay(lat);
+  eqLatencyPad.setDelay(lat);
+  setLatencySamples(lat);
+}
+
 void HostesaAudioProcessor::setEqUiMod(const juce::String &jsonData) {
   // Editor pushes the EQ's own internal LFO/drift/Q-mod as per-point OFFSETS.
   // Format: [{f:HzOffset, g:dBOffset, q:offset}, ...] indexed by EQ point.
@@ -1792,7 +1818,7 @@ void HostesaAudioProcessor::setEqCurve(const juce::String &jsonData) {
       // thread)
       int numCh = getTotalNumOutputChannels();
       int order = (newOS >= 4) ? 2 : (newOS >= 2) ? 1 : 0;
-      eqOversampleOrder = order;
+      eqOversampleOrder.store (order, std::memory_order_relaxed);
 
       // CRITICAL: gate audio thread BEFORE any destruction/creation.
       // Audio thread checks eqOversamplerReady with acquire; this release
@@ -1809,6 +1835,7 @@ void HostesaAudioProcessor::setEqCurve(const juce::String &jsonData) {
         // Off: flag is already false above, safe to destroy now
         eqOversampler.reset();
       }
+      updateReportedLatency(); // oversampling factor changed → latency changed
     }
   }
 

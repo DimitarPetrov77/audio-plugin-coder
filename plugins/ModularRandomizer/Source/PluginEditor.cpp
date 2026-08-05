@@ -768,14 +768,41 @@ HostesaAudioProcessorEditor::HostesaAudioProcessorEditor (
                 {
                     if (args.size() >= 2)
                     {
-                        auto presetName = args[0].toString();
+                        // Sanitize: a raw name containing \ / : * ? " < > | produced an
+                        // invalid path, so the write failed silently. Save, load and
+                        // delete must all sanitize identically or they won't agree.
+                        auto presetName = HostesaAudioProcessor::sanitizeForFilename (args[0].toString());
                         auto jsonData   = args[1].toString();
+                        if (presetName.isEmpty())
+                        {
+                            completion (juce::var ("err:invalid name"));
+                            return;
+                        }
+                        // Never overwrite a good preset with a truncated/!valid payload
+                        if (juce::JSON::parse (jsonData).isVoid())
+                        {
+                            completion (juce::var ("err:preset data was incomplete"));
+                            return;
+                        }
                         auto chainsDir  = HostesaAudioProcessor::getChainsDir();
                         chainsDir.createDirectory();
+                        if (! chainsDir.isDirectory())
+                        {
+                            completion (juce::var ("err:cannot create " + chainsDir.getFullPathName()));
+                            return;
+                        }
                         auto presetFile = chainsDir.getChildFile (presetName + ".mrchain");
-                        presetFile.replaceWithText (jsonData);
+                        // replaceWithText returns false on failure — previously ignored,
+                        // so a failed save still reported success to the UI.
+                        if (! presetFile.replaceWithText (jsonData))
+                        {
+                            completion (juce::var ("err:could not write " + presetFile.getFullPathName()));
+                            return;
+                        }
+                        completion (juce::var ("ok"));
+                        return;
                     }
-                    completion (juce::var ("ok"));
+                    completion (juce::var ("err:missing arguments"));
                 }
             )
             .withNativeFunction (
@@ -863,7 +890,10 @@ HostesaAudioProcessorEditor::HostesaAudioProcessorEditor (
                 {
                     if (args.size() >= 1)
                     {
-                        auto presetName = args[0].toString();
+                        // Sanitize: a raw name containing \ / : * ? " < > | produced an
+                        // invalid path, so the write failed silently. Save, load and
+                        // delete must all sanitize identically or they won't agree.
+                        auto presetName = HostesaAudioProcessor::sanitizeForFilename (args[0].toString());
                         auto chainsDir  = HostesaAudioProcessor::getChainsDir();
                         auto presetFile = chainsDir.getChildFile (presetName + ".mrchain");
                         if (presetFile.existsAsFile())
@@ -882,7 +912,10 @@ HostesaAudioProcessorEditor::HostesaAudioProcessorEditor (
                 {
                     if (args.size() >= 1)
                     {
-                        auto presetName = args[0].toString();
+                        // Sanitize: a raw name containing \ / : * ? " < > | produced an
+                        // invalid path, so the write failed silently. Save, load and
+                        // delete must all sanitize identically or they won't agree.
+                        auto presetName = HostesaAudioProcessor::sanitizeForFilename (args[0].toString());
                         auto chainsDir  = HostesaAudioProcessor::getChainsDir();
                         auto presetFile = chainsDir.getChildFile (presetName + ".mrchain");
                         if (presetFile.existsAsFile())
@@ -899,7 +932,10 @@ HostesaAudioProcessorEditor::HostesaAudioProcessorEditor (
                 {
                     if (args.size() >= 2)
                     {
-                        auto presetName = args[0].toString();
+                        // Sanitize: a raw name containing \ / : * ? " < > | produced an
+                        // invalid path, so the write failed silently. Save, load and
+                        // delete must all sanitize identically or they won't agree.
+                        auto presetName = HostesaAudioProcessor::sanitizeForFilename (args[0].toString());
                         auto jsonData   = args[1].toString();
                         auto eqDir      = HostesaAudioProcessor::getEqPresetsDir();
                         eqDir.createDirectory();
@@ -933,7 +969,10 @@ HostesaAudioProcessorEditor::HostesaAudioProcessorEditor (
                 {
                     if (args.size() >= 1)
                     {
-                        auto presetName = args[0].toString();
+                        // Sanitize: a raw name containing \ / : * ? " < > | produced an
+                        // invalid path, so the write failed silently. Save, load and
+                        // delete must all sanitize identically or they won't agree.
+                        auto presetName = HostesaAudioProcessor::sanitizeForFilename (args[0].toString());
                         auto eqDir      = HostesaAudioProcessor::getEqPresetsDir();
                         auto presetFile = eqDir.getChildFile (presetName + ".mreq");
                         if (presetFile.existsAsFile())
@@ -952,7 +991,10 @@ HostesaAudioProcessorEditor::HostesaAudioProcessorEditor (
                 {
                     if (args.size() >= 1)
                     {
-                        auto presetName = args[0].toString();
+                        // Sanitize: a raw name containing \ / : * ? " < > | produced an
+                        // invalid path, so the write failed silently. Save, load and
+                        // delete must all sanitize identically or they won't agree.
+                        auto presetName = HostesaAudioProcessor::sanitizeForFilename (args[0].toString());
                         auto eqDir      = HostesaAudioProcessor::getEqPresetsDir();
                         auto presetFile = eqDir.getChildFile (presetName + ".mreq");
                         if (presetFile.existsAsFile())
@@ -973,7 +1015,7 @@ HostesaAudioProcessorEditor::HostesaAudioProcessorEditor (
                     if (args.size() >= 2)
                     {
                         auto type       = args[0].toString();
-                        auto presetName = args[1].toString();
+                        auto presetName = HostesaAudioProcessor::sanitizeForFilename (args[1].toString());
 
                         juce::File target;
                         if (type == "chain")
@@ -1446,26 +1488,15 @@ void HostesaAudioProcessorEditor::timerCallback()
     // This prevents 200+ param plugins like FabFilter Saturn from killing perf
     // ═══════════════════════════════════════════════════════════════
     {
-        touchedParamId = {};
-
-        // Drain self-write FIFO every tick (must keep up with audio thread)
-        // Purpose: auto-locate exclusion ONLY — prevents params we wrote from
-        // triggering the "touched by plugin UI" detection.
-        // Does NOT promote to Tier 1 — that would add ALL modulated params back to fast polling.
-        std::unordered_set<std::string> selfWritten;
+        // Drain the self-write FIFO every tick so it can never back up.
+        // Its previous job — excluding our own writes from "touched" detection — is
+        // obsolete: touched now comes from plugin-UI begin-gesture callbacks, which our
+        // writes cannot raise. Dropping the key-set also removes two string allocations
+        // per event per tick.
         {
             const auto scope = audioProcessor.selfWriteFifo.read (
                 audioProcessor.selfWriteFifo.getNumReady());
-            for (int i = 0; i < scope.blockSize1; ++i)
-            {
-                auto& e = audioProcessor.selfWriteRing[scope.startIndex1 + i];
-                selfWritten.insert (std::to_string (e.pluginId) + ":" + std::to_string (e.paramIndex));
-            }
-            for (int i = 0; i < scope.blockSize2; ++i)
-            {
-                auto& e = audioProcessor.selfWriteRing[scope.startIndex2 + i];
-                selfWritten.insert (std::to_string (e.pluginId) + ":" + std::to_string (e.paramIndex));
-            }
+            juce::ignoreUnused (scope);
         }
 
         // Refresh modulated param set periodically (every ~0.5s)
@@ -1473,7 +1504,6 @@ void HostesaAudioProcessorEditor::timerCallback()
             modulatedParamKeys = audioProcessor.getModulatedParamKeys();
 
         juce::Array<juce::var> paramUpdates;
-        float biggestDelta = 0.0f;
 
         // ── TIER 1: Visible modulated + recently-changed params — fast read every tick (60Hz) ──
         // KEY OPTIMIZATION: Only poll params that are BOTH modulated AND visible on screen.
@@ -1663,16 +1693,11 @@ void HostesaAudioProcessorEditor::timerCallback()
                         recentlyChangedKeys[key] = 120; // 2 seconds at 60Hz
                     }
 
-                    // Auto-locate for idle params
-                    if (lastIt != lastParamValues.end() && selfWritten.count (key) == 0)
-                    {
-                        float delta = std::abs (val - lastIt->second);
-                        if (delta > 0.0005f && delta > biggestDelta)
-                        {
-                            biggestDelta = delta;
-                            touchedParamId = juce::String (key);
-                        }
-                    }
+                    // NOTE: the "touched parameter" signal deliberately does NOT come from
+                    // value deltas any more. Doing so reported randomize / modulation /
+                    // assignment as user touches. It is now sourced purely from
+                    // begin-gesture callbacks raised by the hosted plugin's own UI
+                    // (see getLastTouchedParamKey below).
                     lastParamValues[key] = val;
                 }
 
@@ -1696,8 +1721,10 @@ void HostesaAudioProcessorEditor::timerCallback()
         if (paramUpdates.size() > 0)
             data->setProperty ("params", juce::var (paramUpdates));
 
-        if (touchedParamId.isNotEmpty())
-            data->setProperty ("touchedParam", touchedParamId);
+        // Gesture-sourced: only a real grab inside a hosted plugin's UI sets this.
+        auto touchedKey = audioProcessor.getLastTouchedParamKey();
+        if (touchedKey.isNotEmpty())
+            data->setProperty ("touchedParam", touchedKey);
     }
 
     // ── Proxy sync: read atomic cache from audio thread, apply on message thread ──

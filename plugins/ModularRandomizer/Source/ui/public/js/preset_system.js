@@ -1006,7 +1006,8 @@ function buildGlobalPresetData() {
         plugins: pluginBlocks.filter(function (pb) { return !pb.isVirtual; }).map(function (pb) {
             var paramData = {};
             pb.params.forEach(function (p) {
-                paramData[p.realIndex] = { name: p.name, value: p.v, locked: p.lk || false };
+                // alk (assign-lock) was dropped here, so it never survived a chain preset
+                paramData[p.realIndex] = { name: p.name, value: p.v, locked: p.lk || false, alk: p.alk || false };
             });
             return { name: pb.name, path: pb.path || '', manufacturer: pb.manufacturer || '', hostId: pb.hostId, params: paramData, bypassed: pb.bypassed || false, expanded: pb.expanded, busId: pb.busId || 0 };
         }),
@@ -1014,7 +1015,7 @@ function buildGlobalPresetData() {
             return {
                 id: b.id, mode: b.mode, colorIdx: b.colorIdx,
                 targets: Array.from(b.targets), targetBases: b.targetBases || {}, targetRanges: b.targetRanges || {}, targetRangeBases: b.targetRangeBases || {},
-                trigger: b.trigger, beatDiv: b.beatDiv,
+                trigger: b.trigger, beatDiv: b.beatDiv, trigFree: !!b.trigFree, trigHz: b.trigHz != null ? b.trigHz : 1,
                 midiMode: b.midiMode, midiNote: b.midiNote, midiCC: b.midiCC, midiCh: b.midiCh,
                 velScale: b.velScale, threshold: b.threshold, audioSrc: b.audioSrc,
                 rMin: b.rMin, rMax: b.rMax, rangeMode: (b.mode === 'randomize') ? b.rangeMode : 'relative', polarity: b.polarity || 'bipolar',
@@ -1066,6 +1067,9 @@ function buildGlobalPresetData() {
         bc: bc, actId: actId,
         internalBpm: internalBpm,
         autoLocate: autoLocate,
+        // Which plugin params / block params are exposed to the DAW's automation list.
+        // This was missing entirely, so exposure was lost every time a chain was recalled.
+        expose: (typeof getExposeStateForSave === 'function') ? getExposeStateForSave() : null,
         busVolumes: busVolumes.slice(),
         busMutes: busMutes.slice(),
         busSolos: busSolos.slice(),
@@ -1073,7 +1077,9 @@ function buildGlobalPresetData() {
             points: wrongEqPoints.map(function (p, idx) {
                 var saveX = (typeof weqAnimRafId !== 'undefined' && weqAnimRafId && typeof weqAnimBaseX !== 'undefined' && weqAnimBaseX.length > idx) ? weqAnimBaseX[idx] : p.x;
                 var saveY = (typeof weqAnimRafId !== 'undefined' && weqAnimRafId && typeof weqAnimBaseY !== 'undefined' && weqAnimBaseY.length > idx) ? weqAnimBaseY[idx] : p.y;
-                return { x: saveX, y: saveY, uid: p.uid, pluginIds: p.pluginIds || [], seg: p.seg || null, solo: p.solo || false, mute: p.mute || false, q: p.q != null ? p.q : 0.707, type: p.type || 'Bell', drift: p.drift || 0, preEq: p.preEq !== false, stereoMode: p.stereoMode || 0, slope: p.slope || 1, modExclude: p.modExclude || 0 };
+                return { x: saveX, y: saveY, uid: p.uid, pluginIds: p.pluginIds || [], seg: p.seg || null, solo: p.solo || false, mute: p.mute || false, q: p.q != null ? p.q : 0.707, type: p.type || 'Bell', drift: p.drift || 0, preEq: p.preEq !== false, stereoMode: p.stereoMode || 0, slope: p.slope || 1, modExclude: p.modExclude || 0,
+                    // per-point modulation depths (were lost on save)
+                    modGainDepth: p.modGainDepth, modQDepth: p.modQDepth, modDriftDepth: p.modDriftDepth };
             }),
             interp: typeof weqGlobalInterp !== 'undefined' ? weqGlobalInterp : 'smooth',
             depth: typeof weqGlobalDepth !== 'undefined' ? weqGlobalDepth : 100,
@@ -1103,6 +1109,12 @@ function buildGlobalPresetData() {
             qModSpread: typeof weqQModSpread !== 'undefined' ? weqQModSpread : 0,
             qLoCut: typeof weqQLoCut !== 'undefined' ? weqQLoCut : 20,
             qHiCut: typeof weqQHiCut !== 'undefined' ? weqQHiCut : 20000,
+            // Tempo-sync settings for the EQ's gain LFO and Q mod (were never saved)
+            gainSync: typeof weqGainSync !== 'undefined' ? weqGainSync : false,
+            gainSyncDiv: typeof weqGainSyncDiv !== 'undefined' ? weqGainSyncDiv : '1/4',
+            qSync: typeof weqQSync !== 'undefined' ? weqQSync : false,
+            qSyncDiv: typeof weqQSyncDiv !== 'undefined' ? weqQSyncDiv : '1/4',
+            syncSource: typeof weqSyncSource !== 'undefined' ? weqSyncSource : 'daw',
 
             dbRange: typeof weqDBRangeMax !== 'undefined' ? weqDBRangeMax : 24,
             splitMode: typeof weqSplitMode !== 'undefined' ? weqSplitMode : false,
@@ -1118,13 +1130,26 @@ function saveGlobalPresetFromInput() {
     var name = nameInput.value.trim();
     if (!name) { nameInput.focus(); return; }
     var data = buildGlobalPresetData();
+    var json;
+    try {
+        json = JSON.stringify(data);
+    } catch (err) {
+        if (typeof showToast === 'function') showToast('Could not build preset: ' + err.message, 'error', 5000);
+        return;
+    }
     var fn = window.__juceGetNativeFunction('saveGlobalPreset');
-    fn(name, JSON.stringify(data)).then(function () {
+    fn(name, json).then(function (res) {
+        // The backend now reports real success/failure — don't claim success blindly.
+        if (typeof res === 'string' && res.indexOf('err:') === 0) {
+            if (typeof showToast === 'function') showToast('Save failed: ' + res.substring(4), 'error', 6000);
+            return;
+        }
         currentGlobalPresetName = name;
         updateGpNameDisplay();
         clearGpDirty();
         nameInput.value = '';
         refreshGlobalPresetList();
+        if (typeof showToast === 'function') showToast('Saved "' + name + '"', 'success', 1800);
     });
 }
 function loadGlobalPreset(presetName) {
@@ -1169,7 +1194,7 @@ function applyGlobalPreset(data, presetName) {
                 id: sb.id, mode: sb.mode || 'randomize', targets: tSet,
                 targetBases: sb.targetBases || {}, targetRanges: sb.targetRanges || {}, targetRangeBases: sb.targetRangeBases || {},
                 colorIdx: sb.colorIdx || 0,
-                trigger: sb.trigger || 'manual', beatDiv: sb.beatDiv || '1/4',
+                trigger: sb.trigger || 'manual', beatDiv: sb.beatDiv || '1/4', trigFree: !!sb.trigFree, trigHz: sb.trigHz != null ? sb.trigHz : 1,
                 midiMode: sb.midiMode || 'any_note', midiNote: sb.midiNote != null ? sb.midiNote : 60, midiCC: sb.midiCC != null ? sb.midiCC : 1, midiCh: sb.midiCh != null ? sb.midiCh : 0,
                 velScale: sb.velScale || false, threshold: sb.threshold != null ? sb.threshold : -12, audioSrc: sb.audioSrc || 'main',
                 rMin: sb.rMin || 0, rMax: sb.rMax !== undefined ? sb.rMax : 100,
@@ -1312,7 +1337,8 @@ function applyGlobalPreset(data, presetName) {
                             }
                             var val = savedParam ? (typeof savedParam === 'object' ? savedParam.value : savedParam) : p.value;
                             var locked = savedParam && savedParam.locked ? true : false;
-                            var param = { id: fid, name: p.name, v: val, disp: p.disp || '', lk: locked, alk: false, realIndex: p.index, hostId: plug.id };
+                            var alk = savedParam && savedParam.alk ? true : false; // assign-lock (was hardcoded false)
+                            var param = { id: fid, name: p.name, v: val, disp: p.disp || '', lk: locked, alk: alk, realIndex: p.index, hostId: plug.id };
                             PMap[fid] = param;
                             gpBatch.push({ p: plug.id, i: p.index, v: val });
                             return param;
@@ -1469,6 +1495,10 @@ function applyGlobalPreset(data, presetName) {
                     if (weq.points) {
                         wrongEqPoints = weq.points.map(function (p) {
                             var pt = { x: p.x, y: p.y, pluginIds: p.pluginIds || [], seg: p.seg || null, solo: p.solo || false, mute: p.mute || false, q: p.q != null ? p.q : 0.707, type: p.type || 'Bell', drift: p.drift || 0, preEq: p.preEq !== undefined ? p.preEq : (weq.preEq !== undefined ? weq.preEq : true), stereoMode: p.stereoMode || 0, slope: p.slope || 1, modExclude: p.modExclude || 0 };
+                            // per-point modulation depths (undefined = inherit global 100%)
+                            if (p.modGainDepth != null) pt.modGainDepth = p.modGainDepth;
+                            if (p.modQDepth != null) pt.modQDepth = p.modQDepth;
+                            if (p.modDriftDepth != null) pt.modDriftDepth = p.modDriftDepth;
                             if (p.uid) pt.uid = p.uid;
                             else if (typeof _weqAllocUid === 'function') pt.uid = _weqAllocUid();
                             return pt;
@@ -1511,6 +1541,12 @@ function applyGlobalPreset(data, presetName) {
                     if (typeof weqQModSpread !== 'undefined' && weq.qModSpread != null) weqQModSpread = weq.qModSpread;
                     if (typeof weqQLoCut !== 'undefined' && weq.qLoCut != null) weqQLoCut = weq.qLoCut;
                     if (typeof weqQHiCut !== 'undefined' && weq.qHiCut != null) weqQHiCut = weq.qHiCut;
+                    // Tempo-sync settings for gain LFO / Q mod
+                    if (typeof weqGainSync !== 'undefined' && weq.gainSync != null) weqGainSync = weq.gainSync;
+                    if (typeof weqGainSyncDiv !== 'undefined' && weq.gainSyncDiv != null) weqGainSyncDiv = weq.gainSyncDiv;
+                    if (typeof weqQSync !== 'undefined' && weq.qSync != null) weqQSync = weq.qSync;
+                    if (typeof weqQSyncDiv !== 'undefined' && weq.qSyncDiv != null) weqQSyncDiv = weq.qSyncDiv;
+                    if (typeof weqSyncSource !== 'undefined' && weq.syncSource != null) weqSyncSource = weq.syncSource;
 
                     if (typeof weqDBRangeMax !== 'undefined' && weq.dbRange != null) weqDBRangeMax = weq.dbRange;
                     if (typeof weqSplitMode !== 'undefined' && weq.splitMode != null) weqSplitMode = weq.splitMode;
@@ -1615,6 +1651,15 @@ function applyGlobalPreset(data, presetName) {
                 });
 
                 renderAllPlugins(); renderBlocks(); updCounts(); syncBlocksToHost(); saveUiStateToHost(); syncExpandedPlugins();
+
+                // Restore DAW-exposed params/blocks. Must run AFTER plugins and blocks
+                // exist (it re-derives the proxy slots from them) — restoreExposeState
+                // also pushes the state down to C++.
+                if (typeof restoreExposeState === 'function') {
+                    if (data.expose) restoreExposeState(data.expose);
+                    else restoreExposeState({ plugins: {}, blocks: {} }); // older preset: start clean
+                }
+
                 clearGpDirty();
                 closeGlobalPresetBrowser();
 

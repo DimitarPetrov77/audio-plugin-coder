@@ -184,6 +184,14 @@ function _rebuildVisPids() {
             }
         }
     }
+    // Include each expanded card's touched param so its row keeps live values even when
+    // that param is scrolled out of the card's own param list.
+    if (typeof pluginBlocks !== 'undefined') {
+        for (var tbi = 0; tbi < pluginBlocks.length; tbi++) {
+            var tpb = pluginBlocks[tbi];
+            if (tpb.expanded && tpb.touchedPid) _visPidsCache.add(tpb.touchedPid);
+        }
+    }
     // Notify C++ about visible PIDs so Tier 1 only polls params on screen
     if (_visPidsCache.size > 0 && window.__JUCE__ && window.__JUCE__.backend) {
         if (!_setVisFn) _setVisFn = window.__juceGetNativeFunction('setVisibleParams');
@@ -221,8 +229,11 @@ function refreshParamDisplay() {
         var p = PMap[pid];
         if (!p) return;
 
-        var row = document.querySelector('.pr[data-pid="' + pid + '"]');
-        if (!row) return;
+        // A param can be on screen more than once (rack row + touched-param panel), so
+        // update every instance — otherwise whichever copy comes first in the DOM would
+        // be the only one that stays live.
+        var _rows = document.querySelectorAll('.pr[data-pid="' + pid + '"]');
+        if (!_rows.length) return;
 
         // Determine if this param is modulated
         var ri = null;
@@ -243,34 +254,38 @@ function refreshParamDisplay() {
         // For non-modulated params being dragged, skip visual updates entirely
         if (_touchedByUI.has(pid) && !isModulated) return;
 
-        // Update value text (skip for modulated params being dragged — drag handler does it)
-        if (!_touchedByUI.has(pid)) {
-            var ve = row.querySelector('.pr-val');
-            if (ve) ve.textContent = p.disp || ((p.v * 100).toFixed(0) + '%');
-        }
+        for (var _rIdx = 0; _rIdx < _rows.length; _rIdx++) {
+            var row = _rows[_rIdx];
 
-        // Update knob SVG — skip if nothing visual changed (cache key check)
-        var knobEl = row.querySelector('.pr-knob');
-        if (knobEl && typeof buildParamKnob === 'function') {
-            var knobVal = (ri && ri.base !== undefined) ? ri.base : p.v;
-            // Build a cheap cache key from ALL values that affect the SVG output
-            var knobKey = knobVal.toFixed(4) + '|' + p.v.toFixed(4);
-            if (ri) {
-                knobKey += '|' + (ri.range || 0).toFixed(3)
-                         + '|' + (ri.current !== undefined ? ri.current.toFixed(3) : 'x')
-                         + '|' + (ri.color || '')
-                         + '|' + (ri.polarity || '');
+            // Update value text (skip for modulated params being dragged — drag handler does it)
+            if (!_touchedByUI.has(pid)) {
+                var ve = row.querySelector('.pr-val');
+                if (ve) ve.textContent = p.disp || ((p.v * 100).toFixed(0) + '%');
             }
-            if (knobEl._knobKey !== knobKey) {
-                knobEl._knobKey = knobKey;
-                knobEl.innerHTML = buildParamKnob(knobVal, 30, ri);
-            }
-        }
 
-        // Update bar (skip for modulated during drag)
-        if (!_touchedByUI.has(pid)) {
-            var be = row.querySelector('.pr-bar-f');
-            if (be) be.style.width = (p.v * 100) + '%';
+            // Update knob SVG — skip if nothing visual changed (cache key check)
+            var knobEl = row.querySelector('.pr-knob');
+            if (knobEl && typeof buildParamKnob === 'function') {
+                var knobVal = (ri && ri.base !== undefined) ? ri.base : p.v;
+                // Build a cheap cache key from ALL values that affect the SVG output
+                var knobKey = knobVal.toFixed(4) + '|' + p.v.toFixed(4);
+                if (ri) {
+                    knobKey += '|' + (ri.range || 0).toFixed(3)
+                             + '|' + (ri.current !== undefined ? ri.current.toFixed(3) : 'x')
+                             + '|' + (ri.color || '')
+                             + '|' + (ri.polarity || '');
+                }
+                if (knobEl._knobKey !== knobKey) {
+                    knobEl._knobKey = knobKey;
+                    knobEl.innerHTML = buildParamKnob(knobVal, 30, ri);
+                }
+            }
+
+            // Update bar (skip for modulated during drag)
+            if (!_touchedByUI.has(pid)) {
+                var be = row.querySelector('.pr-bar-f');
+                if (be) be.style.width = (p.v * 100) + '%';
+            }
         }
     });
 }
@@ -419,38 +434,11 @@ function setupRtDataListener() {
                     // below also sets _modDirty. One refresh at end of tick.
                 }
 
-                // Auto-locate: scroll to and flash the touched param
-                if (autoLocate && data.touchedParam && !assignMode) {
-                    var pid = data.touchedParam;
-                    var now = Date.now();
-                    if (now - _lastLocateTime > 200) {
-                        _lastLocateTime = now;
-                        // Ensure the plugin card containing this param is expanded
-                        var pp = PMap[pid];
-                        if (pp) {
-                            for (var pbi = 0; pbi < pluginBlocks.length; pbi++) {
-                                var pb = pluginBlocks[pbi];
-                                if (pb.id === pp.hostId && !pb.expanded) {
-                                    pb.expanded = true;
-                                    renderAllPlugins();
-                                    break;
-                                }
-                            }
-                        }
-                        // Find the row and scroll + flash
-                        var row = document.querySelector('.pr[data-pid="' + pid + '"]');
-                        if (!row && typeof scrollVirtualToParam === 'function') {
-                            // Row not in DOM — virtual scroll; scroll to it first
-                            scrollVirtualToParam(pid);
-                            row = document.querySelector('.pr[data-pid="' + pid + '"]');
-                        }
-                        if (row) {
-                            row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                            row.classList.remove('touched');
-                            void row.offsetWidth; // force reflow to restart animation
-                            row.classList.add('touched');
-                        }
-                    }
+                // Touched parameter → show it in the dedicated panel (Bitwig-style).
+                // Gesture-sourced in C++, so only a real grab in the hosted plugin's UI
+                // gets here; the old scroll-to-and-flash highlight is gone.
+                if (data.touchedParam && typeof setTouchedParam === 'function') {
+                    setTouchedParam(data.touchedParam);
                 }
                 // Morph pad playhead readback
                 if (data.morphHeads) {

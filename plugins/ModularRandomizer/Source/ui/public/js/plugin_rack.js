@@ -165,7 +165,9 @@ function buildPluginCard(pb, pi, isA, aBlk, aCol) {
     // Virtual blocks: not draggable, no close/bypass/open/preset
     if (pb.isVirtual) {
         var bulkBtns = isA ? '<button class="sm-btn bulk-all" style="font-size:9px;padding:2px 6px;margin-left:4px" data-plugbulk="' + pb.id + '" data-bulkmode="all">All</button><button class="sm-btn bulk-none" style="font-size:9px;padding:2px 6px" data-plugbulk="' + pb.id + '" data-bulkmode="none">None</button>' : '';
-        card.innerHTML = '<div class="pcard-head pcard-head-virtual" data-plugid="' + pb.id + '"><span class="lchev ' + (pb.expanded ? 'open' : '') + '">&#9654;</span><span class="pcard-name" style="color:var(--accent)">' + pb.name + '</span><span class="pcard-info">' + pb.params.length + ' params</span>' + bulkBtns + '</div><div class="pcard-body ' + (pb.expanded ? '' : 'hide') + '"><div class="pcard-search"><input type="text" placeholder="Filter..." data-plugsearch="' + pb.id + '" value="' + (pb.searchFilter || '') + '"></div><div class="pcard-params" data-plugparams="' + pb.id + '"></div></div>';
+        card.innerHTML = '<div class="pcard-head pcard-head-virtual" data-plugid="' + pb.id + '"><span class="lchev ' + (pb.expanded ? 'open' : '') + '">&#9654;</span><span class="pcard-name" style="color:var(--accent)">' + pb.name + '</span><span class="pcard-info">' + pb.params.length + ' params</span>' + bulkBtns + '</div><div class="pcard-body ' + (pb.expanded ? '' : 'hide') + '"><div class="pcard-touched" data-plugtouched="' + pb.id + '"></div><div class="pcard-search"><input type="text" placeholder="Filter..." data-plugsearch="' + pb.id + '" value="' + (pb.searchFilter || '') + '"></div><div class="pcard-params" data-plugparams="' + pb.id + '"></div></div>';
+        fillTouchedSlot(card.querySelector('[data-plugtouched="' + pb.id + '"]'), pb, isA, aBlk, aCol,
+                        (isA && aBlk && aBlk.mode === 'shapes_range') ? aBlk : null);
         fillPluginParams(card.querySelector('[data-plugparams="' + pb.id + '"]'), pb, isA, aBlk, aCol);
         return card;
     }
@@ -210,7 +212,9 @@ function buildPluginCard(pb, pi, isA, aBlk, aCol) {
     // Bypass icon pushed to the right
     footer += '<button class="pf-bypass' + (pb.bypassed ? ' pf-active' : '') + '" data-pfbypass="' + pb.id + '" title="' + (pb.bypassed ? 'Unbypass' : 'Bypass') + '">&#9211;</button>';
     footer += '</div>';
-    card.innerHTML = '<div class="pcard-head" data-plugid="' + pb.id + '">' + busBadge + '<span class="lchev ' + (pb.expanded ? 'open' : '') + '">&#9654;</span><span class="pcard-name">' + pb.name + '</span><span class="pcard-info">' + pb.params.length + ' params</span>' + bulkBtns + '<button class="pcard-preset" data-plugpreset="' + pb.id + '" title="Presets">&#128203;</button><button class="sm-btn" style="font-size:9px;padding:2px 6px" data-pluged="' + pb.id + '">Open</button><button class="pcard-close" data-plugrm="' + pb.id + '">x</button></div><div class="pcard-body ' + (pb.expanded ? '' : 'hide') + '"><div class="pcard-search"><input type="text" placeholder="Filter..." data-plugsearch="' + pb.id + '" value="' + (pb.searchFilter || '') + '"></div><div class="pcard-params" data-plugparams="' + pb.id + '"></div></div>' + footer;
+    card.innerHTML = '<div class="pcard-head" data-plugid="' + pb.id + '">' + busBadge + '<span class="lchev ' + (pb.expanded ? 'open' : '') + '">&#9654;</span><span class="pcard-name">' + pb.name + '</span><span class="pcard-info">' + pb.params.length + ' params</span>' + bulkBtns + '<button class="pcard-preset" data-plugpreset="' + pb.id + '" title="Presets">&#128203;</button><button class="sm-btn" style="font-size:9px;padding:2px 6px" data-pluged="' + pb.id + '">Open</button><button class="pcard-close" data-plugrm="' + pb.id + '">x</button></div><div class="pcard-body ' + (pb.expanded ? '' : 'hide') + '"><div class="pcard-touched" data-plugtouched="' + pb.id + '"></div><div class="pcard-search"><input type="text" placeholder="Filter..." data-plugsearch="' + pb.id + '" value="' + (pb.searchFilter || '') + '"></div><div class="pcard-params" data-plugparams="' + pb.id + '"></div></div>' + footer;
+    fillTouchedSlot(card.querySelector('[data-plugtouched="' + pb.id + '"]'), pb, isA, aBlk, aCol,
+                    (isA && aBlk && aBlk.mode === 'shapes_range') ? aBlk : null);
     fillPluginParams(card.querySelector('[data-plugparams="' + pb.id + '"]'), pb, isA, aBlk, aCol);
     return card;
 }
@@ -278,6 +282,72 @@ function fillPluginParams(paramC, pb, isA, aBlk, aCol) {
     };
 }
 
+// ── Touched parameter (per plugin) ──────────────────────────────────────────────
+// Each plugin card shows, directly under its name, the parameter last grabbed inside
+// THAT plugin's own UI. The row is a real `.pr` row from _buildParamRow living inside
+// #pluginScroll, so every delegated behaviour (drag-to-assign, click-select,
+// right-click menu, knob drag, lock, link indicators, modulation arcs) is identical to
+// a rack row. Fed only by the gesture-based `touchedParam` readback, so assigning,
+// randomizing and modulation can never move it. The pid is stored on the plugin block
+// (pb.touchedPid), so it survives collapsing/expanding and re-renders.
+
+// Paint a param's live value into EVERY row that shows it (rack row + that plugin's
+// touched-param row). A param can appear twice, and during a drag the realtime refresh
+// is intentionally suppressed for the dragged param — so without this the copy you are
+// not dragging would lag behind until you released. renderKnob=false is used for
+// modulated params, whose knob/arc is drawn by realtime.js instead.
+function _paintParamRows(pid, val, dispText, renderKnob) {
+    var rows = document.querySelectorAll('.pr[data-pid="' + pid + '"]');
+    for (var i = 0; i < rows.length; i++) {
+        var r = rows[i];
+        if (dispText !== null && dispText !== undefined) {
+            var ve = r.querySelector('.pr-val');
+            if (ve) ve.textContent = dispText;
+        }
+        if (renderKnob) {
+            var k = r.querySelector('.pr-knob');
+            if (k && typeof buildParamKnob === 'function') {
+                k.innerHTML = buildParamKnob(val, 30, null);
+                k._knobKey = null; // invalidate realtime's cache so it re-syncs after the drag
+            }
+            var bf = r.querySelector('.pr-bar-f');
+            if (bf) bf.style.width = (val * 100) + '%';
+        }
+    }
+}
+
+// Fill (or clear) one card's touched-param slot.
+function fillTouchedSlot(slotEl, pb, isA, aBlk, aCol, srBlock) {
+    if (!slotEl) return;
+    var p = pb.touchedPid ? PMap[pb.touchedPid] : null;
+    slotEl.innerHTML = '';
+    if (!p) { slotEl.style.display = 'none'; return; }
+    slotEl.style.display = '';
+    slotEl.appendChild(_buildParamRow(p, isA, aBlk, aCol, srBlock));
+}
+
+// Called from the readback when the user touches a param in a hosted plugin's UI.
+// Updates just that plugin's slot in place — no full rack re-render.
+function setTouchedParam(pid) {
+    var p = PMap[pid];
+    if (!p) return;
+    var pb = null;
+    for (var i = 0; i < pluginBlocks.length; i++) {
+        if (pluginBlocks[i].id === p.hostId) { pb = pluginBlocks[i]; break; }
+    }
+    if (!pb || pb.touchedPid === pid) return;
+    pb.touchedPid = pid;
+    var slot = document.querySelector('[data-plugtouched="' + pb.id + '"]');
+    if (slot) {
+        var isA = (typeof assignMode !== 'undefined' && assignMode !== null);
+        var aBlk = isA ? findBlock(assignMode) : null;
+        var aCol = aBlk ? bColor(aBlk.colorIdx) : '';
+        var srBlock = (aBlk && aBlk.mode === 'shapes_range') ? aBlk : null;
+        fillTouchedSlot(slot, pb, isA, aBlk, aCol, srBlock);
+    }
+    _visPidsDirty = true; // keep the new row's values live
+}
+
 // Build a single absolute-positioned or flow-positioned param row
 function _buildParamRow(p, isA, aBlk, aCol, srBlock) {
     var isTgt = isA && aBlk && aBlk.targets.has(p.id);
@@ -302,7 +372,10 @@ function _buildParamRow(p, isA, aBlk, aCol, srBlock) {
     }
     var knobVal = (rangeInfo && rangeInfo.base !== undefined) ? rangeInfo.base : p.v;
     var knobSvg = buildParamKnob(knobVal, 30, rangeInfo);
-    var grip = p.lk ? '' : '<span class="pr-grip" title="Drag to logic block">⠿</span>';
+    // No drag grip: it implied the rows could be reordered (they can't), and the glyph
+    // was the source of the mojibake in the rack. The whole row is still draggable onto
+    // a logic block — that affordance comes from the cursor + drag itself.
+    var grip = '';
     // Check if this param is a link source — O(1) via pre-built lookup table
     var linkSrcIndicator = '';
     if (_linkSrcLookup) {
@@ -1346,6 +1419,7 @@ pse.addEventListener('click', function (e) {
         var pb = null;
         for (var i = 0; i < pluginBlocks.length; i++) { if (pluginBlocks[i].id === plugId) { pb = pluginBlocks[i]; break; } }
         if (b && pb) {
+            pushUndoSnapshot(); // bulk assign/unassign is undoable
             pb.params.forEach(function (p) {
                 if (p.lk) return; // skip locked
                 if (mode === 'all') {
@@ -1514,6 +1588,10 @@ pse.addEventListener('contextmenu', function (e) {
         if (assignMode) {
             var srBlk = findBlock(assignMode);
             if (srBlk && srBlk.mode === 'shapes_range') {
+                // Snapshot BEFORE we mutate anything — this drag both assigns the param
+                // and sets its modulation range, and neither was undoable before.
+                var _srSnap = captureFullSnapshot();
+                var _srWasAssigned = srBlk.targets.has(pid);
                 // Auto-assign if not yet assigned
                 if (!srBlk.targets.has(pid)) {
                     assignTarget(srBlk, pid);
@@ -1543,6 +1621,14 @@ pse.addEventListener('contextmenu', function (e) {
                     document.removeEventListener('mousemove', onMoveRange);
                     document.removeEventListener('mouseup', onUpRange);
                     _touchedByUI.delete(pid);
+                    // Record undo only if the assignment or the range actually changed
+                    var _srNewRange = srBlk.targetRanges ? srBlk.targetRanges[pid] : undefined;
+                    if (!_srWasAssigned || _srNewRange !== startRange) {
+                        undoStack.push({ type: 'full', snapshot: _srSnap });
+                        if (undoStack.length > maxUndo) undoStack.shift();
+                        redoStack = [];
+                        updateUndoBadge();
+                    }
                     renderAllPlugins(); renderBlocks(); syncBlocksToHost();
                 }
                 document.addEventListener('mousemove', onMoveRange);
@@ -1578,22 +1664,11 @@ pse.addEventListener('contextmenu', function (e) {
                     // Modulated virtual: update bases, let realtime.js render knob+arc
                     updateModBases(pid, newVal);
                     // Update value text only — knob SVG is rendered by realtime.js
-                    var row = knob.closest('.pr');
-                    if (row) {
-                        var ve = row.querySelector('.pr-val');
-                        if (ve) ve.textContent = (newVal * 100).toFixed(0) + '%';
-                    }
+                    _paintParamRows(pid, newVal, (newVal * 100).toFixed(0) + '%', false);
                 } else {
                     // Unmodulated virtual: direct render
                     p.v = newVal;
-                    knob.innerHTML = buildParamKnob(newVal, 30, null);
-                    var row = knob.closest('.pr');
-                    if (row) {
-                        var ve = row.querySelector('.pr-val');
-                        if (ve) ve.textContent = p.disp || ((newVal * 100).toFixed(0) + '%');
-                        var bf = row.querySelector('.pr-bar-f');
-                        if (bf) bf.style.width = (newVal * 100) + '%';
-                    }
+                    _paintParamRows(pid, newVal, p.disp || ((newVal * 100).toFixed(0) + '%'), true);
                 }
                 // Redraw canvas + sync to host
                 if (typeof weqDrawCanvas === 'function') weqDrawCanvas();
@@ -1605,21 +1680,10 @@ pse.addEventListener('contextmenu', function (e) {
                     // Update stored bases — realtime.js reads these for knob position + fill arc
                     updateModBases(pid, newVal);
                     // Only update value text — knob SVG is rendered by realtime.js
-                    var row = knob.closest('.pr');
-                    if (row) {
-                        var ve = row.querySelector('.pr-val');
-                        if (ve) ve.textContent = (newVal * 100).toFixed(0) + '%';
-                    }
+                    _paintParamRows(pid, newVal, (newVal * 100).toFixed(0) + '%', false);
                 } else {
                     p.v = newVal;
-                    knob.innerHTML = buildParamKnob(newVal, 30, null);
-                    var row = knob.closest('.pr');
-                    if (row) {
-                        var ve = row.querySelector('.pr-val');
-                        if (ve) ve.textContent = p.disp || ((newVal * 100).toFixed(0) + '%');
-                        var bf = row.querySelector('.pr-bar-f');
-                        if (bf) bf.style.width = (newVal * 100) + '%';
-                    }
+                    _paintParamRows(pid, newVal, p.disp || ((newVal * 100).toFixed(0) + '%'), true);
                 }
             }
         }
