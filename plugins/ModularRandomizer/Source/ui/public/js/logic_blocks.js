@@ -120,6 +120,15 @@ function renderHzInput(blockId, field, val) {
     var v = (val != null) ? val : 0.5;
     return '<input class="sub-input hz-input" type="number" step="0.01" min="0.01" max="20" value="' + v + '" data-b="' + blockId + '" data-f="' + field + '" title="Rate in Hz" style="width:54px"><span class="sub-lbl" style="min-width:auto;margin-left:2px">Hz</span>';
 }
+// ── Rate knob helpers (Hz ⇄ knob position) ──
+// The Speed knob carries a 0-100 position; the real rate lives in <block>.shapeHz /
+// morphHz. The mapping is exponential over 0.01–20 Hz so slow rates get most of the
+// travel (each knob step is a constant ~7.8% of the rate), which is how LFO rate knobs
+// are expected to behave. Dragging writes the Hz value live, so it applies immediately.
+var HZ_MIN = 0.01, HZ_MAX = 20, HZ_SPAN = 2000; // HZ_MAX / HZ_MIN
+function hzFromPct(p) { return HZ_MIN * Math.pow(HZ_SPAN, Math.max(0, Math.min(100, p)) / 100); }
+function pctFromHz(hz) { return 100 * Math.log(Math.max(HZ_MIN, Math.min(HZ_MAX, hz || 0.5)) / HZ_MIN) / Math.log(HZ_SPAN); }
+function fmtHz(hz) { return (hz < 1 ? hz.toFixed(2) : hz.toFixed(1)) + 'Hz'; }
 // Convert morphSpeed (0-100) to display string
 function morphSpeedDisplay(sp) {
     return Math.round(sp) + '%';
@@ -971,19 +980,20 @@ function renderShapesBody(b) {
     var phaseVal = b.shapePhaseOffset || 0;
     // Migrate legacy % speed → explicit Hz (unified Hz|Sync)
     if (b.shapeHz == null) b.shapeHz = 0.02 + Math.pow((b.shapeSpeed != null ? b.shapeSpeed : 50) / 100, 3) * 4.98;
-    h += buildKnobRow(
-        buildBlockKnob(spinVal, -100, 100, 36, 'shapes', 'shapeSpin', b.id, 'Spin', 'Â±') +
+    // Speed knob shows Hz in Free mode; in Sync mode the measure dropdown replaces it.
+    var shapeKnobs = '';
+    if (!b.shapeTempoSync)
+        shapeKnobs += buildBlockKnob(pctFromHz(b.shapeHz), 0, 100, 36, 'shapes', 'shapeHzPct', b.id, 'Speed', 'Hz', function (p) { return fmtHz(hzFromPct(p)); });
+    shapeKnobs += buildBlockKnob(spinVal, -100, 100, 36, 'shapes', 'shapeSpin', b.id, 'Spin', 'Â±') +
         buildBlockKnob(sizeVal, 1, 100, 36, 'shapes', 'shapeSize', b.id, 'Size', '%') +
-        buildBlockKnob(phaseVal, 0, 360, 36, 'shapes', 'shapePhaseOffset', b.id, 'Phase', 'Â°')
-    );
-    // ── Rate: Hz (free) or Sync (beat division) ──
+        buildBlockKnob(phaseVal, 0, 360, 36, 'shapes', 'shapePhaseOffset', b.id, 'Phase', 'Â°');
+    h += buildKnobRow(shapeKnobs);
+    // ── Rate: Free (Speed knob above, in Hz) or Sync (musical measure) ──
     h += '<div class="behaviour-row"><span class="sub-lbl">Rate</span><div class="tgl ' + (b.shapeTempoSync ? 'on' : '') + '" data-b="' + b.id + '" data-f="shapeTempoSync"></div><span class="tgl-lbl">Sync</span>';
     if (b.shapeTempoSync) {
         var divs = [{ v: '4/1', label: '4 Bars' }, { v: '2/1', label: '2 Bars' }].concat(BEAT_DIVS);
         h += renderBeatDivSelect(b.id, 'shapeSyncDiv', b.shapeSyncDiv, divs);
         h += '<div class="seg-inline" data-b="' + b.id + '" data-f="clockSource"><button class="' + ((b.clockSource || 'daw') === 'daw' ? 'on' : '') + '" data-v="daw">DAW</button><button class="' + (b.clockSource === 'internal' ? 'on' : '') + '" data-v="internal">Int</button></div>';
-    } else {
-        h += renderHzInput(b.id, 'shapeHz', b.shapeHz);
     }
     h += '</div>';
     h += '</div></div>';
@@ -1047,18 +1057,19 @@ function renderShapesRangeBody(b) {
     var phaseVal = b.shapePhaseOffset || 0;
     // Migrate legacy % speed → explicit Hz (unified Hz|Sync)
     if (b.shapeHz == null) b.shapeHz = 0.02 + Math.pow((b.shapeSpeed != null ? b.shapeSpeed : 50) / 100, 3) * 4.98;
-    h += buildKnobRow(
-        buildBlockKnob(spinVal, -100, 100, 36, 'shapes', 'shapeSpin', b.id, 'Spin', 'Â±') +
-        buildBlockKnob(phaseVal, 0, 360, 36, 'shapes', 'shapePhaseOffset', b.id, 'Phase', 'Â°')
-    );
-    // ── Rate: Hz (free) or Sync (beat division) ──
+    // Speed knob shows Hz in Free mode; in Sync mode the measure dropdown replaces it.
+    var srKnobs = '';
+    if (!b.shapeTempoSync)
+        srKnobs += buildBlockKnob(pctFromHz(b.shapeHz), 0, 100, 36, 'shapes', 'shapeHzPct', b.id, 'Speed', 'Hz', function (p) { return fmtHz(hzFromPct(p)); });
+    srKnobs += buildBlockKnob(spinVal, -100, 100, 36, 'shapes', 'shapeSpin', b.id, 'Spin', 'Â±') +
+        buildBlockKnob(phaseVal, 0, 360, 36, 'shapes', 'shapePhaseOffset', b.id, 'Phase', 'Â°');
+    h += buildKnobRow(srKnobs);
+    // ── Rate: Free (Speed knob above, in Hz) or Sync (musical measure) ──
     h += '<div class="behaviour-row"><span class="sub-lbl">Rate</span><div class="tgl ' + (b.shapeTempoSync ? 'on' : '') + '" data-b="' + b.id + '" data-f="shapeTempoSync"></div><span class="tgl-lbl">Sync</span>';
     if (b.shapeTempoSync) {
         var divs = [{ v: '4/1', label: '4 Bars' }, { v: '2/1', label: '2 Bars' }].concat(BEAT_DIVS);
         h += renderBeatDivSelect(b.id, 'shapeSyncDiv', b.shapeSyncDiv, divs);
         h += '<div class="seg-inline" data-b="' + b.id + '" data-f="clockSource"><button class="' + ((b.clockSource || 'daw') === 'daw' ? 'on' : '') + '" data-v="daw">DAW</button><button class="' + (b.clockSource === 'internal' ? 'on' : '') + '" data-v="internal">Int</button></div>';
-    } else {
-        h += renderHzInput(b.id, 'shapeHz', b.shapeHz);
     }
     h += '</div>';
     h += '</div></div>';
@@ -1313,19 +1324,20 @@ function renderMorphBody(b) {
             h += buildShapeOptions('lfoShape', b);
             h += '</select>';
             // LFO knobs: Size, Spin, Speed
-            h += buildKnobRow(
-                buildBlockKnob(b.lfoDepth != null ? b.lfoDepth : 80, 0, 100, 36, 'morph', 'lfoDepth', b.id, 'Size', '%') +
-                buildBlockKnob(b.lfoRotation || 0, -100, 100, 36, 'morph', 'lfoRotation', b.id, 'Spin', '\u00b1')
-            );
+            var mKnobs = buildBlockKnob(b.lfoDepth != null ? b.lfoDepth : 80, 0, 100, 36, 'morph', 'lfoDepth', b.id, 'Size', '%') +
+                buildBlockKnob(b.lfoRotation || 0, -100, 100, 36, 'morph', 'lfoRotation', b.id, 'Spin', '\u00b1');
+            if (!morphSynced)
+                mKnobs += buildBlockKnob(pctFromHz(b.morphHz), 0, 100, 36, 'morph', 'morphHzPct', b.id, 'Speed', 'Hz', function (p) { return fmtHz(hzFromPct(p)); });
+            h += buildKnobRow(mKnobs);
+        } else if (!morphSynced) {
+            // Non-shapes explore modes: Speed knob on its own row
+            h += buildKnobRow(buildBlockKnob(pctFromHz(b.morphHz), 0, 100, 36, 'morph', 'morphHzPct', b.id, 'Speed', 'Hz', function (p) { return fmtHz(hzFromPct(p)); }));
         }
-        // (rate is the unified Hz|Sync control below \u2014 % speed knob/slider removed)
-        // \u2500\u2500 Rate: Hz (free) or Sync (beat division) \u2500\u2500
+        // \u2500\u2500 Rate: Free (Speed knob above, in Hz) or Sync (musical measure) \u2500\u2500
         h += '<div class="behaviour-row"><span class="sub-lbl">Rate</span><div class="tgl ' + (b.morphTempoSync ? 'on' : '') + '" data-b="' + b.id + '" data-f="morphTempoSync"></div><span class="tgl-lbl">Sync</span>';
         if (b.morphTempoSync) {
             h += renderBeatDivSelect(b.id, 'morphSyncDiv', b.morphSyncDiv, MORPH_DIVS);
             h += '<div class="seg-inline" data-b="' + b.id + '" data-f="clockSource"><button class="' + ((b.clockSource || 'daw') === 'daw' ? 'on' : '') + '" data-v="daw">DAW</button><button class="' + (b.clockSource === 'internal' ? 'on' : '') + '" data-v="internal">Int</button></div>';
-        } else {
-            h += renderHzInput(b.id, 'morphHz', b.morphHz);
         }
         h += '</div>';
     }
@@ -1893,7 +1905,9 @@ function wireBlocks() {
         };
     });
     // Default values for double-click reset
-    var knobDefaults = { rMin: 0, rMax: 100, threshold: -12, glideMs: 200, envAtk: 10, envRel: 100, envSens: 50, envFilterFreq: 50, envFilterBW: 5, morphSpeed: 50, morphGlide: 200, jitter: 0, snapRadius: 100, lfoDepth: 80, lfoRotation: 0, sampleSpeedPct: 100, qSteps: 12, shapeSize: 80, shapeSpin: 0, shapeSpeed: 50, shapePhaseOffset: 0, linkSmoothMs: 0 };
+    var knobDefaults = { rMin: 0, rMax: 100, threshold: -12, glideMs: 200, envAtk: 10, envRel: 100, envSens: 50, envFilterFreq: 50, envFilterBW: 5, morphSpeed: 50, morphGlide: 200, jitter: 0, snapRadius: 100, lfoDepth: 80, lfoRotation: 0, sampleSpeedPct: 100, qSteps: 12, shapeSize: 80, shapeSpin: 0, shapeSpeed: 50, shapePhaseOffset: 0, linkSmoothMs: 0,
+        // Rate knobs are 0-100 positions; 56 ≈ 0.5 Hz on the exponential Hz curve
+        shapeHzPct: 56, morphHzPct: 56 };
     document.querySelectorAll('.lbody input[type="range"]').forEach(function (sl) {
         if (!sl.dataset.b) return;
         // Skip link slider types — they have their own handlers
@@ -1945,6 +1959,10 @@ function wireBlocks() {
             var curVal;
             if (f === 'sampleSpeedPct') {
                 curVal = b.sampleSpeed * 100;
+            } else if (f === 'shapeHzPct') {
+                curVal = pctFromHz(b.shapeHz);
+            } else if (f === 'morphHzPct') {
+                curVal = pctFromHz(b.morphHz);
             } else if (f.indexOf('linkMin__') === 0) {
                 var _pid = f.substring(9);
                 curVal = (b.linkMin && b.linkMin[_pid] != null) ? b.linkMin[_pid] : 0;
@@ -1968,6 +1986,9 @@ function wireBlocks() {
                 nv = Math.round(nv);
                 // Write value — handle compound fields for link block
                 if (f === 'sampleSpeedPct') b.sampleSpeed = nv / 100;
+                // Rate knobs store Hz (applied live, so the change is heard while dragging)
+                else if (f === 'shapeHzPct') b.shapeHz = hzFromPct(nv);
+                else if (f === 'morphHzPct') b.morphHz = hzFromPct(nv);
                 else if (f.indexOf('linkMin__') === 0) { var _pid = f.substring(9); if (!b.linkMin) b.linkMin = {}; b.linkMin[_pid] = nv; }
                 else if (f.indexOf('linkMax__') === 0) { var _pid = f.substring(9); if (!b.linkMax) b.linkMax = {}; b.linkMax[_pid] = nv; }
                 else if (f.indexOf('linkMacro__') === 0) { var _si = parseInt(f.substring(11)); if (b.linkSources && b.linkSources[_si]) b.linkSources[_si].macroValue = nv; }
@@ -2011,6 +2032,7 @@ function wireBlocks() {
                     else if (f === 'envFilterBW') valEl.textContent = envFmtBw(nv);
                     else if (f === 'morphSpeed') valEl.textContent = morphSpeedDisplay(nv);
                     else if (f === 'sampleSpeedPct') valEl.textContent = b.sampleSpeed.toFixed(1) + 'x';
+                    else if (f === 'shapeHzPct' || f === 'morphHzPct') valEl.textContent = fmtHz(hzFromPct(nv));
                     else valEl.textContent = nv + '%';
                 }
                 // Live update pad visualizations
@@ -2046,7 +2068,9 @@ function wireBlocks() {
                 document.removeEventListener('mousemove', onMove);
                 document.removeEventListener('mouseup', onUp);
                 // Push undo if value changed
-                var endVal = (f === 'sampleSpeedPct') ? (b.sampleSpeed * 100) : b[f];
+                var endVal = (f === 'sampleSpeedPct') ? (b.sampleSpeed * 100)
+                           : (f === 'shapeHzPct') ? b.shapeHz
+                           : (f === 'morphHzPct') ? b.morphHz : b[f];
                 if (endVal !== _knobStartVal && _knobUndoSnap) {
                     undoStack.push({ type: 'full', snapshot: _knobUndoSnap });
                     if (undoStack.length > maxUndo) undoStack.shift();
@@ -2073,6 +2097,8 @@ function wireBlocks() {
             if (def !== undefined) {
                 var snap = captureFullSnapshot();
                 if (f === 'sampleSpeedPct') b.sampleSpeed = def / 100;
+                else if (f === 'shapeHzPct') b.shapeHz = hzFromPct(def);
+                else if (f === 'morphHzPct') b.morphHz = hzFromPct(def);
                 else b[f] = def;
                 undoStack.push({ type: 'full', snapshot: snap });
                 if (undoStack.length > maxUndo) undoStack.shift();
@@ -2089,10 +2115,15 @@ function wireBlocks() {
             var range = mx - mn;
             var step = e.shiftKey ? range * 0.002 : range * 0.01;
             var delta = e.deltaY < 0 ? step : -step;
-            var curVal = (f === 'sampleSpeedPct') ? (b.sampleSpeed * 100) : (b[f] != null ? b[f] : mn);
+            var curVal = (f === 'sampleSpeedPct') ? (b.sampleSpeed * 100)
+                       : (f === 'shapeHzPct') ? pctFromHz(b.shapeHz)
+                       : (f === 'morphHzPct') ? pctFromHz(b.morphHz)
+                       : (b[f] != null ? b[f] : mn);
             var nv = Math.round(Math.max(mn, Math.min(mx, curVal + delta)));
             if (nv === Math.round(curVal)) return;
             if (f === 'sampleSpeedPct') b.sampleSpeed = nv / 100;
+            else if (f === 'shapeHzPct') b.shapeHz = hzFromPct(nv);
+            else if (f === 'morphHzPct') b.morphHz = hzFromPct(nv);
             else b[f] = nv;
             renderSingleBlock(bId); debouncedSync();
         }, { passive: false });

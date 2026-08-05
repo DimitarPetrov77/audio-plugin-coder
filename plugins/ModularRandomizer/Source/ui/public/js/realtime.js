@@ -1,6 +1,66 @@
 var _lastBpmDisplay = 0, _bpmThrottle = 0, _lastLocateTime = 0;
 var _laneSkipDirty = 0; // frames to silently adopt lane values after visibility restore
 var _rtTick = 0; // frame counter for throttling (badge updates etc.)
+
+// ── Motion smoothing (dead reckoning) ─────────────────────────────────────────────
+// C++ pushes readback on a timer whose arrival is uneven, and the underlying values only
+// advance once per audio block — so writing them straight to the DOM makes playheads and
+// dots visibly step. Each tracked quantity stores its latest authoritative sample plus a
+// smoothed velocity; one requestAnimationFrame loop extrapolates between samples so every
+// animation glides at display rate. Position is always recomputed from the newest
+// authoritative sample, so this adds no drift — only sub-frame prediction.
+//   key    unique id per animated thing
+//   dims   1 for a scalar, 2 for an x/y pair
+//   vals   current authoritative value(s)
+//   period wrap length (1 for a 0..1 looping playhead, 2π for an angle, 0 = no wrap)
+//   apply  fn(v0[, v1]) that writes to the DOM — re-supplied each readback so it always
+//          closes over live elements
+var _smTracks = {};
+var _smRaf = null;
+function _smSet(key, dims, vals, period, apply) {
+    var now = performance.now();
+    var tr = _smTracks[key];
+    if (!tr) {
+        tr = _smTracks[key] = { dims: dims, v: vals.slice(), vel: [], t: now, period: period || 0, apply: apply };
+        for (var z = 0; z < dims; z++) tr.vel.push(0);
+        apply.apply(null, vals);
+        if (_smRaf === null) _smRaf = requestAnimationFrame(_smTick);
+        return;
+    }
+    tr.apply = apply; tr.period = period || 0; tr.dims = dims;
+    var dt = (now - tr.t) / 1000;
+    if (dt > 0.0004) {
+        for (var i = 0; i < dims; i++) {
+            var d = vals[i] - tr.v[i];
+            if (tr.period) { var h = tr.period * 0.5; if (d < -h) d += tr.period; else if (d > h) d -= tr.period; }
+            var vv = d / dt;
+            if (!isFinite(vv) || Math.abs(vv) > 1e4) vv = 0;
+            tr.vel[i] = tr.vel[i] * 0.6 + vv * 0.4; // EMA — rejects timer jitter
+        }
+    }
+    tr.v = vals.slice();
+    tr.t = now;
+    if (_smRaf === null) _smRaf = requestAnimationFrame(_smTick);
+}
+function _smTick(now) {
+    var alive = 0;
+    for (var k in _smTracks) {
+        var tr = _smTracks[k];
+        var age = (now - tr.t) / 1000;
+        if (age > 2.0) { delete _smTracks[k]; continue; }   // element gone / block deleted
+        if (age > 0.4) { for (var z = 0; z < tr.dims; z++) tr.vel[z] = 0; age = 0; } // stalled → hold
+        if (age > 0.2) age = 0.2;                            // never predict far ahead
+        var out = [];
+        for (var i = 0; i < tr.dims; i++) {
+            var p = tr.v[i] + tr.vel[i] * age;
+            if (tr.period) { p = p % tr.period; if (p < 0) p += tr.period; }
+            out.push(p);
+        }
+        try { tr.apply.apply(null, out); } catch (e) { delete _smTracks[k]; continue; }
+        alive++;
+    }
+    _smRaf = alive ? requestAnimationFrame(_smTick) : null;
+}
 function processRealTimeData() {
     // Clear consumed MIDI events
     rtData.midi = [];
@@ -305,7 +365,11 @@ function setupRtDataListener() {
                                 var cv = document.getElementById('waveCv-' + sh.id);
                                 head._pw = cv ? cv.width : 260;
                             }
-                            head.style.transform = 'translateX(' + (sh.pos * head._pw).toFixed(1) + 'px)';
+                            (function (el) {
+                                _smSet('smph' + sh.id, 1, [sh.pos], 1, function (p) {
+                                    el.style.transform = 'translateX(' + (p * el._pw).toFixed(1) + 'px)';
+                                });
+                            })(head);
                         }
                     }
                 }
@@ -398,15 +462,22 @@ function setupRtDataListener() {
                             mb.playheadY = mh.y;
                             var dot = document.getElementById('morphHead-' + mh.id);
                             if (dot) {
-                                dot.style.left = (mh.x * 100) + '%';
-                                dot.style.top = ((1 - mh.y) * 100) + '%';
+                                (function (el) {
+                                    _smSet('mph' + mh.id, 2, [mh.x, mh.y], 0, function (x, y) {
+                                        el.style.left = (x * 100) + '%';
+                                        el.style.top = ((1 - y) * 100) + '%';
+                                    });
+                                })(dot);
                             }
                             // Sync SVG rotation with actual C++ rotation angle
                             if (mh.rot !== undefined) {
                                 var svg = document.querySelector('.morph-pad[data-b="' + mh.id + '"]:not(.shapes-pad) .lfo-path-svg');
                                 if (svg) {
-                                    var deg = (mh.rot * 180 / Math.PI) * -1;
-                                    svg.style.transform = 'rotate(' + deg.toFixed(1) + 'deg)';
+                                    (function (el) {
+                                        _smSet('mphrot' + mh.id, 1, [mh.rot], Math.PI * 2, function (r) {
+                                            el.style.transform = 'rotate(' + ((r * 180 / Math.PI) * -1).toFixed(2) + 'deg)';
+                                        });
+                                    })(svg);
                                 }
                             }
                             // ── IDW interpolation for arc animation (VISIBLE params only) ──
@@ -462,33 +533,38 @@ function setupRtDataListener() {
                                 // (refreshParamDisplay filters by visibility internally)
                                 if (mb.targets && mb.targets.size > 0) _modDirty = true;
                             }
+                            // Dot + readout share one smoothed x/y track so they stay in lockstep
                             var dot = document.getElementById('shapeHead-' + mh.id);
-                            if (dot) {
-                                dot.style.left = (mh.x * 100) + '%';
-                                dot.style.top = ((1 - mh.y) * 100) + '%';
+                            var readout = document.getElementById('shapeReadout-' + mh.id);
+                            if (dot || readout) {
+                                (function (el, ro, tracking) {
+                                    _smSet('shp' + mh.id, 2, [mh.x, mh.y], 0, function (x, y) {
+                                        if (el) {
+                                            el.style.left = (x * 100) + '%';
+                                            el.style.top = ((1 - y) * 100) + '%';
+                                        }
+                                        if (ro) {
+                                            if (tracking === 'horizontal') ro.style.left = (x * 100) + '%';
+                                            else if (tracking === 'vertical') ro.style.top = ((1 - y) * 100) + '%';
+                                            else {
+                                                var ddx = x - 0.5, ddy = y - 0.5;
+                                                var pxSize = Math.sqrt(ddx * ddx + ddy * ddy) * 2 * 200; // pad is 200px
+                                                ro.style.width = pxSize + 'px';
+                                                ro.style.height = pxSize + 'px';
+                                            }
+                                        }
+                                    });
+                                })(dot, readout, mb.shapeTracking || 'horizontal');
                             }
                             if (mh.rot !== undefined) {
                                 var svg = document.querySelector('.shapes-pad[data-b="' + mh.id + '"] .lfo-path-svg');
                                 if (svg) {
-                                    var deg = (mh.rot * 180 / Math.PI) * -1;
-                                    svg.style.transform = 'rotate(' + deg.toFixed(1) + 'deg)';
-                                }
-                            }
-                            // Update readout line position
-                            var readout = document.getElementById('shapeReadout-' + mh.id);
-                            if (readout) {
-                                var tracking = mb.shapeTracking || 'horizontal';
-                                if (tracking === 'horizontal') {
-                                    readout.style.left = (mh.x * 100) + '%';
-                                } else if (tracking === 'vertical') {
-                                    readout.style.top = ((1 - mh.y) * 100) + '%';
-                                } else {
-                                    // Distance: circle radius = distance from center
-                                    var ddx = mh.x - 0.5, ddy = mh.y - 0.5;
-                                    var dist = Math.sqrt(ddx * ddx + ddy * ddy) * 2; // diameter as fraction
-                                    var pxSize = dist * 200; // pad is 200px
-                                    readout.style.width = pxSize + 'px';
-                                    readout.style.height = pxSize + 'px';
+                                    (function (el) {
+                                        // period 2π — angle wraps
+                                        _smSet('shprot' + mh.id, 1, [mh.rot], Math.PI * 2, function (r) {
+                                            el.style.transform = 'rotate(' + ((r * 180 / Math.PI) * -1).toFixed(2) + 'deg)';
+                                        });
+                                    })(svg);
                                 }
                             }
                         }
@@ -506,10 +582,21 @@ function setupRtDataListener() {
                                 var wrap = ph.parentElement;
                                 ph._wPx = wrap ? wrap.clientWidth : 300;
                             }
-                            ph.style.transform = 'translateX(' + (lh.ph * ph._wPx) + 'px)';
+                            // Smoothed: the tracking line glides at display rate (period 1 = loops)
+                            (function (el) {
+                                _smSet('lph' + lh.id + '_' + lh.li, 1, [lh.ph], 1, function (p) {
+                                    el.style.transform = 'translateX(' + (p * el._wPx) + 'px)';
+                                });
+                            })(ph);
                         }
                         var vi = document.getElementById('lvi-' + lh.id + '-' + lh.li);
-                        if (vi) vi.style.height = (lh.val * 100) + '%';
+                        if (vi) {
+                            (function (el) {
+                                _smSet('lvi' + lh.id + '_' + lh.li, 1, [lh.val], 0, function (v) {
+                                    el.style.height = (v * 100) + '%';
+                                });
+                            })(vi);
+                        }
                         // Oneshot idle state: dim canvas when not active
                         var cwrap = document.getElementById('lcw-' + lh.id + '-' + lh.li);
                         if (cwrap) {
