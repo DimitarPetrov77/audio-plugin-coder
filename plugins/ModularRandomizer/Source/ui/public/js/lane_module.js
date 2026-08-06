@@ -122,6 +122,240 @@ function laneLoopBeats(lane) {
     return BEAT_MAP[lane.loopLen] || 4;
 }
 
+// ── Per-segment interpolation ─────────────────────────────────────────────────────
+// Each point may carry `ip` — the interpolation for the segment STARTING at it, which
+// overrides the lane-wide mode. That is what lets one stretch run dead straight while
+// the rest of the curve stays smooth. Absent/null means inherit. Mirrors the C++
+// resolution in ProcessBlock.cpp so the drawing, the readout and the audio agree.
+var LANE_INTERPS = ['smooth', 'linear', 'step'];
+
+function laneSegInterp(lane, seg) {
+    var p = lane.pts && lane.pts[seg];
+    if (p && p.ip) return p.ip;
+    return lane.interp || 'smooth';
+}
+
+// Segments spanned by the current point selection. Selecting points 2 and 5 covers the
+// three segments 2→3, 3→4 and 4→5, i.e. everything *between* the outermost selected
+// points — which is what "apply it between these two points" means.
+function laneSelectedSegments(lane) {
+    if (!lane._sel || lane._sel.size < 2 || !lane.pts) return [];
+    var idx = Array.from(lane._sel).sort(function (a, b) { return a - b; });
+    var lo = idx[0], hi = idx[idx.length - 1];
+    var out = [];
+    for (var s = lo; s < hi && s < lane.pts.length - 1; s++) out.push(s);
+    return out;
+}
+
+// Apply an interpolation mode to the selected span. mode === null clears the override
+// so those segments follow the lane again.
+function laneApplySegInterp(b, li, mode) {
+    var lane = b.lanes[li];
+    var segs = laneSelectedSegments(lane);
+    if (segs.length === 0) return 0;
+    pushUndoSnapshot();
+    for (var i = 0; i < segs.length; i++) {
+        if (mode) lane.pts[segs[i]].ip = mode;
+        else delete lane.pts[segs[i]].ip;
+    }
+    laneDrawCanvas(b, li);
+    syncBlocksToHost();
+    if (typeof markStateDirty === 'function') markStateDirty();
+    return segs.length;
+}
+
+// ── Free loop length (exact seconds) ──────────────────────────────────────────────
+// Free mode is deliberately unquantised: whatever number is here is the loop length, to
+// the millisecond. Motion capture writes the take's real duration straight into it.
+var LANE_FSEC_MIN = 0.05, LANE_FSEC_MAX = 600;
+
+// Precision where it matters, without ragged widths: always keep at least one decimal
+// below 100s so values don't alternate between "4" and "0.425" and look uneven.
+function laneFmtSecs(v) {
+    v = +v || 0;
+    var s;
+    if (v < 10) s = v.toFixed(3);
+    else if (v < 100) s = v.toFixed(2);
+    else return String(Math.round(v));
+    if (s.indexOf('.') >= 0) {
+        s = s.replace(/0+$/, '');          // drop trailing zeros…
+        if (s.charAt(s.length - 1) === '.') s += '0';   // …but keep one decimal
+    }
+    return s;
+}
+
+function laneSetFreeSecs(b, li, secs) {
+    var lane = b.lanes[li];
+    if (!lane) return;
+    lane.freeSecs = Math.min(LANE_FSEC_MAX, Math.max(LANE_FSEC_MIN, Math.round(secs * 1000) / 1000));
+    var el = document.querySelector('.lane-hdr-fsec[data-b="' + b.id + '"][data-li="' + li + '"]');
+    if (el) el.textContent = laneFmtSecs(lane.freeSecs) + 's';
+}
+
+// Drag = proportional change, so the feel is the same at 0.2s and at 200s. Ctrl for fine.
+function laneSetupFreeSecs() {
+    document.querySelectorAll('.lane-hdr-fsec').forEach(function (el) {
+        var bId = parseInt(el.dataset.b), li = parseInt(el.dataset.li);
+        el.onmousedown = function (e) {
+            e.preventDefault(); e.stopPropagation();
+            var b = findBlock(bId); if (!b || !b.lanes[li]) return;
+            var startY = e.clientY;
+            var startVal = b.lanes[li].freeSecs != null ? b.lanes[li].freeSecs : 4;
+            var snap = (typeof captureFullSnapshot === 'function') ? captureFullSnapshot() : null;
+            var moved = false;
+            function onMove(me) {
+                moved = true;
+                var dy = startY - me.clientY;
+                var rate = me.ctrlKey || me.metaKey ? 0.0015 : 0.006;
+                laneSetFreeSecs(b, li, startVal * Math.exp(dy * rate));
+                laneDrawCanvas(b, li);
+                if (typeof debouncedSync === 'function') debouncedSync();
+            }
+            function onUp() {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                if (moved) {
+                    if (snap && typeof undoStack !== 'undefined') {
+                        undoStack.push({ type: 'full', snapshot: snap });
+                        if (undoStack.length > maxUndo) undoStack.shift();
+                        redoStack = [];
+                        if (typeof updateUndoBadge === 'function') updateUndoBadge();
+                    }
+                    syncBlocksToHost();
+                }
+            }
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        };
+        // Double-click to type an exact value. Uses a real inline input rather than
+        // window.prompt(), which is not reliably available inside a WebView.
+        el.ondblclick = function (e) {
+            e.preventDefault(); e.stopPropagation();
+            var b = findBlock(bId); if (!b || !b.lanes[li]) return;
+            if (el.querySelector('input')) return;
+            var cur = b.lanes[li].freeSecs != null ? b.lanes[li].freeSecs : 4;
+            var prevText = el.textContent;
+            el.textContent = '';
+            var inp = document.createElement('input');
+            inp.type = 'text';
+            inp.value = String(cur);
+            inp.className = 'lane-fsec-edit';
+            el.appendChild(inp);
+            inp.focus();
+            inp.select();
+            var done = false;
+            function commit(save) {
+                if (done) return;
+                done = true;
+                var v = parseFloat(inp.value);
+                if (inp.parentNode) inp.remove();
+                if (save && isFinite(v)) {
+                    pushUndoSnapshot();
+                    laneSetFreeSecs(b, li, v);
+                    laneDrawCanvas(b, li);
+                    syncBlocksToHost();
+                } else {
+                    el.textContent = prevText;
+                }
+            }
+            inp.onkeydown = function (ke) {
+                ke.stopPropagation();
+                if (ke.key === 'Enter') commit(true);
+                else if (ke.key === 'Escape') commit(false);
+            };
+            inp.onblur = function () { commit(true); };
+            inp.onmousedown = function (me) { me.stopPropagation(); };
+        };
+    });
+}
+
+// ── Lane speed diagnostics ────────────────────────────────────────────────────────
+// Shows what the AUDIO THREAD resolved for a lane next to the loop-length dropdown,
+// plus the cycle time actually MEASURED from the playhead. If the dropdown changes but
+// the measured seconds don't, the break is downstream of the UI; if the resolved beats
+// don't change, it never reached the DSP. Toggle with the "?" button in the lane header.
+var laneDebugOn = false;
+var LANE_SYNC_PATHS = ['beat-sync', 'free-run', 'FROZEN (transport stopped)', 'oneshot'];
+
+// Measure real cycle time by timing playhead wraps (1 → 0).
+function laneDebugTick(b, li, ph) {
+    if (!laneDebugOn) return;
+    var lane = b.lanes && b.lanes[li];
+    if (!lane) return;
+    var prev = lane._dbgPrevPh;
+    lane._dbgPrevPh = ph;
+    if (prev == null) return;
+    var now = performance.now();
+    if (ph < prev - 0.5) {                       // wrapped
+        if (lane._dbgLastWrap) {
+            var secs = (now - lane._dbgLastWrap) / 1000;
+            // Exponential average so the readout is steady but still tracks changes
+            lane._dbgMeasured = lane._dbgMeasured
+                ? lane._dbgMeasured * 0.6 + secs * 0.4
+                : secs;
+        }
+        lane._dbgLastWrap = now;
+    }
+    // Reset the measurement if the playhead has clearly stalled
+    if (lane._dbgLastWrap && now - lane._dbgLastWrap > 70000) {
+        lane._dbgMeasured = 0; lane._dbgLastWrap = 0;
+    }
+    var el = document.getElementById('ldbg-' + b.id + '-' + li);
+    if (el) el.textContent = laneDebugText(lane);
+}
+
+function laneDebugText(lane) {
+    var sp = lane._dbgSyncPath;
+    var path = (sp >= 0 && sp < LANE_SYNC_PATHS.length) ? LANE_SYNC_PATHS[sp] : 'no data';
+    var t = 'dsp: ' + (lane._dbgLoopBeats != null ? (+lane._dbgLoopBeats).toFixed(2) : '?') + ' beats';
+    t += ' / ' + (lane._dbgLoopSecs != null ? (+lane._dbgLoopSecs).toFixed(2) : '?') + 's';
+    t += '  ·  ui: ' + laneLoopBeats(lane).toFixed(2) + ' beats';
+    t += '  ·  measured: ' + (lane._dbgMeasured ? lane._dbgMeasured.toFixed(2) + 's' : '—');
+    t += '  ·  ' + path;
+    return t;
+}
+
+// ── Effect region ─────────────────────────────────────────────────────────────────
+// Depth / Warp / Steps / Drift apply only inside [fxLo, fxHi] when a region is latched.
+// Outside it the raw curve passes through. Both the drawing and the DSP read these two
+// numbers, so what you see is what you hear — and it survives deselecting, which the old
+// selection-derived preview did not.
+function laneFxActive(lane) {
+    return lane && lane.fxLo != null && lane.fxHi != null
+        && lane.fxHi > lane.fxLo && (lane.fxLo > 0 || lane.fxHi < 1);
+}
+
+// Latch the region to the current 2+ point selection. Returns true if it took.
+function laneFxSetFromSelection(lane) {
+    if (!lane._sel || lane._sel.size < 2 || !lane.pts) return false;
+    var lo = 1, hi = 0;
+    lane._sel.forEach(function (i) {
+        if (!lane.pts[i]) return;
+        if (lane.pts[i].x < lo) lo = lane.pts[i].x;
+        if (lane.pts[i].x > hi) hi = lane.pts[i].x;
+    });
+    if (hi <= lo) return false;
+    lane.fxLo = lo; lane.fxHi = hi;
+    return true;
+}
+
+function laneFxClear(lane) {
+    delete lane.fxLo;
+    delete lane.fxHi;
+}
+
+// Called whenever an effect control (depth/warp/steps/drift) changes. If a selection is
+// live and no region is latched yet, latch it — so "select two points, then turn Steps
+// up" confines the steps to that span instead of losing it on the next click.
+function laneFxLatchOnEdit(b, li) {
+    var lane = b.lanes[li];
+    if (!lane || laneFxActive(lane)) return false;
+    if (!laneFxSetFromSelection(lane)) return false;
+    if (typeof showToast === 'function')
+        showToast('Effects limited to the selected span — right-click to clear', 'info', 2800);
+    return true;
+}
+
 // ── Drift replication (mirrors C++ ProcessBlock.cpp exactly) ──
 // Used by realtime.js so the morph visualization matches the audio thread's drift.
 // Beats-per-division for Drift Scale strings (matches parseBeatsPerDiv in C++).
@@ -214,6 +448,260 @@ function interpolateAtX(pts, x) {
     return pts[pts.length - 1].y;
 }
 
+// ── Motion capture → Lane ─────────────────────────────────────────────────────────
+// Arm a curve lane, then physically move a knob — either in a hosted plugin's own UI or
+// in our parameter rack. The GESTURE defines the take: recording starts on the first
+// movement and ends when you stop, and the lane's loop length is then set to however
+// long you moved for. Nothing is clipped to a pre-set loop.
+//
+// Uses the same gesture signal as the touched-parameter panel, so only a real grab in
+// the plugin's UI starts it — modulation or randomizing can't trigger a capture.
+//
+// Lane points are canvas-space (y = 0 is the top) and the DSP reads param = 1 - y,
+// so a recorded value v maps to y = 1 - v.
+var _laneCap = null;
+
+// Latest gesture counter seen from the backend. `touchedParam` is sticky — it keeps
+// reporting the last grabbed param forever so the touched-param panel can display it —
+// so it CANNOT be used to detect "the user just grabbed something". This counter can:
+// it only advances on a real begin-gesture.
+var _laneTouchSeq = 0;
+var LANE_CAP_ARM_TIMEOUT = 30;  // seconds to wait for a grab before giving up
+var LANE_CAP_IDLE = 0.6;        // seconds of stillness that end a take (non-drag sources)
+var LANE_CAP_MAX = 120;         // hard ceiling on a single take, seconds
+var LANE_CAP_MIN = 0.15;        // shorter than this isn't a gesture, it's a click
+
+function laneCaptureActive() { return _laneCap != null; }
+
+function laneArmCapture(blockId, laneIdx) {
+    if (_laneCap) { laneCancelCapture(); return; } // second click = cancel
+    var b = findBlock(blockId);
+    if (!b || !b.lanes || !b.lanes[laneIdx]) return;
+    var lane = b.lanes[laneIdx];
+    _laneCap = {
+        blockId: blockId, laneIdx: laneIdx, pid: null,
+        t0: 0, samples: [],
+        lastV: 0, lastMoveT: 0,   // when the value last actually changed
+        wasMuted: !!lane.muted,
+        // Freeze the gesture counter: recording starts only once it ADVANCES past this.
+        seq0: _laneTouchSeq,
+        armedAt: performance.now(),
+        localV: null,       // live value while dragging one of our own rack knobs
+        dragging: false,    // a rack knob is physically held right now
+        pendingFinish: false, // take is full, waiting for the hand to let go
+        v0: 0,              // value at the grab — the take starts when it first changes
+        beganAt: 0
+    };
+    // Mute while recording so the lane's own output can't fight the hand that's moving
+    // the knob (and so we record the user's motion, not our modulation).
+    lane.muted = true;
+    syncBlocksToHost();
+    renderSingleBlock(blockId);
+    if (typeof showToast === 'function')
+        showToast('Capture armed — move a knob (rack or plugin UI). Recording starts when you move and ends when you stop; the loop length follows.', 'info', 4500);
+}
+
+// Begin recording a specific parameter. Shared by both gesture sources.
+function _laneCapBegin(pid) {
+    if (!_laneCap || _laneCap.pid) return false;
+    var p = (typeof PMap !== 'undefined') ? PMap[pid] : null;
+    if (!p) return false;
+    if (p.lk) {
+        if (typeof showToast === 'function')
+            showToast('That parameter is locked — move another one', 'info', 2000);
+        return false;
+    }
+    _laneCap.pid = pid;
+    _laneCap.t0 = 0;                 // clock starts on the first actual movement
+    _laneCap.v0 = p.v;
+    _laneCap.lastV = p.v;
+    _laneCap.lastMoveT = 0;
+    _laneCap.beganAt = performance.now();
+    _laneCap.samples = [];
+    _laneCap.localV = null;
+    renderSingleBlock(_laneCap.blockId); // show REC state
+    return true;
+}
+
+// ── Local gesture source: our own parameter rows in the plugin rack ───────────────
+// Rack drags deliberately do NOT raise host begin-gestures (that is what stops
+// randomize/modulation from being mistaken for a touch), so the rack reports its
+// drags here directly. The dragged value is fed in live rather than read back, so the
+// recorded curve is exactly what was drawn — even for a param another block already
+// modulates, where the rack updates the modulation base instead of the value.
+// isDrag: a held mouse gesture that will end with a release. The scroll wheel passes
+// false — it has no release, so it must not leave the take waiting for one.
+function laneCaptureLocalTouch(pid, isDrag) {
+    if (!_laneCap) return;
+    if (!_laneCap.pid) _laneCapBegin(pid);
+    if (_laneCap.pid === pid && isDrag) _laneCap.dragging = true;
+}
+function laneCaptureLocalValue(pid, v) {
+    if (_laneCap && _laneCap.pid === pid) _laneCap.localV = v;
+}
+function laneCaptureLocalRelease(pid) {
+    if (!_laneCap || _laneCap.pid !== pid) return;
+    _laneCap.dragging = false;
+    // Fall back to readback for the rest of the loop — a released knob holds its value.
+    _laneCap.localV = null;
+    // The take filled up while the knob was still held: apply it now.
+    if (_laneCap.pendingFinish) laneFinishCapture();
+}
+
+function laneCancelCapture() {
+    if (!_laneCap) return;
+    var b = findBlock(_laneCap.blockId);
+    if (b && b.lanes && b.lanes[_laneCap.laneIdx]) b.lanes[_laneCap.laneIdx].muted = _laneCap.wasMuted;
+    var bid = _laneCap.blockId;
+    _laneCap = null;
+    syncBlocksToHost();
+    renderSingleBlock(bid);
+}
+
+// Called every readback frame from realtime.js
+function laneCaptureTick(data) {
+    // Track the gesture counter on every frame, armed or not, so arming has a baseline.
+    if (data && typeof data.touchSeq === 'number') _laneTouchSeq = data.touchSeq;
+
+    if (!_laneCap) return;
+    var b = findBlock(_laneCap.blockId);
+    if (!b || !b.lanes || !b.lanes[_laneCap.laneIdx]) { _laneCap = null; return; }
+
+    // Waiting for the user to grab something in the hosted plugin's UI
+    if (!_laneCap.pid) {
+        // Only a NEW grab counts — the counter must have advanced since we armed.
+        if (_laneTouchSeq <= _laneCap.seq0) {
+            if ((performance.now() - _laneCap.armedAt) / 1000 > LANE_CAP_ARM_TIMEOUT) {
+                laneCancelCapture();
+                if (typeof showToast === 'function')
+                    showToast('Capture timed out — no parameter was moved', 'info', 2500);
+            }
+            return;
+        }
+        if (!data || !data.touchedParam) return;
+        if (!_laneCapBegin(data.touchedParam)) {
+            // Locked or unknown param: consume this gesture and keep waiting.
+            _laneCap.seq0 = _laneTouchSeq;
+            return;
+        }
+    }
+
+    var pp = PMap[_laneCap.pid];
+    if (!pp) { laneCancelCapture(); return; }
+    // A rack drag feeds its value in directly; otherwise use the readback value.
+    var sv = (_laneCap.localV != null) ? _laneCap.localV : pp.v;
+    var btn = document.querySelector('.lane-cap-btn[data-b="' + _laneCap.blockId + '"][data-li="' + _laneCap.laneIdx + '"]');
+
+    // The take starts on the first real movement, not on the grab, so hesitating after
+    // you take hold of the knob doesn't eat into a short loop.
+    if (!_laneCap.t0) {
+        if (sv !== _laneCap.v0) {
+            _laneCap.t0 = performance.now();
+        } else {
+            if ((performance.now() - _laneCap.beganAt) / 1000 > LANE_CAP_ARM_TIMEOUT) {
+                laneCancelCapture();
+                if (typeof showToast === 'function')
+                    showToast('Capture timed out — no parameter was moved', 'info', 2500);
+            } else if (btn) btn.textContent = 'Move…';
+            return;
+        }
+    }
+
+    var t = (performance.now() - _laneCap.t0) / 1000;
+    if (sv !== _laneCap.lastV) { _laneCap.lastV = sv; _laneCap.lastMoveT = t; }
+    if (!_laneCap.pendingFinish) _laneCap.samples.push({ t: t, v: sv });
+
+    // The take ends when the gesture does. A held rack knob ends on release, so a
+    // deliberate pause mid-gesture is preserved; sources with no release event (the
+    // plugin's own UI, the scroll wheel) end after a moment of stillness.
+    var over = (t > LANE_CAP_MAX);
+    if (!over && !_laneCap.dragging && (t - _laneCap.lastMoveT) > LANE_CAP_IDLE) over = true;
+
+    if (over) {
+        // Never hand the parameter to the lane while the knob is still held — the lane
+        // and the hand would fight for it (jitter, clamped to the lane's depth, and the
+        // knob stops following). Wait for the release.
+        if (_laneCap.dragging) {
+            _laneCap.pendingFinish = true;
+            if (btn) btn.textContent = 'REC ✓ release';
+            return;
+        }
+        laneFinishCapture();
+        return;
+    }
+    if (btn) btn.textContent = 'REC ' + t.toFixed(1) + 's';
+}
+
+function laneFinishCapture() {
+    if (!_laneCap) return;
+    var cap = _laneCap;
+    _laneCap = null;
+    var b = findBlock(cap.blockId);
+    if (!b || !b.lanes || !b.lanes[cap.laneIdx]) return;
+    var lane = b.lanes[cap.laneIdx];
+    lane.muted = cap.wasMuted;
+
+    // The take runs from the first movement to the last — trailing stillness (the idle
+    // period that ended it, or a pause before release) is not part of the gesture.
+    var span = cap.lastMoveT;
+    if (cap.samples.length < 2 || span < LANE_CAP_MIN) {
+        syncBlocksToHost(); renderSingleBlock(cap.blockId);
+        if (typeof showToast === 'function') showToast('Capture cancelled — nothing recorded', 'info', 2500);
+        return;
+    }
+
+    pushUndoSnapshot();
+
+    // The gesture defines the loop: set the lane's length to how long it actually took.
+    var lenLabel = _laneCapApplyLoopLength(lane, span);
+
+    // Resample the irregular readback samples onto an even grid, so the curve is
+    // independent of frame timing and stays cheap to draw/evaluate.
+    var N = 64, pts = [];
+    var si = 0;
+    for (var i = 0; i <= N; i++) {
+        var tt = (i / N) * span;
+        while (si < cap.samples.length - 2 && cap.samples[si + 1].t < tt) si++;
+        var a = cap.samples[si], c = cap.samples[Math.min(si + 1, cap.samples.length - 1)];
+        var v;
+        if (c.t <= a.t) v = a.v;
+        else {
+            var f = Math.max(0, Math.min(1, (tt - a.t) / (c.t - a.t)));
+            v = a.v + (c.v - a.v) * f;
+        }
+        pts.push({ x: i / N, y: Math.max(0, Math.min(1, 1 - v)) }); // param → canvas y
+    }
+    lane.pts = pts;
+
+    // Make sure the captured param is actually driven by this lane
+    if (!lane.pids) lane.pids = [];
+    if (lane.pids.indexOf(cap.pid) < 0) {
+        assignTarget(b, cap.pid);
+        lane.pids.push(cap.pid);
+    }
+
+    laneDrawCanvas(b, cap.laneIdx);
+    renderSingleBlock(cap.blockId);
+    renderAllPlugins();
+    syncBlocksToHost();
+    if (typeof showToast === 'function') {
+        var nm = PMap[cap.pid] ? PMap[cap.pid].name : 'parameter';
+        showToast('Captured "' + nm + '" — ' + span.toFixed(2) + 's loop (' + lenLabel + ')',
+                  'success', 3000);
+    }
+}
+
+// Set the lane's loop length to the recorded gesture's duration — EXACTLY.
+// The take is whatever length it was; snapping it to a musical division would silently
+// change the timing the user just performed. So the lane is switched to free mode and
+// given the precise seconds. Use the loop-length dropdown afterwards if you want it
+// pulled onto the grid.
+function _laneCapApplyLoopLength(lane, seconds) {
+    lane.loopLen = 'free';
+    lane.freeSecs = Math.round(seconds * 1000) / 1000;
+    return lane.freeSecs.toFixed(3) + 's free';
+}
+
 function renderLaneBody(b) {
     ensureLanes(b);
     var h = '';
@@ -273,10 +761,11 @@ function renderLaneBody(b) {
                 h += '<option value="' + o.v + '"' + (lane.loopLen === o.v ? ' selected' : '') + '>' + o.label + '</option>';
             });
             h += '</select>';
-            // Free seconds input (only visible when loopLen is "free")
+            // Free length (only when loopLen is "free"). Drag for continuous, unquantised
+            // seconds — a captured 3.247s take stays 3.247s. Double-click to type a value.
             if (lane.loopLen === 'free') {
-                h += '<input type="number" class="lane-hdr-fsec" data-b="' + b.id + '" data-li="' + li + '" value="' + (lane.freeSecs || 4) + '" min="0.1" max="60" step="0.1" title="Loop duration in seconds">';
-                h += '<span class="lane-hdr-unit">s</span>';
+                h += '<span class="lane-hdr-fsec" data-b="' + b.id + '" data-li="' + li + '" title="Loop length in seconds — drag to adjust (Ctrl = fine), double-click to type">'
+                   + laneFmtSecs(lane.freeSecs != null ? lane.freeSecs : 4) + 's</span>';
             }
             // Play mode selector
             h += '<select class="lane-hdr-sel lane-hdr-pm" data-b="' + b.id + '" data-li="' + li + '" data-lf="playMode" title="Playhead mode">';
@@ -298,6 +787,10 @@ function renderLaneBody(b) {
             h += '<span class="lane-del-btn" data-b="' + b.id + '" data-li="' + li + '" title="Delete this lane">\u00D7</span>';
             h += '</div>'; // ctrls
             h += '</div>'; // hdr
+
+            if (laneDebugOn) {
+                h += '<div class="lane-dbg-row" id="ldbg-' + b.id + '-' + li + '">' + laneDebugText(lane) + '</div>';
+            }
 
             // Trigger controls row (only visible in oneshot mode)
             if (lane.trigMode === 'oneshot') {
@@ -505,6 +998,11 @@ function renderLaneBody(b) {
                     });
                     h += '</select>';
                     h += '<div class="lane-ft-spacer"></div>';
+                    // Motion capture: arm, then move a knob in the plugin's own UI
+                    var capOn = (typeof _laneCap !== 'undefined' && _laneCap
+                                 && _laneCap.blockId === b.id && _laneCap.laneIdx === li);
+                    var capLbl = capOn ? (_laneCap.pid ? 'REC' : 'Arm\u2026') : '\u25cf Capture';
+                    h += '<button class="lane-ft-btn lane-cap-btn' + (capOn ? ' armed' : '') + '" data-b="' + b.id + '" data-li="' + li + '" data-act="capture" title="Capture motion: arm, then move a parameter in the hosted plugin\'s own UI. Records one loop length.">' + capLbl + '</button>';
                     h += '<button class="lane-ft-btn" data-b="' + b.id + '" data-li="' + li + '" data-act="random" title="Randomize this lane">\u2684 Random</button>';
                     h += '<button class="lane-ft-btn" data-b="' + b.id + '" data-li="' + li + '" data-act="invert" title="Invert curve vertically">\u2195 Invert</button>';
                     h += '<div class="lane-ft-shapes" style="position:relative;display:inline-block">';
@@ -1224,7 +1722,9 @@ function laneSetupFooter(b, li) {
         btn.onclick = function (e) {
             e.stopPropagation();
             var act = btn.dataset.act;
-            if (act === 'random') {
+            if (act === 'capture') {
+                laneArmCapture(b.id, li);
+            } else if (act === 'random') {
                 pushUndoSnapshot();
                 laneRandomize(lane, b.laneGrid);
                 if (lane._sel) lane._sel.clear();
@@ -2071,10 +2571,11 @@ function laneDrawCanvas(b, li, selSet) {
                     // Parse drift scale beats (per-snapshot, fallback to lane-level)
                     var DS_BEAT_MAP_VIS = { '1/16': 0.25, '1/8': 0.5, '1/4': 1, '1/2': 2, '1/1': 4, '2/1': 8, '4/1': 16, '8/1': 32, '16/1': 64, '32/1': 128 };
                     var driftScaleBeats = DS_BEAT_MAP_VIS[nextSnap.driftScale || lane.driftScale || '1/1'] || 4;
-                    // Parse loop len beats
-                    var LL_BEAT_MAP_VIS = { '1/16': 0.25, '1/8': 0.5, '1/4': 1, '1/2': 2, '1/1': 4, '2/1': 8, '4/1': 16, '8/1': 32, '16/1': 64, '32/1': 128, 'free': 4 };
-                    var loopBeatsVis = LL_BEAT_MAP_VIS[lane.loopLen || '1/1'] || 4;
-                    var driftPhaseScale = loopBeatsVis / Math.max(0.25, driftScaleBeats);
+                    // Cycles are measured against a 1-bar (4-beat) reference, NOT the loop
+                    // length — Drift Scale sets detail *within* the loop, so a longer loop
+                    // drifts proportionally slower. Must match ProcessBlock.cpp exactly or
+                    // the drawing shows a different wobble than the audio produces.
+                    var driftPhaseScale = 4.0 / Math.max(0.25, driftScaleBeats);
                     var driftFreq = driftBaseFreq * (1 + driftSharpness * 2) * driftPhaseScale;
 
                     // Per-snapshot destination effects
@@ -2205,8 +2706,9 @@ function laneDrawCanvas(b, li, selSet) {
                 var x0 = pts[seg].x, x1 = pts[seg + 1].x;
                 var y0 = pts[seg].y, y1 = pts[seg + 1].y;
                 var t = (x1 > x0) ? (sx - x0) / (x1 - x0) : 0;
-                if (lane.interp === 'step') return y0;
-                if (lane.interp === 'smooth') { var ts = t * t * (3 - 2 * t); return y0 + (y1 - y0) * ts; }
+                var ipm = laneSegInterp(lane, seg);
+                if (ipm === 'step') return y0;
+                if (ipm === 'smooth') { var ts = t * t * (3 - 2 * t); return y0 + (y1 - y0) * ts; }
                 return y0 + (y1 - y0) * t;
             }
         }
@@ -2240,9 +2742,14 @@ function laneDrawCanvas(b, li, selSet) {
         return Math.max(0, Math.min(1, v));
     }
 
-    // Determine effect X range from selection (2+ points selected → restrict effects to that range)
-    var selXMin = 0, selXMax = 1, hasSelRange = false;
-    if (lane._sel && lane._sel.size >= 2) {
+    // Effect X range. A LATCHED region (lane.fxLo/fxHi) persists and is what the DSP
+    // uses; a live 2+ point selection previews a region before it is latched. Previously
+    // this was derived from the selection only, so it vanished on deselect and the audio
+    // never honoured it at all.
+    var selXMin = 0, selXMax = 1, hasSelRange = false, fxLatched = false;
+    if (laneFxActive(lane)) {
+        selXMin = lane.fxLo; selXMax = lane.fxHi; hasSelRange = true; fxLatched = true;
+    } else if (lane._sel && lane._sel.size >= 2) {
         selXMin = 1; selXMax = 0;
         lane._sel.forEach(function (idx) {
             if (pts[idx]) {
@@ -2254,19 +2761,24 @@ function laneDrawCanvas(b, li, selSet) {
         else { selXMin = 0; selXMax = 1; }
     }
 
-    // Draw selection range highlight
+    // Draw the effect range. A latched region is drawn solid and brighter so it reads as
+    // committed state that outlives the selection; an unlatched preview stays dashed.
     if (hasSelRange) {
-        ctx.fillStyle = 'rgba(' + r + ',' + g + ',' + bl + ',0.07)';
+        ctx.fillStyle = 'rgba(' + r + ',' + g + ',' + bl + ',' + (fxLatched ? 0.12 : 0.07) + ')';
         ctx.fillRect(selXMin * W, 0, (selXMax - selXMin) * W, H);
-        // Edge lines
-        ctx.strokeStyle = 'rgba(' + r + ',' + g + ',' + bl + ',0.3)';
+        ctx.strokeStyle = 'rgba(' + r + ',' + g + ',' + bl + ',' + (fxLatched ? 0.6 : 0.3) + ')';
         ctx.lineWidth = 1;
-        ctx.setLineDash([3, 3]);
+        if (!fxLatched) ctx.setLineDash([3, 3]);
         ctx.beginPath();
         ctx.moveTo(selXMin * W, 0); ctx.lineTo(selXMin * W, H);
         ctx.moveTo(selXMax * W, 0); ctx.lineTo(selXMax * W, H);
         ctx.stroke();
         ctx.setLineDash([]);
+        if (fxLatched) {
+            ctx.fillStyle = 'rgba(' + r + ',' + g + ',' + bl + ',0.85)';
+            ctx.font = '8px monospace';
+            ctx.fillText('FX', selXMin * W + 3, 9);
+        }
     }
 
     // Build processed curve (resampled polyline)
@@ -2291,11 +2803,12 @@ function laneDrawCanvas(b, li, selSet) {
         // driftScale: musical period for one noise cycle (independent of loop length)
         var driftAmt = Math.abs(drift);
         if (driftAmt > 0.001 && driftRange > 0.001) {
-            // Phase scaling: drift operates on driftScale time, not loop time
-            var loopBeats = laneLoopBeats(lane);
+            // Cycles are measured against a 1-bar (4-beat) reference, NOT the loop length —
+            // Drift Scale sets detail *within* the loop, so a longer loop drifts
+            // proportionally slower. Must match ProcessBlock.cpp exactly.
             var DS_BEAT_MAP = { '1/16': 0.25, '1/8': 0.5, '1/4': 1, '1/2': 2, '1/1': 4, '2/1': 8, '4/1': 16, '8/1': 32, '16/1': 64, '32/1': 128 };
             var driftScaleBeats = DS_BEAT_MAP[lane.driftScale || '1/1'] || 4;
-            var phaseScale = loopBeats / driftScaleBeats; // how much of the noise pattern fits in one loop
+            var phaseScale = 4.0 / Math.max(0.25, driftScaleBeats);
             // Hash: integer → -1..+1
             var hashI = function (n) {
                 var h = n | 0;
@@ -2433,8 +2946,9 @@ function laneDrawCanvas(b, li, selSet) {
                                 var x0 = oPts[si].x, x1 = oPts[si + 1].x;
                                 var y0p = oPts[si].y, y1p = oPts[si + 1].y;
                                 var tp = (x1 > x0) ? (rx - x0) / (x1 - x0) : 0;
-                                if (oInterp === 'step') { ry = y0p; }
-                                else if (oInterp === 'smooth') { var tsp = tp * tp * (3 - 2 * tp); ry = y0p + (y1p - y0p) * tsp; }
+                                var oim = oPts[si].ip || oInterp;
+                                if (oim === 'step') { ry = y0p; }
+                                else if (oim === 'smooth') { var tsp = tp * tp * (3 - 2 * tp); ry = y0p + (y1p - y0p) * tsp; }
                                 else { ry = y0p + (y1p - y0p) * tp; }
                                 break;
                             }
@@ -2593,6 +3107,19 @@ function laneDrawCanvas(b, li, selSet) {
     ctx.lineJoin = 'round';
     ctx.stroke();
 
+    // Segments with their own interpolation are re-stroked heavier, so an overridden
+    // span is visible at a glance rather than being silent state.
+    for (var oi2 = 0; oi2 < pts.length - 1; oi2++) {
+        if (!pts[oi2].ip) continue;
+        ctx.beginPath();
+        ctx.moveTo(pts[oi2].x * W, laneYtoCanvas(pts[oi2].y, H));
+        laneTracePath(ctx, [pts[oi2], pts[oi2 + 1]], W, H, pts[oi2].ip);
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 3;
+        ctx.globalAlpha = 0.55;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+    }
 
     // Breakpoints -" edge points (first/last) drawn as bigger squares, others as circles
     var sel = selSet || lane._sel;
@@ -2637,19 +3164,21 @@ function laneDrawCanvas(b, li, selSet) {
     }
 }
 
+// Traces segment by segment so a per-point `ip` override changes only its own segment.
+// `interp` is the lane-wide fallback for points that carry no override.
 function laneTracePath(ctx, pts, W, H, interp) {
-    if (interp === 'smooth') {
-        for (var i = 0; i < pts.length - 1; i++) {
-            var cx = (pts[i].x * W + pts[i + 1].x * W) / 2;
-            ctx.bezierCurveTo(cx, laneYtoCanvas(pts[i].y, H), cx, laneYtoCanvas(pts[i + 1].y, H), pts[i + 1].x * W, laneYtoCanvas(pts[i + 1].y, H));
+    for (var i = 0; i < pts.length - 1; i++) {
+        var mode = pts[i].ip || interp;
+        var x1 = pts[i + 1].x * W, y1 = laneYtoCanvas(pts[i + 1].y, H);
+        if (mode === 'smooth') {
+            var cx = (pts[i].x * W + x1) / 2;
+            ctx.bezierCurveTo(cx, laneYtoCanvas(pts[i].y, H), cx, y1, x1, y1);
+        } else if (mode === 'step') {
+            ctx.lineTo(x1, laneYtoCanvas(pts[i].y, H));
+            ctx.lineTo(x1, y1);
+        } else {
+            ctx.lineTo(x1, y1);
         }
-    } else if (interp === 'step') {
-        for (var i = 1; i < pts.length; i++) {
-            ctx.lineTo(pts[i].x * W, laneYtoCanvas(pts[i - 1].y, H));
-            ctx.lineTo(pts[i].x * W, laneYtoCanvas(pts[i].y, H));
-        }
-    } else {
-        for (var i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x * W, laneYtoCanvas(pts[i].y, H));
     }
 }
 
@@ -3391,13 +3920,16 @@ laneSetupMouse._syncTimer = null;
 
 // Re-sort points and remap _sel indices after a move
 function laneResortWithSel(lane) {
-    var tagged = lane.pts.map(function (p, i) { return { x: p.x, y: p.y, wasSel: lane._sel.has(i), isEdge: (p.x < 0.01 || p.x > 0.99) }; });
+    // `ip` (per-segment interpolation) travels with its point — rebuilding the array
+    // without it would silently discard the override whenever a point is dragged.
+    var tagged = lane.pts.map(function (p, i) { return { x: p.x, y: p.y, ip: p.ip, wasSel: lane._sel.has(i), isEdge: (p.x < 0.01 || p.x > 0.99) }; });
     tagged.sort(function (a, bb) { return a.x - bb.x; });
     lane._sel.clear();
     lane.pts = [];
     for (var i = 0; i < tagged.length; i++) {
-        var px = tagged[i].isEdge ? tagged[i].x : tagged[i].x; // edge points keep their x
-        lane.pts.push({ x: px, y: tagged[i].y });
+        var np = { x: tagged[i].x, y: tagged[i].y };
+        if (tagged[i].ip) np.ip = tagged[i].ip;
+        lane.pts.push(np);
         if (tagged[i].wasSel) lane._sel.add(i);
     }
 }
@@ -3490,6 +4022,61 @@ function laneShowCtxMenu(b, li, lane, cx, cy) {
             }
         },
         { label: '---' },
+    ];
+
+    // ── Shape of the selected span ──
+    // Only meaningful with two or more points selected: the modes apply to the segments
+    // between the outermost selected points, leaving the rest of the curve alone.
+    var _segs = laneSelectedSegments(lane);
+    if (_segs.length > 0) {
+        var _cur = lane.pts[_segs[0]].ip || null;
+        var _allSame = _segs.every(function (s) { return (lane.pts[s].ip || null) === _cur; });
+        var _tick = function (m) { return (_allSame && _cur === m) ? ' ✓' : ''; };
+        var _mk = function (label, mode) {
+            return {
+                label: label + _tick(mode),
+                action: function () {
+                    var n = laneApplySegInterp(b, li, mode);
+                    if (typeof showToast === 'function')
+                        showToast((mode || 'lane default') + ' → ' + n
+                                  + ' segment' + (n === 1 ? '' : 's'), 'info', 2000);
+                }
+            };
+        };
+        items.push({ label: _segs.length + ' segment' + (_segs.length === 1 ? '' : 's') + ' selected', disabled: true });
+        items.push(_mk('Straight line', 'linear'));
+        items.push(_mk('Smooth', 'smooth'));
+        items.push(_mk('Step (hold)', 'step'));
+        items.push(_mk('Follow lane', null));
+        items.push({
+            label: 'Limit effects to this span', action: function () {
+                pushUndoSnapshot();
+                if (laneFxSetFromSelection(lane)) {
+                    syncBlocksToHost();
+                    if (typeof showToast === 'function')
+                        showToast('Depth / Warp / Steps / Drift now apply only here', 'info', 2600);
+                }
+            }
+        });
+        items.push({ label: '---' });
+    }
+    if (laneFxActive(lane)) {
+        items.push({
+            label: 'Clear effect limit (whole lane)', action: function () {
+                pushUndoSnapshot();
+                laneFxClear(lane);
+                syncBlocksToHost();
+            }
+        });
+        items.push({ label: '---' });
+    }
+    items.push({
+        label: (laneDebugOn ? 'Hide' : 'Show') + ' speed diagnostics',
+        action: function () { laneDebugOn = !laneDebugOn; renderBlocks(); }
+    });
+    items.push({ label: '---' });
+
+    items = items.concat([
         {
             label: 'Snap to Grid', action: function () {
                 pushUndoSnapshot();
@@ -3522,7 +4109,7 @@ function laneShowCtxMenu(b, li, lane, cx, cy) {
                 lane._sel.forEach(function (idx) { if (lane.pts[idx]) lane.pts[idx].y = 1; });
             }
         }
-    ];
+    ]);
 
     items.forEach(function (it) {
         if (it.label === '---') {
@@ -3532,6 +4119,13 @@ function laneShowCtxMenu(b, li, lane, cx, cy) {
             return;
         }
         var row = document.createElement('div');
+        if (it.disabled) {
+            // Section caption, not an action
+            row.style.cssText = 'padding:4px 10px;font-size:9px;letter-spacing:.06em;text-transform:uppercase;opacity:.45;';
+            row.textContent = it.label;
+            menu.appendChild(row);
+            return;
+        }
         row.className = 'lane-add-menu-item';
         row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;';
         row.innerHTML = '<span>' + it.label + '</span>' + (it.key ? '<span style="opacity:0.4;font-size:9px;margin-left:12px">' + it.key + '</span>' : '');
@@ -3560,12 +4154,13 @@ function _laneShapeDuplicate(b, li, lane) {
     if (!lane._sel || !lane._sel.size) return;
     var selected = [];
     lane._sel.forEach(function (idx) {
-        if (lane.pts[idx]) selected.push({ x: lane.pts[idx].x, y: lane.pts[idx].y });
+        if (lane.pts[idx]) selected.push({ x: lane.pts[idx].x, y: lane.pts[idx].y, ip: lane.pts[idx].ip });
     });
     if (!selected.length) return;
     selected.sort(function (a, c) { return a.x - c.x; });
     var baseX = selected[0].x;
-    var offsets = selected.map(function (p) { return { dx: p.x - baseX, y: p.y }; });
+    // Carry `ip` so a duplicated span keeps its segment shapes, not just its outline.
+    var offsets = selected.map(function (p) { return { dx: p.x - baseX, y: p.y, ip: p.ip }; });
 
     // Find grid step
     var gridParts = b.laneGrid === 'free' ? null : b.laneGrid.split('/');
@@ -3581,6 +4176,7 @@ function _laneShapeDuplicate(b, li, lane) {
         var nx = pasteX + p.dx;
         if (nx > 0.99) return;
         var np = { x: nx, y: p.y };
+        if (p.ip) np.ip = p.ip;
         lanePutPt(lane, np, gridStep);
         pastedPts.push(np);
     });

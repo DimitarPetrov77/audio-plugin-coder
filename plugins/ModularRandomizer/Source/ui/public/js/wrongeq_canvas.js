@@ -234,7 +234,10 @@ function _weqSnapshotState() {
         steps: weqGlobalSteps,
         tilt: weqGlobalTilt,
         bypass: weqGlobalBypass,
-        dbRange: weqDBRangeMax
+        dbRange: weqDBRangeMax,
+        interp: weqGlobalInterp,
+        oversample: weqOversample,
+        unassignedMode: weqUnassignedMode
     };
 }
 
@@ -253,6 +256,9 @@ function _weqRestoreSnapshot(snap) {
     if (snap.tilt != null) weqGlobalTilt = snap.tilt;
     if (snap.bypass != null) weqGlobalBypass = snap.bypass;
     if (snap.dbRange != null) weqDBRangeMax = snap.dbRange;
+    if (snap.interp != null) weqGlobalInterp = snap.interp;
+    if (snap.oversample != null) weqOversample = snap.oversample;   // weqSyncToHost() below sends it
+    if (snap.unassignedMode != null) weqUnassignedMode = snap.unassignedMode;
     // Update animation bases (snapshot contains unmodulated values)
     weqAnimBaseY = wrongEqPoints.map(function (p) { return p.y; });
     weqAnimBaseX = wrongEqPoints.map(function (p) { return p.x; });
@@ -2926,6 +2932,7 @@ function weqSetupEvents() {
     // Bypass toggle
     var bypassBtn = document.getElementById('weqBypass');
     if (bypassBtn) bypassBtn.onclick = function () {
+        _weqPushUndo();
         weqGlobalBypass = !weqGlobalBypass;
         bypassBtn.classList.toggle('on', weqGlobalBypass);
         bypassBtn.classList.toggle('weq-bypass-on', weqGlobalBypass);
@@ -2963,9 +2970,11 @@ function weqSetupEvents() {
             var dragged = false;
             var fillEl = btn.querySelector('.weq-mod-fill');
 
+            var _wqPushed = false;
             var onMove = function (me) {
                 var dy = startY - me.clientY; // up = positive = increase
                 if (!dragged && Math.abs(dy) < 4) return; // dead zone
+                if (!_wqPushed) { _wqPushed = true; _weqPushUndo(); }
                 dragged = true;
                 // Scale: 100px drag = 100% change
                 var newDepth = Math.max(0, Math.min(100, Math.round(startDepth + dy)));
@@ -3015,6 +3024,7 @@ function weqSetupEvents() {
     // Oversampling cycle button: Off → 2× → 4× → Off
     var osBtn = document.getElementById('weqOversampleBtn');
     if (osBtn) osBtn.onclick = function () {
+        _weqPushUndo();
         if (weqOversample === 1) weqOversample = 2;
         else if (weqOversample === 2) weqOversample = 4;
         else weqOversample = 1;
@@ -3202,6 +3212,7 @@ function weqSetupEvents() {
                     label: 'Band ' + (idx + 1) + ' — ' + freq,
                     color: col,
                     action: function () {
+                        _weqPushUndo();
                         if (!wrongEqPoints[idx].pluginIds) wrongEqPoints[idx].pluginIds = [];
                         if (wrongEqPoints[idx].pluginIds.indexOf(plugId) < 0) {
                             wrongEqPoints[idx].pluginIds.push(plugId);
@@ -3249,6 +3260,7 @@ function weqSetupEvents() {
             e.stopPropagation();
             var idx = parseInt(btn.dataset.weqsolo);
             if (idx < 0 || idx >= wrongEqPoints.length) return;
+            _weqPushUndo();
             var wasSoloed = wrongEqPoints[idx].solo;
             // Exclusive solo: unsolo all others, toggle this one
             for (var si = 0; si < wrongEqPoints.length; si++) wrongEqPoints[si].solo = false;
@@ -3265,6 +3277,7 @@ function weqSetupEvents() {
             e.stopPropagation();
             var idx = parseInt(btn.dataset.weqmute);
             if (idx < 0 || idx >= wrongEqPoints.length) return;
+            _weqPushUndo();
             wrongEqPoints[idx].mute = !wrongEqPoints[idx].mute;
             weqRenderPanel();
             weqSyncToHost();
@@ -3278,6 +3291,7 @@ function weqSetupEvents() {
         el.ondblclick = function (e) {
             e.stopPropagation();
             if (idx >= 0 && idx < wrongEqPoints.length) {
+                _weqPushUndo();
                 wrongEqPoints[idx].y = weqDBtoY(0); // reset to 0dB
                 if (weqAnimRafId) weqAnimBaseY[idx] = weqDBtoY(0);
                 weqRenderPanel(); weqSyncToHost(); weqSyncVirtualParams();
@@ -3289,7 +3303,11 @@ function weqSetupEvents() {
             var startY = e.clientY;
             var baseYVal = (weqAnimRafId && weqAnimBaseY[idx] != null) ? weqAnimBaseY[idx] : (idx >= 0 && idx < wrongEqPoints.length ? wrongEqPoints[idx].y : weqDBtoY(0));
             var startDB = weqYToDB(baseYVal);
+            // Snapshot on the first real movement, not on mousedown — a click that
+            // doesn't drag shouldn't leave an undo entry behind.
+            var _wqPushed = false;
             function onMove(ev) {
+                if (!_wqPushed) { _wqPushed = true; _weqPushUndo(); }
                 var dy = startY - ev.clientY;
                 var newDB = Math.max(-weqDBRangeMax, Math.min(weqDBRangeMax, startDB + dy * 0.3));
                 if (idx >= 0 && idx < wrongEqPoints.length) {
@@ -3321,6 +3339,7 @@ function weqSetupEvents() {
         el.ondblclick = function (e) {
             e.stopPropagation();
             if (idx >= 0 && idx < wrongEqPoints.length) {
+                _weqPushUndo();
                 wrongEqPoints[idx].x = weqFreqToX(1000); // reset to 1kHz
                 if (weqAnimRafId && weqAnimBaseX[idx] != null) weqAnimBaseX[idx] = wrongEqPoints[idx].x;
                 weqRenderPanel(); weqSyncToHost(); weqSyncVirtualParams();
@@ -3331,7 +3350,9 @@ function weqSetupEvents() {
             e.preventDefault(); e.stopPropagation();
             var startY = e.clientY;
             var startFreq = (idx >= 0 && idx < wrongEqPoints.length) ? weqXToFreq(wrongEqPoints[idx].x) : 1000;
+            var _wqPushed = false;
             function onMove(ev) {
+                if (!_wqPushed) { _wqPushed = true; _weqPushUndo(); }
                 var dy = startY - ev.clientY; // up = higher freq
                 var newFreq = Math.max(WEQ_MIN_FREQ, Math.min(WEQ_MAX_FREQ, startFreq * Math.pow(1.006, dy)));
                 if (idx >= 0 && idx < wrongEqPoints.length) {
@@ -3366,6 +3387,7 @@ function weqSetupEvents() {
             if (_qDragPending) { clearTimeout(_qDragPending); _qDragPending = null; }
             _qDragActive = false;
             if (idx >= 0 && idx < wrongEqPoints.length) {
+                _weqPushUndo();
                 wrongEqPoints[idx].q = 0.707;
                 if (weqAnimRafId && weqAnimBaseQ[idx] != null) weqAnimBaseQ[idx] = 0.707;
                 el.textContent = '0.71';
@@ -3379,8 +3401,10 @@ function weqSetupEvents() {
             var startY = e.clientY;
             var startQ = (idx >= 0 && idx < wrongEqPoints.length && wrongEqPoints[idx].q != null) ? wrongEqPoints[idx].q : 0.707;
             _qDragActive = false;
+            var _wqPushed = false;
 
             function onMove(ev) {
+                if (!_wqPushed) { _wqPushed = true; _weqPushUndo(); }
                 _qDragActive = true;
                 var dy = startY - ev.clientY;
                 var newQ = Math.max(0.025, Math.min(40, startQ * Math.pow(1.01, dy)));
@@ -3414,6 +3438,7 @@ function weqSetupEvents() {
         btn.onclick = function (e) {
             e.stopPropagation();
             if (idx < 0 || idx >= wrongEqPoints.length) return;
+            _weqPushUndo();
             var current = wrongEqPoints[idx].type || 'Bell';
             var ci = WEQ_TYPES.indexOf(current);
             var newType = WEQ_TYPES[(ci + 1) % WEQ_TYPES.length];
@@ -3436,6 +3461,7 @@ function weqSetupEvents() {
             e.stopPropagation();
             if (idx < 0 || idx >= wrongEqPoints.length) return;
             if (wrongEqPoints[idx].type === newType) return; // already active
+            _weqPushUndo();
             wrongEqPoints[idx].type = newType;
             if (newType === 'LP' || newType === 'HP') {
                 wrongEqPoints[idx].y = weqDBtoY(0);
@@ -3454,6 +3480,7 @@ function weqSetupEvents() {
             e.stopPropagation();
             if (idx < 0 || idx >= wrongEqPoints.length) return;
             if ((wrongEqPoints[idx].slope || 1) === newSlope) return;
+            _weqPushUndo();
             wrongEqPoints[idx].slope = newSlope;
             weqRenderPanel();
             weqSyncToHost();
@@ -3466,6 +3493,7 @@ function weqSetupEvents() {
         btn.onclick = function (e) {
             e.stopPropagation();
             if (idx < 0 || idx >= wrongEqPoints.length) return;
+            _weqPushUndo();
             wrongEqPoints[idx].preEq = !(wrongEqPoints[idx].preEq !== false);
             weqRenderPanel();
             weqSyncToHost();
@@ -3482,7 +3510,8 @@ function weqSetupEvents() {
         btn.onclick = function (e) {
             e.stopPropagation();
             if (idx < 0 || idx >= wrongEqPoints.length) return;
-            if ((wrongEqPoints[idx].stereoMode || 0) === mode) return; // already set
+            if ((wrongEqPoints[idx].stereoMode || 0) === mode) return; // already
+            _weqPushUndo(); set
             wrongEqPoints[idx].stereoMode = mode;
             weqRenderPanel();
             weqSyncToHost();
@@ -3496,6 +3525,7 @@ function weqSetupEvents() {
         el.ondblclick = function (e) {
             e.stopPropagation();
             if (idx >= 0 && idx < wrongEqPoints.length) {
+                _weqPushUndo();
                 wrongEqPoints[idx].drift = 0;
                 weqRenderPanel(); weqSyncToHost();
                 if (typeof markStateDirty === 'function') markStateDirty();
@@ -3505,7 +3535,9 @@ function weqSetupEvents() {
             e.preventDefault(); e.stopPropagation();
             var startY = e.clientY;
             var startDrift = (idx >= 0 && idx < wrongEqPoints.length && wrongEqPoints[idx].drift != null) ? wrongEqPoints[idx].drift : 0;
+            var _wqPushed = false;
             function onMove(ev) {
+                if (!_wqPushed) { _wqPushed = true; _weqPushUndo(); }
                 var dy = startY - ev.clientY;
                 var newDrift = Math.max(0, Math.min(100, Math.round(startDrift + dy * 0.5)));
                 if (idx >= 0 && idx < wrongEqPoints.length) {
@@ -3550,6 +3582,7 @@ function weqSetupEvents() {
         // Double-click: reset to default
         knob.ondblclick = function (e) {
             e.preventDefault(); e.stopPropagation();
+            _weqPushUndo();
             if (key === 'depth') { weqGlobalDepth = 100; knob.textContent = '100%'; }
             else if (key === 'warp') { weqGlobalWarp = 0; knob.textContent = '+0'; }
             else if (key === 'steps') { weqGlobalSteps = 0; knob.textContent = 'Off'; }
@@ -3622,7 +3655,9 @@ function weqSetupEvents() {
                 weqDrawCanvas();
             }
 
+            var _wqPushed = false;
             function onMove(ev) {
+                if (!_wqPushed) { _wqPushed = true; _weqPushUndo(); }
                 var rawDy = startY - ev.clientY;
                 var dy = ev.shiftKey ? rawDy * 0.2 : rawDy; // Shift = fine control (5x slower)
                 if (key === 'depth') {
@@ -3814,6 +3849,7 @@ function weqSetupEvents() {
             var oldMax = weqDBRangeMax;
             var newMax = parseInt(sel.value);
             if (!newMax || newMax === oldMax) { weqDBRangeMax = newMax || oldMax; return; }
+            _weqPushUndo();
             // The dB range is a ZOOM, not a gain change: preserve each point's actual dB
             // and recompute its normalized Y against the new range, so the curve rescales
             // visually while the sound stays identical. (Points beyond the new range clamp
@@ -4874,6 +4910,7 @@ function weqShowPluginAssign(ptIdx, evt) {
         clearEl.className = 'ctx-i';
         clearEl.textContent = '✕ Clear All';
         clearEl.onclick = function () {
+            _weqPushUndo();
             // Unassign all plugins from this band in C++
             var oldIds = pt.pluginIds.slice();
             pt.pluginIds = [];
@@ -4995,6 +5032,7 @@ function weqShowSegSettings(ptIdx, evt) {
     popup.querySelectorAll('[data-segfx]').forEach(function (btn) {
         btn.onclick = function (fxe) {
             fxe.stopPropagation();
+            _weqPushUndo();
             var fx = btn.dataset.segfx;
 
             // Find the next point after this one in sorted order
@@ -5032,6 +5070,7 @@ function weqShowSegSettings(ptIdx, evt) {
     // Reset
     var resetBtn = popup.querySelector('#weqSegReset');
     if (resetBtn) resetBtn.onclick = function () {
+        _weqPushUndo();
         pt.seg = null;
         popup.remove();
         weqDrawCanvas();
@@ -5990,6 +6029,7 @@ function _weqShowPresetBrowser(anchor) {
         initEl.textContent = 'Init';
         initEl.onclick = function () {
             menu.remove();
+            _weqPushUndo();
             _weqCurrentPreset = null;
             wrongEqPoints = [];
             weqAnimBaseY = []; weqAnimBaseX = [];

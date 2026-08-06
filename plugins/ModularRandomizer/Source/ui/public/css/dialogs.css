@@ -976,3 +976,102 @@
 .scan-path-rm:hover {
     color: var(--text-primary)
 }
+/* ── Modulation Map ───────────────────────────────────────────────
+   Lists every modulated parameter and the blocks driving it. Rows where two or more
+   blocks drive the same parameter are flagged — they compete, and that was previously
+   impossible to see anywhere in the UI. Sized to match the plugin rack rows so it's
+   readable at the app's normal scale. */
+.mm-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 12px;
+    min-height: 30px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.mm-row:hover {
+    background: var(--bg-cell-hover);
+}
+
+.mm-row.conflict {
+    border-left: 3px solid #d08a4a;
+    background: rgba(208, 138, 74, 0.08);
+}
+
+.mm-plug {
+    flex: 0 0 30%;
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.mm-param {
+    flex: 1 1 auto;
+    font-size: 12px;
+    color: var(--text-primary);
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.mm-lock {
+    font-size: 9px;
+    opacity: 0.7;
+    border: 1px solid currentColor;
+    border-radius: 2px;
+    padding: 0 3px;
+}
+
+.mm-chips {
+    flex: 0 0 auto;
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.mm-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    padding: 5px 7px;
+    border: 1px solid currentColor;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.05);
+    cursor: pointer;
+}
+
+.mm-chip:hover {
+    background: rgba(255, 255, 255, 0.16);
+}
+
+.mm-chip.off {
+    opacity: 0.45;
+    text-decoration: line-through;
+}
+
+.mm-chip-d {
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.85;
+}
+
+.mm-empty {
+    padding: 24px 14px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.modal-footer-info.mm-warn {
+    color: #d08a4a;
+}

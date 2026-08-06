@@ -1014,7 +1014,7 @@ function buildGlobalPresetData() {
         blocks: blocks.map(function (b) {
             return {
                 id: b.id, mode: b.mode, colorIdx: b.colorIdx,
-                targets: Array.from(b.targets), targetBases: b.targetBases || {}, targetRanges: b.targetRanges || {}, targetRangeBases: b.targetRangeBases || {},
+                targets: Array.from(b.targets), targetBases: b.targetBases || {}, targetRanges: b.targetRanges || {}, targetRangeBases: b.targetRangeBases || {}, targetDepths: b.targetDepths || {}, targetCurves: b.targetCurves || {},
                 trigger: b.trigger, beatDiv: b.beatDiv, trigFree: !!b.trigFree, trigHz: b.trigHz != null ? b.trigHz : 1,
                 midiMode: b.midiMode, midiNote: b.midiNote, midiCC: b.midiCC, midiCh: b.midiCh,
                 velScale: b.velScale, threshold: b.threshold, audioSrc: b.audioSrc,
@@ -1045,9 +1045,10 @@ function buildGlobalPresetData() {
                 lanes: (b.lanes || []).map(function (lane) {
                     return {
                         pids: lane.pids || (lane.pid ? [lane.pid] : []), color: lane.color || '', collapsed: !!lane.collapsed,
-                        pts: (lane.pts || []).map(function (p) { return { x: p.x, y: p.y }; }),
+                        pts: (lane.pts || []).map(function (p) { var q = { x: p.x, y: p.y }; if (p.ip) q.ip = p.ip; return q; }),
                         loopLen: lane.loopLen || '1/1', steps: lane.steps != null ? lane.steps : 0, depth: lane.depth != null ? lane.depth : 100,
                         drift: lane.drift != null ? lane.drift : 0, driftRange: lane.driftRange != null ? lane.driftRange : 5, driftScale: lane.driftScale || '1/1', warp: lane.warp != null ? lane.warp : 0, interp: lane.interp || 'smooth',
+                        fxLo: lane.fxLo != null ? lane.fxLo : 0, fxHi: lane.fxHi != null ? lane.fxHi : 1,
                         playMode: lane.playMode || 'forward', freeSecs: lane.freeSecs != null ? lane.freeSecs : 4,
                         synced: lane.synced !== false, muted: !!lane.muted,
                         trigMode: lane.trigMode || 'loop', trigSource: lane.trigSource || 'manual',
@@ -1119,6 +1120,9 @@ function buildGlobalPresetData() {
             dbRange: typeof weqDBRangeMax !== 'undefined' ? weqDBRangeMax : 24,
             splitMode: typeof weqSplitMode !== 'undefined' ? weqSplitMode : false,
             oversample: typeof weqOversample !== 'undefined' ? weqOversample : 1,
+            // Split-mode pre-split gains: the autosave kept these, presets did not,
+            // so leaving split mode after loading a preset restored the wrong gains.
+            splitSavedGains: typeof _weqSplitSavedGains !== 'undefined' ? _weqSplitSavedGains : null,
             unassignedMode: typeof weqUnassignedMode !== 'undefined' ? weqUnassignedMode : 0,
             eqPresetName: typeof _weqCurrentPreset !== 'undefined' ? _weqCurrentPreset : null,
             modEnabled: typeof weqModEnabled !== 'undefined' ? weqModEnabled : true
@@ -1192,7 +1196,7 @@ function applyGlobalPreset(data, presetName) {
             if (sb.targets) sb.targets.forEach(function (t) { tSet.add(t); });
             return {
                 id: sb.id, mode: sb.mode || 'randomize', targets: tSet,
-                targetBases: sb.targetBases || {}, targetRanges: sb.targetRanges || {}, targetRangeBases: sb.targetRangeBases || {},
+                targetBases: sb.targetBases || {}, targetRanges: sb.targetRanges || {}, targetRangeBases: sb.targetRangeBases || {}, targetDepths: sb.targetDepths || {}, targetCurves: sb.targetCurves || {},
                 colorIdx: sb.colorIdx || 0,
                 trigger: sb.trigger || 'manual', beatDiv: sb.beatDiv || '1/4', trigFree: !!sb.trigFree, trigHz: sb.trigHz != null ? sb.trigHz : 1,
                 midiMode: sb.midiMode || 'any_note', midiNote: sb.midiNote != null ? sb.midiNote : 60, midiCC: sb.midiCC != null ? sb.midiCC : 1, midiCh: sb.midiCh != null ? sb.midiCh : 0,
@@ -1226,9 +1230,10 @@ function applyGlobalPreset(data, presetName) {
                     var lPids = lane.pids || (lane.pid ? [lane.pid] : []);
                     return {
                         pids: lPids, color: lane.color || '', collapsed: !!lane.collapsed,
-                        pts: (lane.pts || []).map(function (p) { return { x: p.x, y: p.y }; }),
+                        pts: (lane.pts || []).map(function (p) { var q = { x: p.x, y: p.y }; if (p.ip) q.ip = p.ip; return q; }),
                         loopLen: lane.loopLen || '1/1', steps: lane.steps != null ? lane.steps : 0, depth: lane.depth != null ? lane.depth : 100,
                         drift: lane.drift != null ? lane.drift : 0, driftRange: lane.driftRange != null ? lane.driftRange : 5, driftScale: lane.driftScale || '1/1', warp: lane.warp != null ? lane.warp : 0, interp: lane.interp || 'smooth',
+                        fxLo: lane.fxLo != null ? lane.fxLo : 0, fxHi: lane.fxHi != null ? lane.fxHi : 1,
                         playMode: lane.playMode || 'forward', freeSecs: lane.freeSecs != null ? lane.freeSecs : 4,
                         synced: lane.synced !== false, muted: !!lane.muted,
                         trigMode: lane.trigMode || 'loop', trigSource: lane.trigSource || 'manual',
@@ -1551,6 +1556,7 @@ function applyGlobalPreset(data, presetName) {
                     if (typeof weqDBRangeMax !== 'undefined' && weq.dbRange != null) weqDBRangeMax = weq.dbRange;
                     if (typeof weqSplitMode !== 'undefined' && weq.splitMode != null) weqSplitMode = weq.splitMode;
                     if (typeof weqOversample !== 'undefined' && weq.oversample != null) weqOversample = weq.oversample;
+                    if (typeof _weqSplitSavedGains !== 'undefined' && weq.splitSavedGains != null) _weqSplitSavedGains = weq.splitSavedGains;
                     if (typeof weqUnassignedMode !== 'undefined' && weq.unassignedMode != null) weqUnassignedMode = weq.unassignedMode;
                     if (typeof weqModEnabled !== 'undefined' && weq.modEnabled != null) weqModEnabled = weq.modEnabled;
                     if (typeof _weqCurrentPreset !== 'undefined') _weqCurrentPreset = weq.eqPresetName || null;

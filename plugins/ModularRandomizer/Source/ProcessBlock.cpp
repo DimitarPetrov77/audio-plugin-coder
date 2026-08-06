@@ -152,17 +152,25 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         // If FIFO is full, event is silently dropped (acceptable for UI triggers)
     }
 
-    // DAW transport info
-    if (auto* playHead = getPlayHead())
+    // DAW transport info.
+    // We must distinguish "a host transport exists and is stopped" (modulators should
+    // pause — correct in a DAW) from "there is no host transport at all" (the standalone,
+    // where pausing would freeze every synced lane forever and nothing would ever run).
     {
-        if (auto pos = playHead->getPosition())
+        bool haveTransport = false;
+        if (auto* playHead = getPlayHead())
         {
-            if (auto bpm = pos->getBpm())
-                currentBpm.store (*bpm);
-            isPlaying.store (pos->getIsPlaying());
-            if (auto ppq = pos->getPpqPosition())
-                ppqPosition.store (*ppq);
+            if (auto pos = playHead->getPosition())
+            {
+                haveTransport = true;
+                if (auto bpm = pos->getBpm())
+                    currentBpm.store (*bpm);
+                isPlaying.store (pos->getIsPlaying());
+                if (auto ppq = pos->getPpqPosition())
+                    ppqPosition.store (*ppq);
+            }
         }
+        transportAvailable.store (haveTransport, std::memory_order_release);
     }
 
     // â”€â”€ Audio processing â”€â”€
@@ -577,7 +585,9 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                             offset = (mp * 2.0f - 1.0f) * depth;
 
                         for (size_t ti = 0; ti < lb.targets.size(); ++ti)
-                            addModOffset (lb.targets[ti].pluginId, lb.targets[ti].paramIndex, offset);
+                            addModOffset (lb.targets[ti].pluginId, lb.targets[ti].paramIndex,
+                                          shapeModCurve (offset, lb.targets[ti].curve)
+                                              * lb.targets[ti].depth); // per-assignment curve + amount/polarity
                     }
 
                     // Write envelope level for UI readback
@@ -716,7 +726,9 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                             offset = (mp * 2.0f - 1.0f) * depth;
 
                         for (size_t ti = 0; ti < lb.targets.size(); ++ti)
-                            addModOffset (lb.targets[ti].pluginId, lb.targets[ti].paramIndex, offset);
+                            addModOffset (lb.targets[ti].pluginId, lb.targets[ti].paramIndex,
+                                          shapeModCurve (offset, lb.targets[ti].curve)
+                                              * lb.targets[ti].depth); // per-assignment curve + amount/polarity
                     }
 
                     // Write envelope level for UI readback (shares env readback)
@@ -1053,6 +1065,11 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                         mixed += weights[si] * lb.snapshots[si].targetValues[ti];
                                 }
                                 mixed = juce::jlimit (0.0f, 1.0f, mixed);
+                                // Per-assignment depth: scale the move away from this
+                                // target's resting value (depth 1 = unchanged behaviour).
+                                float anchor = (ti < lb.targetBaseValues.size()) ? lb.targetBaseValues[ti] : mixed;
+                                mixed = juce::jlimit (0.0f, 1.0f, anchor + lb.targets[ti].depth
+                                        * shapeModCurve (mixed - anchor, lb.targets[ti].curve));
                                 writeModBase (lb.targets[ti].pluginId, lb.targets[ti].paramIndex, mixed);
                             }
                         }
@@ -1097,7 +1114,10 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                     float twoPi = juce::MathConstants<float>::twoPi;
                     float secsPerBuffer = (float) numSamples / (float) currentSampleRate;
 
-                    bool dawSynced = (lb.shapeTempoSync && lb.clockSourceE != ClockSource::Internal);
+                    // Only tempo-synced to the DAW when a host transport actually exists —
+                    // otherwise (standalone) a synced shape would freeze permanently.
+                    bool dawSynced = (lb.shapeTempoSync && lb.clockSourceE != ClockSource::Internal
+                                      && transportAvailable.load (std::memory_order_acquire));
 
                     // Transport gating: DAW-synced shapes pause when transport stops
                     if (dawSynced && !playing)
@@ -1345,7 +1365,9 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                         if (std::abs (depth) < 0.001f)
                             continue;
 
-                        addModOffset (lb.targets[ti].pluginId, lb.targets[ti].paramIndex, newVal);
+                        addModOffset (lb.targets[ti].pluginId, lb.targets[ti].paramIndex,
+                                      shapeModCurve (newVal, lb.targets[ti].curve)
+                                          * lb.targets[ti].depth); // per-assignment curve + amount/polarity
                         lb.targetLastWritten[ti] = newVal;
                     }
 
@@ -1366,8 +1388,11 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                     float secsPerBuffer = (float) numSamples / (float) currentSampleRate;
                     int laneIdx = 0;
 
-                    // Advance internal beat accumulator for this block
-                    bool useInternal = (lb.clockSourceE == ClockSource::Internal);
+                    // Advance internal beat accumulator for this block.
+                    // With no host transport (standalone), the internal clock is the ONLY
+                    // clock — otherwise every host-synced lane sits frozen forever.
+                    const bool haveTransport = transportAvailable.load (std::memory_order_acquire);
+                    bool useInternal = (lb.clockSourceE == ClockSource::Internal) || ! haveTransport;
                     if (useInternal && lb.internalBpm > 0.0f)
                     {
                         double beatsPerSec = (double) lb.internalBpm / 60.0;
@@ -1383,7 +1408,9 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
                         // Calculate loop duration in seconds
                         float loopSecs;
-                        bool dawSynced = (lc.synced && lb.clockSourceE != ClockSource::Internal);
+                        // Only "DAW-synced" when there is actually a DAW transport to sync to.
+                        bool dawSynced = (lc.synced && lb.clockSourceE != ClockSource::Internal
+                                          && haveTransport);
 
                         if (lc.loopLenFree)
                         {
@@ -1489,6 +1516,7 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                         if (dawSynced && !playing)
                         {
                             lc.wasPlaying = false;
+                            lc.dbgSyncPath = 2;   // frozen: DAW-synced but transport stopped
                             // Still write readback so UI shows frozen playhead
                             int rbIdx = numActiveLanes.load();
                             if (rbIdx < maxLaneReadback)
@@ -1498,6 +1526,9 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                 laneReadback[rbIdx].playhead.store((float) lc.playhead);
                                 laneReadback[rbIdx].value.store(0.5f);
                                 laneReadback[rbIdx].active.store(true);
+                                laneReadback[rbIdx].loopBeats.store(lc.loopLenBeats);
+                                laneReadback[rbIdx].loopSecs.store(loopSecs);
+                                laneReadback[rbIdx].syncPath.store(lc.dbgSyncPath);
                                 numActiveLanes.store(rbIdx + 1);
                             }
                             laneIdx++;
@@ -1518,6 +1549,7 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                         bool beatSynced = !lc.loopLenFree && lc.playModeE == LanePlayMode::Forward;
                         if (beatSynced && (dawSynced || useInternal))
                         {
+                            lc.dbgSyncPath = 0;
                             double effectivePpq = dawSynced ? ppq : lb.internalPpq;
                             double beatsIntoLoop = std::fmod(effectivePpq, (double) lc.loopLenBeats);
                             if (beatsIntoLoop < 0.0) beatsIntoLoop += (double) lc.loopLenBeats;
@@ -1525,6 +1557,7 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                         }
                         else
                         {
+                            lc.dbgSyncPath = 1;
                             float playDelta = secsPerBuffer / std::max(0.001f, loopSecs);
 
                             // Playhead modes
@@ -1644,12 +1677,18 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
                                 // Check if this param is in this lane's target list
                                 // Binary search on pre-sorted targetKeySorted — O(log n), no strings
+                                float tgtDepth = 1.0f; int tgtCurve = 0;
                                 if (!lc.targetKeySorted.empty())
                                 {
                                     LogicBlock::LaneClip::IntKey searchKey { pA.pluginId, pA.paramIndex };
-                                    if (!std::binary_search(lc.targetKeySorted.begin(),
-                                                           lc.targetKeySorted.end(), searchKey))
+                                    // lower_bound (not binary_search) so we can also read the
+                                    // per-assignment depth off the matched entry — still O(log n).
+                                    auto it = std::lower_bound(lc.targetKeySorted.begin(),
+                                                               lc.targetKeySorted.end(), searchKey);
+                                    if (it == lc.targetKeySorted.end() || !(*it == searchKey))
                                         continue;
+                                    tgtDepth = it->depth;
+                                    tgtCurve = it->curve;
                                 }
 
                                 // Find valB: fast if same index matches, else linear scan
@@ -1762,6 +1801,13 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                     morphed = juce::jlimit(0.0f, 1.0f, morphed + noise * driftRangeNorm * driftGain);
                                 }
 
+                                // Per-assignment depth: blend from this param's snapshot-A
+                                // value (its resting point in the morph) toward the morphed
+                                // result. depth 1 = unchanged behaviour.
+                                if (tgtDepth != 1.0f || tgtCurve != 0)
+                                    morphed = juce::jlimit (0.0f, 1.0f, pA.value + tgtDepth
+                                                * shapeModCurve (morphed - pA.value, tgtCurve));
+
                                 writeModBase(pA.pluginId, pA.paramIndex, morphed);
                             }
 
@@ -1811,9 +1857,14 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                             float y0 = pts[seg].y, y1 = pts[seg + 1].y;
                             float t = (x1 > x0) ? (pos - x0) / (x1 - x0) : 0.0f;
 
-                            if (lc.interpE == LaneInterp::Step)
+                            // Per-segment override wins over the lane's mode, so a
+                            // single stretch can be a straight line inside a smooth curve.
+                            const auto segInterp = (pts[seg].ip >= 0)
+                                                 ? (LaneInterp) pts[seg].ip
+                                                 : lc.interpE;
+                            if (segInterp == LaneInterp::Step)
                                 value = y0;
-                            else if (lc.interpE == LaneInterp::Smooth)
+                            else if (segInterp == LaneInterp::Smooth)
                             {
                                 float ts = t * t * (3.0f - 2.0f * t);
                                 value = y0 + (y1 - y0) * ts;
@@ -1825,11 +1876,22 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                         // y=0 top → param=1, y=1 bottom → param=0
                         float paramVal = 1.0f - value;
 
+                        // Effect region: outside it the curve passes through untouched, so
+                        // depth/warp/steps/drift can be confined to one stretch of the lane.
+                        // The UI draws the same band it edits, so the two always agree.
+                        const bool fxLimited = (lc.fxLo > 0.0f || lc.fxHi < 1.0f)
+                                            && (lc.fxHi > lc.fxLo);
+                        const bool inFx = (! fxLimited)
+                                       || ((float) pos >= lc.fxLo && (float) pos <= lc.fxHi);
+
                         // Depth: scale toward center (0.5)
-                        paramVal = 0.5f + (paramVal - 0.5f) * lc.depth;
+                        if (inFx)
+                        {
+                            paramVal = 0.5f + (paramVal - 0.5f) * lc.depth;
+                        }
 
                         // Warp: S-curve contrast, bipolar
-                        if (std::abs(lc.warp) > 0.001f)
+                        if (inFx && std::abs(lc.warp) > 0.001f)
                         {
                             float centered = (paramVal - 0.5f) * 2.0f; // -1..+1
                             if (lc.warp > 0.0f)
@@ -1851,7 +1913,7 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                         }
 
                         // Steps: output quantization
-                        int stepsI = (int) lc.steps;
+                        int stepsI = inFx ? (int) lc.steps : 0;
                         if (stepsI >= 2)
                         {
                             paramVal = std::round(paramVal * (float) stepsI) / (float) stepsI;
@@ -1862,7 +1924,7 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                         // Drift: deterministic organic variation with smooth→sharp character
                         // Positive (+): slow wandering. Negative (-): fast micro-jitter
                         // drift is -1..+1 (speed/character), driftRange is 0-100 (amplitude %)
-                        float driftAmt = std::abs(lc.drift);
+                        float driftAmt = inFx ? std::abs(lc.drift) : 0.0f;
                         float driftRangeNorm = lc.driftRange / 100.0f; // 0..1.0
                         if (driftAmt > 0.001f && driftRangeNorm > 0.001f)
                         {
@@ -1917,7 +1979,16 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                         // Lane output: absolute parameter positioning (like Morph Pad)
                         // paramVal is already 0..1, representing the target parameter value
                         for (const auto& tgt : lc.targets)
-                            writeModBase (tgt.pluginId, tgt.paramIndex, paramVal);
+                        {
+                            // Per-assignment depth, scaled around the curve mid-line (0.5) —
+                            // the same anchor the lane's own Depth control uses, so the two
+                            // compose predictably. depth 1 = unchanged behaviour.
+                            float outVal = (tgt.depth == 1.0f && tgt.curve == 0)
+                                         ? paramVal
+                                         : juce::jlimit (0.0f, 1.0f, 0.5f
+                                             + shapeModCurve (paramVal - 0.5f, tgt.curve) * tgt.depth);
+                            writeModBase (tgt.pluginId, tgt.paramIndex, outVal);
+                        }
 
                         // Write readback for UI
                         int rbIdx = numActiveLanes.load();
@@ -1928,6 +1999,9 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                             laneReadback[rbIdx].playhead.store((float) lc.playhead);
                             laneReadback[rbIdx].value.store(paramVal);
                             laneReadback[rbIdx].active.store(lc.oneshotMode ? lc.oneshotActive : true);
+                            laneReadback[rbIdx].loopBeats.store(lc.loopLenBeats);
+                            laneReadback[rbIdx].loopSecs.store(loopSecs);
+                            laneReadback[rbIdx].syncPath.store(lc.oneshotMode ? 3 : lc.dbgSyncPath);
                             numActiveLanes.store(rbIdx + 1);
                         }
                         laneIdx++;
@@ -1982,6 +2056,11 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                         // Direct linear interpolation: source 0→lo, source 1→hi
                         float mapped = lo + srcVal * (hi - lo);
                         mapped = juce::jlimit(0.0f, 1.0f, mapped);
+
+                        // Per-assignment depth (depth 1 = unchanged behaviour)
+                        float lnkAnchor = (ti < lb.targetBaseValues.size()) ? lb.targetBaseValues[ti] : mapped;
+                        mapped = juce::jlimit (0.0f, 1.0f, lnkAnchor + lb.targets[ti].depth
+                                * shapeModCurve (mapped - lnkAnchor, lb.targets[ti].curve));
 
                         writeModBase (lb.targets[ti].pluginId, lb.targets[ti].paramIndex, mapped);
                     }

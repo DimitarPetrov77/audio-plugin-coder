@@ -57,6 +57,7 @@ juce_add_binary_data(HostesaWebUI
         Source/ui/public/js/wrongeq_canvas.js
         Source/ui/public/js/realtime.js
         Source/ui/public/js/expose_system.js
+        Source/ui/public/js/mod_overview.js
         Source/ui/public/js/controls.js
         Source/ui/public/js/persistence.js
         Source/ui/public/js/juce_integration.js

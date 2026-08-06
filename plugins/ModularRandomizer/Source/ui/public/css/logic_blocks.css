@@ -601,6 +601,37 @@ input[type="range"] {
     text-overflow: ellipsis
 }
 
+/* Per-assignment modulation amount. Drag vertically to set; negative = inverted.
+   Kept visually quiet at the default 100% so a big target list stays calm, and only
+   asserts itself once a target has been given its own amount. */
+.tgt-depth {
+    flex: 0 0 auto;
+    min-width: 34px;
+    text-align: right;
+    font-size: 8px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent, #6a9);
+    cursor: ns-resize;
+    user-select: none;
+    padding: 1px 2px;
+    border-radius: 2px;
+}
+
+.tgt-depth.full {
+    color: var(--text-muted, #777);
+    font-weight: 500;
+}
+
+.tgt-depth.inv {
+    color: #d08a4a;
+}
+
+.tgt-depth:hover {
+    background: rgba(255, 255, 255, 0.07);
+    color: var(--text-primary, #eee);
+}
+
 .tgt-lane-tag {
     font-size: 8px;
     font-weight: 700;
@@ -1609,6 +1640,9 @@ input[type="range"] {
     border-bottom: 1px solid var(--border);
     user-select: none;
     background: color-mix(in srgb, var(--bg-panel) 80%, var(--bg-app));
+    /* Controls keep their natural width and the name ellipsises; on a very narrow panel
+       clip rather than letting the strip spill outside the lane. */
+    overflow: hidden;
 }
 
 .lane-hdr-arrow {
@@ -1663,8 +1697,11 @@ input[type="range"] {
     border-left: 1px solid var(--border);
     outline: none;
     cursor: pointer;
-    padding: 0 8px;
-    max-width: 56px;
+    /* No max-width: a native <select> reserves ~16px for its arrow, so a hard cap
+       clipped the labels ("1 bar" -> "1 ba", "One-Shot" -> "One"). These size to their
+       content instead; the lane name next to them flexes and ellipsises to make room. */
+    padding: 0 2px 0 6px;
+    flex-shrink: 0;
 }
 
 .lane-hdr-sel option {
@@ -2441,32 +2478,35 @@ select.lane-morph-knob {
 }
 
 /* Free seconds input */
+/* Free loop length — a drag control, not a stepped input, so the value is continuous.
+   Styled to match .lane-hdr-sel exactly: borderless, left divider, full header height,
+   so it sits in the control strip instead of floating in it as a box. */
 .lane-hdr-fsec {
-    width: 38px;
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    color: var(--text-primary);
-    font-size: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     font-family: var(--font-mono);
-    padding: 1px 3px;
-    text-align: center;
+    font-size: 10px;
+    color: var(--text-secondary);
+    background: none;
+    border: none;
+    border-left: 1px solid var(--border);
     outline: none;
+    padding: 0 6px;
+    min-width: 52px;
+    cursor: ns-resize;
+    user-select: none;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
 }
 
-.lane-hdr-fsec:focus {
-    border-color: var(--lane-color);
-}
-
-.lane-hdr-unit {
-    font-size: 8px;
-    color: var(--text-muted);
-    margin-right: 3px;
+.lane-hdr-fsec:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.04);
 }
 
 /* Play mode selector */
 .lane-hdr-pm {
-    max-width: 62px;
     font-size: 9px;
 }
 
@@ -3259,4 +3299,62 @@ select.lane-morph-knob {
     color: var(--link-color) !important;
     border-color: var(--link-color) !important;
     background: color-mix(in srgb, var(--link-color) 10%, transparent) !important;
+}
+
+/* Lane motion-capture button: quiet until armed, then unmistakably recording. */
+.lane-cap-btn.armed {
+    color: #fff;
+    background: #b34a4a;
+    border-color: #d05a5a;
+    font-variant-numeric: tabular-nums;
+    animation: laneCapPulse 1s ease-in-out infinite;
+}
+
+@keyframes laneCapPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(208, 90, 90, 0.55); }
+    50%      { box-shadow: 0 0 0 3px rgba(208, 90, 90, 0); }
+}
+
+/* Response-curve tag on a target row — only shown when the curve isn't Linear. */
+.tgt-curve {
+    flex: 0 0 auto;
+    font-size: 7px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    border: 1px solid currentColor;
+    border-radius: 2px;
+    padding: 0 2px;
+    opacity: .75;
+}
+
+/* ── Lane speed diagnostics ───────────────────────────────────────
+   Temporary instrumentation for the "loop length doesn't change speed" report.
+   Shows the audio thread's resolved values against the UI's, plus the cycle time
+   measured from the playhead itself. */
+/* Toggled from the lane right-click menu, not a header button — the header has no
+   room to spare and this is diagnostic, not everyday, state. */
+.lane-dbg-row {
+    font: 9px/1.5 Consolas, monospace;
+    color: #d08a4a;
+    background: rgba(208, 138, 74, 0.07);
+    border-top: 1px solid rgba(208, 138, 74, 0.25);
+    padding: 2px 8px;
+    white-space: nowrap;
+    overflow-x: auto;
+}
+
+.lane-fsec-edit {
+    width: 100%;
+    min-width: 0;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text-primary);
+    font-size: 10px;
+    font-family: var(--font-mono);
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    padding: 0;
 }

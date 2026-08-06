@@ -163,6 +163,8 @@
             <span id="bpmDisplay">— BPM</span>
             <span><span class="sd off" id="midiD"></span>MIDI</span>
             <span><span class="sd off" id="envD"></span>ENV</span>
+            <button class="undo-btn" id="modMapBtn" title="Modulation overview — what modulates what">&#9783; Mod
+                Map</button>
             <button class="undo-btn" id="undoBtn" disabled title="Undo (Ctrl+Z)">&#8630; Undo <span class="undo-badge"
                     id="undoCount">0</span></button>
             <button class="undo-btn" id="redoBtn" disabled title="Redo (Ctrl+Shift+Z)">&#8631; Redo <span
@@ -281,6 +283,25 @@
             </div>
         </div>
     </div>
+    <!-- Modulation Overview ("what modulates what") -->
+    <div class="modal-overlay" id="modMapModal">
+        <div class="modal" style="width:600px;max-height:560px">
+            <div class="modal-head">
+                <span class="modal-title">Modulation Map</span>
+                <button class="modal-close" id="modMapClose">&times;</button>
+            </div>
+            <div class="preset-toolbar">
+                <input type="text" class="modal-search" id="modMapSearch"
+                    placeholder="Filter by plugin, parameter or block...">
+            </div>
+            <div class="modal-body" id="modMapBody"></div>
+            <div class="modal-footer">
+                <span class="modal-footer-info" id="modMapInfo">&nbsp;</span>
+                <span class="modal-footer-info" style="opacity:.6">click a row to locate &middot; click a block chip to
+                    select it</span>
+            </div>
+        </div>
+    </div>
     <!-- Plugin Browser Modal -->
     <div class="modal-overlay" id="pluginModal">
         <div class="modal">
@@ -332,6 +353,7 @@
     <script src="js/wrongeq_canvas.js"></script>
     <script src="js/realtime.js"></script>
     <script src="js/expose_system.js"></script>
+    <script src="js/mod_overview.js"></script>
     <script src="js/controls.js"></script>
     <script src="js/persistence.js"></script>
     <script src="js/juce_integration.js"></script>

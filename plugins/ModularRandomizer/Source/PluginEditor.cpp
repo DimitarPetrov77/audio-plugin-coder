@@ -1475,6 +1475,10 @@ void HostesaAudioProcessorEditor::timerCallback()
                 obj->setProperty ("ph", (double) audioProcessor.laneReadback[i].playhead.load());
                 obj->setProperty ("val", (double) audioProcessor.laneReadback[i].value.load());
                 obj->setProperty ("act", audioProcessor.laneReadback[i].active.load());
+                // Diagnostics — what the audio thread resolved, for the lane debug readout
+                obj->setProperty ("lb", (double) audioProcessor.laneReadback[i].loopBeats.load());
+                obj->setProperty ("ls", (double) audioProcessor.laneReadback[i].loopSecs.load());
+                obj->setProperty ("sp", audioProcessor.laneReadback[i].syncPath.load());
                 laneArr.add (juce::var (obj));
             }
             data->setProperty ("laneHeads", juce::var (laneArr));
@@ -1505,6 +1509,25 @@ void HostesaAudioProcessorEditor::timerCallback()
 
         juce::Array<juce::var> paramUpdates;
 
+        // The parameter the user is physically holding in a hosted plugin's UI. It must be
+        // polled every tick regardless of the visibility/modulation filters below: it drives
+        // the touched-parameter panel (which stays visible when the card is collapsed) and
+        // motion capture (which records a parameter before it is modulated by anything).
+        // Without this exemption, collapsing the rack card freezes its value.
+        const auto touchedKeyForTier1 = audioProcessor.getLastTouchedParamKey();
+        const std::string touchedStd = touchedKeyForTier1.toStdString();
+
+        // The identity cache is only built for expanded plugins, so seed the touched
+        // param's entry by parsing its own key ("pluginId:paramIndex").
+        if (! touchedStd.empty() && paramIdentCache.count (touchedStd) == 0)
+        {
+            const int colon = touchedKeyForTier1.indexOfChar (':');
+            if (colon > 0)
+                paramIdentCache[touchedStd] = ParamIdent {
+                    touchedKeyForTier1.substring (0, colon).getIntValue(),
+                    touchedKeyForTier1.substring (colon + 1).getIntValue() };
+        }
+
         // ── TIER 1: Visible modulated + recently-changed params — fast read every tick (60Hz) ──
         // KEY OPTIMIZATION: Only poll params that are BOTH modulated AND visible on screen.
         // With 2000 modulated params but only ~8 visible, this reduces work by 99.6%.
@@ -1534,6 +1557,9 @@ void HostesaAudioProcessorEditor::timerCallback()
         // Always add recently-changed keys (user interaction, expires via TTL)
         for (auto& rc : recentlyChangedKeys)
             tier1Keys.insert (rc.first);
+        // ...and the parameter currently being grabbed in a plugin's own UI.
+        if (! touchedStd.empty())
+            tier1Keys.insert (touchedStd);
 
         if (!tier1Keys.empty())
         {
@@ -1542,8 +1568,10 @@ void HostesaAudioProcessorEditor::timerCallback()
                 auto idIt = paramIdentCache.find (key);
                 if (idIt == paramIdentCache.end()) continue; // not yet cached by tier 2
 
-                // Skip collapsed plugins — no point polling invisible params
-                if (expandedPluginIds.count (idIt->second.pluginId) == 0) continue;
+                // Skip collapsed plugins — no point polling invisible params.
+                // Exception: the touched param stays live (see touchedStd above).
+                if (expandedPluginIds.count (idIt->second.pluginId) == 0 && key != touchedStd)
+                    continue;
 
                 float val = audioProcessor.getParamValueFast (idIt->second.pluginId, idIt->second.paramIndex);
                 if (val < 0.0f) continue; // lock unavailable, skip
@@ -1724,7 +1752,12 @@ void HostesaAudioProcessorEditor::timerCallback()
         // Gesture-sourced: only a real grab inside a hosted plugin's UI sets this.
         auto touchedKey = audioProcessor.getLastTouchedParamKey();
         if (touchedKey.isNotEmpty())
+        {
             data->setProperty ("touchedParam", touchedKey);
+            // touchedParam persists forever (Bitwig-style panel), so anything that needs
+            // to react to a *new* grab — e.g. motion capture arming — watches this counter.
+            data->setProperty ("touchSeq", audioProcessor.getLastTouchedSeq());
+        }
     }
 
     // ── Proxy sync: read atomic cache from audio thread, apply on message thread ──

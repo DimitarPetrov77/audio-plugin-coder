@@ -1142,7 +1142,32 @@ private:
     struct ParamTarget {
         int pluginId   = 0;
         int paramIndex = 0;
+        // Per-assignment modulation amount. 1.0 = 100% (full), 0 = no effect,
+        // negative = inverted polarity. Lets one modulator drive each of its targets
+        // by a different amount/direction.
+        float depth = 1.0f;
+        // Per-assignment response curve: 0 = linear, 1 = exponential (gentle at first),
+        // 2 = logarithmic (fast at first), 3 = S-curve (eased at both ends).
+        int curve = 0;
     };
+
+    /** Shape a bipolar modulation signal (-1..1) by a response curve, preserving sign.
+        Linear is returned untouched so the default costs nothing. */
+    static inline float shapeModCurve (float x, int curve)
+    {
+        if (curve <= 0) return x;
+        float s = (x < 0.0f) ? -1.0f : 1.0f;
+        float a = std::abs (x);
+        if (a > 1.0f) return x;              // out-of-range: leave alone
+        switch (curve)
+        {
+            case 1: a = a * a;                       break; // exponential
+            case 2: a = std::sqrt (a);               break; // logarithmic
+            case 3: a = a * a * (3.0f - 2.0f * a);   break; // smoothstep / S
+            default: break;
+        }
+        return s * a;
+    }
 
     struct LogicBlock {
         int id = 0;
@@ -1342,9 +1367,12 @@ private:
 
         // ── Lane Clips ──
         struct LaneClip {
-            struct LaneTarget { int pluginId = 0; int paramIndex = 0; };
+            struct LaneTarget { int pluginId = 0; int paramIndex = 0; float depth = 1.0f; int curve = 0; };
             std::vector<LaneTarget> targets;
-            struct Point { float x = 0.0f, y = 0.0f; };
+            // ip: interpolation override for the segment STARTING at this point.
+            // -1 = inherit the lane's interp; otherwise a LaneInterp value. Lets one
+            // stretch of the curve be a straight line while the rest stays smooth.
+            struct Point { float x = 0.0f, y = 0.0f; int ip = -1; };
             std::vector<Point> pts;
             juce::String loopLen;
             float loopLenBeats = 1.0f;  // pre-computed (0 = free mode)
@@ -1352,6 +1380,9 @@ private:
             float freeSecs = 4.0f;
             float steps = 0.0f;     // output quantization: 0=off, 2-32=discrete levels
             float depth = 1.0f;
+            // Effect region: depth/warp/steps/drift apply only where fxLo <= pos <= fxHi.
+            // Full range (0..1) means the whole lane, which is the default.
+            float fxLo = 0.0f, fxHi = 1.0f;
             float drift = 0.0f;
             float driftRange = 5.0f;  // 0-100: amplitude as % of full parameter range
             juce::String driftScale;  // musical period for drift noise: "1/4", "1/1", "4/1", etc.
@@ -1360,6 +1391,7 @@ private:
 
             juce::String interp;
             LaneInterp interpE = LaneInterp::Smooth;
+            int dbgSyncPath = -1;   // which playhead branch ran last (see LaneReadback)
             juce::String playMode;
             LanePlayMode playModeE = LanePlayMode::Forward;
             bool synced = true;
@@ -1411,6 +1443,10 @@ private:
             struct IntKey {
                 int pluginId;
                 int paramIndex;
+                // Per-assignment depth carried alongside the key. Comparison ignores it,
+                // so lower_bound still finds the entry and we read the depth off it.
+                float depth = 1.0f;
+                int curve = 0;
                 bool operator<(const IntKey& o) const {
                     return pluginId < o.pluginId || (pluginId == o.pluginId && paramIndex < o.paramIndex);
                 }
@@ -1721,10 +1757,12 @@ private:
         std::atomic<bool> (&touched)[kMaxPlugins][kMaxParams];
         std::atomic<int>* lastSlot = nullptr;
         std::atomic<int>* lastIdx  = nullptr;
+        std::atomic<int>* seq      = nullptr;
 
         GestureListener (int s, std::atomic<bool> (&t)[kMaxPlugins][kMaxParams],
-                         std::atomic<int>* ls = nullptr, std::atomic<int>* li = nullptr)
-            : slot (s), touched (t), lastSlot (ls), lastIdx (li) {}
+                         std::atomic<int>* ls = nullptr, std::atomic<int>* li = nullptr,
+                         std::atomic<int>* sq = nullptr)
+            : slot (s), touched (t), lastSlot (ls), lastIdx (li), seq (sq) {}
 
         void parameterValueChanged (int, float) override {}
         void parameterGestureChanged (int paramIndex, bool starting) override
@@ -1741,6 +1779,9 @@ private:
                 {
                     lastSlot->store (slot, std::memory_order_release);
                     lastIdx->store (paramIndex, std::memory_order_release);
+                    // Bump a sequence number so the UI can tell a NEW grab from the
+                    // persistent "last touched" state (which is never cleared).
+                    if (seq != nullptr) seq->fetch_add (1, std::memory_order_release);
                 }
             }
         }
@@ -1751,7 +1792,13 @@ private:
     // our own writes). Consumed by the editor to drive the "touched parameter" panel.
     std::atomic<int> lastTouchedSlot { -1 };
     std::atomic<int> lastTouchedIdx  { -1 };
+    // Incremented on every begin-gesture. Lets the UI distinguish "a new grab just
+    // happened" from "this is still the same param that was touched minutes ago".
+    std::atomic<int> lastTouchedSeq  { 0 };
 public:
+    /** Monotonic count of begin-gestures in hosted plugin UIs. */
+    int getLastTouchedSeq() const { return lastTouchedSeq.load (std::memory_order_acquire); }
+
     /** Returns "pluginId:paramIndex" for the last parameter the user grabbed inside a
         hosted plugin's UI, or an empty string if none. */
     juce::String getLastTouchedParamKey() const
@@ -1882,6 +1929,9 @@ public:
     std::atomic<float> sidechainRmsLevel { 0.0f };  // Sidechain input RMS (0..1)
     std::atomic<double> currentBpm { 120.0 };       // DAW BPM
     std::atomic<bool> isPlaying { false };           // DAW transport playing
+    // False in the standalone (and any host that exposes no playhead). Lanes must not
+    // freeze on a stopped transport when there is no transport to begin with.
+    std::atomic<bool> transportAvailable { false };
     std::atomic<double> ppqPosition { 0.0 };         // PPQ position for tempo sync
 
     // ── Spectrum Analyzer (FFT) ──
@@ -1978,6 +2028,13 @@ public:
         std::atomic<float> playhead  { 0.0f };
         std::atomic<float> value     { 0.5f }; // current evaluated value (0..1)
         std::atomic<bool>  active    { true };  // false when oneshot is done/idle
+        // Diagnostics: what the AUDIO THREAD actually resolved for this lane, so the UI
+        // can show the real numbers instead of recomputing its own guess.
+        std::atomic<float> loopBeats { 0.0f };
+        std::atomic<float> loopSecs  { 0.0f };
+        // 0 = beat-synced (playhead derived from PPQ), 1 = free-running (delta per buffer),
+        // 2 = frozen (DAW-synced, transport stopped), 3 = oneshot
+        std::atomic<int>   syncPath  { -1 };
     };
     LaneReadback laneReadback[maxLaneReadback];
     std::atomic<int> numActiveLanes { 0 };

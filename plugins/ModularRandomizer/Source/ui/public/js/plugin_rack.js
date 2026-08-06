@@ -1641,6 +1641,9 @@ pse.addEventListener('contextmenu', function (e) {
         var isVirtual = (hid === -100); // WEQ_VIRTUAL_ID
         var tfn = isVirtual ? null : getTouchParam();
         if (tfn) tfn(hid, ri);
+        // An armed lane motion-capture can start from a rack knob, not just the
+        // hosted plugin's own UI. No-op unless a capture is waiting.
+        if (typeof laneCaptureLocalTouch === 'function') laneCaptureLocalTouch(pid, true);
         // Check if param has ACTIVE modulation (non-zero depth/range)
         // Use getModArcInfo which already checks for non-zero values
         var _arcInfo = getModArcInfo(pid);
@@ -1656,6 +1659,7 @@ pse.addEventListener('contextmenu', function (e) {
             var dy = startY - me.clientY;
             var newVal = Math.max(0, Math.min(1, startVal + dy / sensitivity));
             _lastDragVal = newVal;
+            if (typeof laneCaptureLocalValue === 'function') laneCaptureLocalValue(pid, newVal);
 
             if (isVirtual) {
                 // Virtual param: always apply to EQ state + redraw canvas
@@ -1690,6 +1694,7 @@ pse.addEventListener('contextmenu', function (e) {
         function onUp() {
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
+            if (typeof laneCaptureLocalRelease === 'function') laneCaptureLocalRelease(pid);
             if (!_hasModBlocks) _touchedByUI.delete(pid);
             if (_lastDragVal !== startVal) {
                 pushParamUndo(pid, startVal);
@@ -1734,6 +1739,12 @@ pse.addEventListener('contextmenu', function (e) {
         var newVal = Math.max(0, Math.min(1, baseVal + delta));
         if (newVal === oldVal) return;
         p.v = newVal;
+        // Wheel counts as a rack gesture for an armed motion capture. It has no release
+        // event, so it is not flagged as a drag — the take ends on stillness instead.
+        if (typeof laneCaptureLocalTouch === 'function') {
+            laneCaptureLocalTouch(pid, false);
+            laneCaptureLocalValue(pid, newVal);
+        }
         var isVW = (hid === -100);
         if (isVW) {
             if (typeof weqApplyVirtualParam === 'function') weqApplyVirtualParam(pid, newVal);

@@ -743,6 +743,12 @@ void HostesaAudioProcessor::updateLogicBlocks(const juce::String &jsonData) {
                 LogicBlock::LaneClip::LaneTarget tgt;
                 tgt.pluginId = (int)ltObj->getProperty("pluginId");
                 tgt.paramIndex = (int)ltObj->getProperty("paramIndex");
+                tgt.depth = ltObj->hasProperty("depth")
+                                ? juce::jlimit(-2.0f, 2.0f, (float)(double)ltObj->getProperty("depth"))
+                                : 1.0f;
+                tgt.curve = ltObj->hasProperty("curve")
+                                ? juce::jlimit(0, 3, (int)ltObj->getProperty("curve"))
+                                : 0;
                 lc.targets.push_back(tgt);
               }
             }
@@ -815,6 +821,20 @@ void HostesaAudioProcessor::updateLogicBlocks(const juce::String &jsonData) {
                                  ? lObj->getProperty("trigAudioSrc").toString()
                                  : "main") == "sidechain";
 
+          // Effect region (absent = whole lane)
+          lc.fxLo = lObj->hasProperty("fxLo")
+                        ? (float)(double)lObj->getProperty("fxLo")
+                        : 0.0f;
+          lc.fxHi = lObj->hasProperty("fxHi")
+                        ? (float)(double)lObj->getProperty("fxHi")
+                        : 1.0f;
+          lc.fxLo = juce::jlimit(0.0f, 1.0f, lc.fxLo);
+          lc.fxHi = juce::jlimit(0.0f, 1.0f, lc.fxHi);
+          if (lc.fxHi <= lc.fxLo) {
+            lc.fxLo = 0.0f;
+            lc.fxHi = 1.0f;
+          }
+
           auto ptsVar = lObj->getProperty("pts");
           if (ptsVar.isArray()) {
             for (int pi = 0; pi < ptsVar.size(); ++pi) {
@@ -822,6 +842,11 @@ void HostesaAudioProcessor::updateLogicBlocks(const juce::String &jsonData) {
                 LogicBlock::LaneClip::Point pt;
                 pt.x = (float)(double)ptObj->getProperty("x");
                 pt.y = (float)(double)ptObj->getProperty("y");
+                // Per-segment interpolation override; absent means inherit the lane's.
+                if (ptObj->hasProperty("ip")) {
+                  auto ipStr = ptObj->getProperty("ip").toString();
+                  pt.ip = ipStr.isEmpty() ? -1 : (int)parseLaneInterp(ipStr);
+                }
                 lc.pts.push_back(pt);
               }
             }
@@ -921,7 +946,7 @@ void HostesaAudioProcessor::updateLogicBlocks(const juce::String &jsonData) {
           lc.targetKeySorted.clear();
           lc.targetKeySorted.reserve(lc.targets.size());
           for (const auto &tgt : lc.targets)
-            lc.targetKeySorted.push_back({tgt.pluginId, tgt.paramIndex});
+            lc.targetKeySorted.push_back({tgt.pluginId, tgt.paramIndex, tgt.depth, tgt.curve});
           std::sort(lc.targetKeySorted.begin(), lc.targetKeySorted.end());
 
           lb.laneClips.push_back(std::move(lc));
@@ -1010,6 +1035,13 @@ void HostesaAudioProcessor::updateLogicBlocks(const juce::String &jsonData) {
           ParamTarget pt;
           pt.pluginId = (int)tObj->getProperty("hostId");
           pt.paramIndex = (int)tObj->getProperty("paramIndex");
+          // Per-assignment depth (absent = 1.0 = full, so old patches are unchanged)
+          pt.depth = tObj->hasProperty("depth")
+                         ? juce::jlimit(-2.0f, 2.0f, (float)(double)tObj->getProperty("depth"))
+                         : 1.0f;
+          pt.curve = tObj->hasProperty("curve")
+                         ? juce::jlimit(0, 3, (int)tObj->getProperty("curve"))
+                         : 0;
           lb.targets.push_back(pt);
         }
       }
@@ -1443,7 +1475,7 @@ void HostesaAudioProcessor::rebuildPluginSlots() {
       // Register gesture listeners on all params for hosted-UI touch detection.
       if (hp->instance && slot >= 0) {
         auto listener = std::make_unique<GestureListener>(
-            slot, paramTouched, &lastTouchedSlot, &lastTouchedIdx);
+            slot, paramTouched, &lastTouchedSlot, &lastTouchedIdx, &lastTouchedSeq);
         auto &params = hp->instance->getParameters();
         for (auto *p : params)
           p->addListener(listener.get());

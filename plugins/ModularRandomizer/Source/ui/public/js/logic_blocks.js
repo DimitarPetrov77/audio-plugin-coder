@@ -129,6 +129,39 @@ var HZ_MIN = 0.01, HZ_MAX = 20, HZ_SPAN = 2000; // HZ_MAX / HZ_MIN
 function hzFromPct(p) { return HZ_MIN * Math.pow(HZ_SPAN, Math.max(0, Math.min(100, p)) / 100); }
 function pctFromHz(hz) { return 100 * Math.log(Math.max(HZ_MIN, Math.min(HZ_MAX, hz || 0.5)) / HZ_MIN) / Math.log(HZ_SPAN); }
 function fmtHz(hz) { return (hz < 1 ? hz.toFixed(2) : hz.toFixed(1)) + 'Hz'; }
+// ── Per-assignment modulation depth ──────────────────────────────────────────────
+// Every target of every block carries its own amount/polarity, stored as a percent in
+// b.targetDepths[pid]. 100 = full (and the default, so untouched patches are unchanged),
+// 0 = no effect, negative = inverted. One modulator can therefore push one param hard,
+// nudge another gently, and drive a third in the opposite direction.
+var WEQ_DEPTH_MIN = -200, WEQ_DEPTH_MAX = 200;
+function targetDepthOf(b, pid) {
+    if (!b || !b.targetDepths) return 100;
+    var d = b.targetDepths[pid];
+    return (d == null || isNaN(d)) ? 100 : Math.max(WEQ_DEPTH_MIN, Math.min(WEQ_DEPTH_MAX, d));
+}
+function setTargetDepth(b, pid, pct) {
+    if (!b) return;
+    if (!b.targetDepths) b.targetDepths = {};
+    b.targetDepths[pid] = Math.max(WEQ_DEPTH_MIN, Math.min(WEQ_DEPTH_MAX, Math.round(pct)));
+}
+function fmtDepth(pct) { return (pct > 0 ? '+' : '') + Math.round(pct) + '%'; }
+
+// Per-assignment response curve: shapes how the modulation travels between 0 and full.
+// 0 = Linear (default), 1 = Exponential, 2 = Logarithmic, 3 = S-curve.
+var TARGET_CURVES = ['Linear', 'Exponential', 'Logarithmic', 'S-Curve'];
+var TARGET_CURVE_TAG = ['', 'exp', 'log', 'S'];
+function targetCurveOf(b, pid) {
+    if (!b || !b.targetCurves) return 0;
+    var c = b.targetCurves[pid];
+    return (c == null || isNaN(c)) ? 0 : Math.max(0, Math.min(3, c | 0));
+}
+function setTargetCurve(b, pid, c) {
+    if (!b) return;
+    if (!b.targetCurves) b.targetCurves = {};
+    b.targetCurves[pid] = Math.max(0, Math.min(3, c | 0));
+}
+
 // ── Trigger rate row (unified Hz|Sync) ──
 // Sync ON  → musical division (bars/straight/dotted/triplets) + DAW/Int clock
 // Sync OFF → an explicit trigger frequency in Hz, free-running
@@ -151,7 +184,7 @@ function morphSpeedDisplay(sp) {
 function addBlock(mode) {
     if (!mode) mode = 'randomize'; var id = ++bc;
     var blk = {
-        id: id, mode: mode, enabled: true, targets: new Set(), targetBases: {}, targetRanges: {}, targetRangeBases: {}, colorIdx: bc - 1, trigger: 'manual', beatDiv: '1/4', trigFree: false, trigHz: 1, midiMode: 'any_note', midiNote: 60, midiCC: 1, midiCh: 0, velScale: false, threshold: -12, audioSrc: 'main', rMin: 0, rMax: 100, rangeMode: 'relative', polarity: 'bipolar', quantize: false, qSteps: 12, movement: 'instant', glideMs: 200, envAtk: 10, envRel: 100, envSens: 50, envInvert: false, envFilterMode: 'flat', envFilterFreq: 50, envFilterBW: 5, loopMode: 'loop', sampleSpeed: 1.0, sampleReverse: false, jumpMode: 'restart', sampleName: '', sampleWaveform: null, expanded: true, clockSource: 'daw',
+        id: id, mode: mode, enabled: true, targets: new Set(), targetBases: {}, targetRanges: {}, targetRangeBases: {}, targetDepths: {}, targetCurves: {}, colorIdx: bc - 1, trigger: 'manual', beatDiv: '1/4', trigFree: false, trigHz: 1, midiMode: 'any_note', midiNote: 60, midiCC: 1, midiCh: 0, velScale: false, threshold: -12, audioSrc: 'main', rMin: 0, rMax: 100, rangeMode: 'relative', polarity: 'bipolar', quantize: false, qSteps: 12, movement: 'instant', glideMs: 200, envAtk: 10, envRel: 100, envSens: 50, envInvert: false, envFilterMode: 'flat', envFilterFreq: 50, envFilterBW: 5, loopMode: 'loop', sampleSpeed: 1.0, sampleReverse: false, jumpMode: 'restart', sampleName: '', sampleWaveform: null, expanded: true, clockSource: 'daw',
         snapshots: [], playheadX: 0.5, playheadY: 0.5, morphMode: 'manual', exploreMode: 'wander', lfoShape: 'circle', lfoDepth: 80, lfoRotation: 0, morphSpeed: 50, morphHz: 0.5, morphAction: 'jump', stepOrder: 'cycle', morphSource: 'midi', jitter: 0, morphGlide: 200, morphTempoSync: false, morphSyncDiv: '1/4', snapRadius: 100,
         shapeType: 'circle', shapeTracking: 'horizontal', shapeSize: 80, shapeSpin: 0, shapeSpeed: 50, shapeHz: 0.5, shapePhaseOffset: 0, shapeRange: 'relative', shapePolarity: 'bipolar', shapeTempoSync: false, shapeSyncDiv: '1/4', shapeTrigger: 'free',
         laneTool: 'draw', laneGrid: '1/8', lanes: [],
@@ -262,8 +295,45 @@ function _buildTargetRow(pid, b, col) {
     row.className = 'tgt-row';
     row.setAttribute('data-pid', pid);
     row.style.borderLeft = '3px solid ' + rowCol;
+    var dpct = targetDepthOf(b, pid);
+    var dcur = targetCurveOf(b, pid);
     row.innerHTML = laneTag + '<span class="tgt-name" data-pid="' + pid + '" title="Click to locate">' + pn + ': ' + tp.name + '</span>' +
+        (dcur ? '<span class="tgt-curve" title="Response curve: ' + TARGET_CURVES[dcur] + '">' + TARGET_CURVE_TAG[dcur] + '</span>' : '') +
+        '<span class="tgt-depth' + (dpct < 0 ? ' inv' : '') + (dpct === 100 ? ' full' : '') + '" data-b="' + b.id + '" data-p="' + pid + '"' +
+        ' title="Modulation amount for this target — drag up/down. Negative = inverted. Double-click = 100%. Right-click the row for the response curve.">' + fmtDepth(dpct) + '</span>' +
         '<span class="tx" data-b="' + b.id + '" data-p="' + pid + '" title="Remove">x</span>';
+
+    // Right-click → response curve for this one assignment
+    row.oncontextmenu = function (e) {
+        e.preventDefault(); e.stopPropagation();
+        if (typeof _weqShowCtxMenu !== 'function') return;
+        var cur = targetCurveOf(b, pid);
+        var items = [{ label: (tp.name || pid) + ' — response', disabled: true }];
+        TARGET_CURVES.forEach(function (nm, ci) {
+            items.push({
+                label: (ci === cur ? '• ' : '   ') + nm,
+                action: function () {
+                    if (targetCurveOf(b, pid) === ci) return;
+                    if (typeof pushUndoSnapshot === 'function') pushUndoSnapshot();
+                    setTargetCurve(b, pid, ci);
+                    renderSingleBlock(b.id);
+                    syncBlocksToHost();
+                }
+            });
+        });
+        items.push({ sep: true });
+        items.push({
+            label: 'Reset amount to 100%',
+            action: function () {
+                if (targetDepthOf(b, pid) === 100) return;
+                if (typeof pushUndoSnapshot === 'function') pushUndoSnapshot();
+                setTargetDepth(b, pid, 100);
+                renderSingleBlock(b.id);
+                syncBlocksToHost();
+            }
+        });
+        _weqShowCtxMenu(items, e);
+    };
     // Wire handlers inline — critical for virtual-scroll rows created after wireBlocks()
     var nameSpan = row.querySelector('.tgt-name');
     if (nameSpan) {
@@ -289,6 +359,51 @@ function _buildTargetRow(pid, b, col) {
                     requestAnimationFrame(tryLocate);
                 }
             })();
+        };
+    }
+    // Depth: vertical drag to set, double-click to reset. Wired inline because virtual
+    // scrolling creates these rows after wireBlocks() has already run.
+    var depthEl = row.querySelector('.tgt-depth');
+    if (depthEl) {
+        depthEl.onmousedown = function (e) {
+            e.preventDefault(); e.stopPropagation();
+            var startY = e.clientY;
+            var startVal = targetDepthOf(b, pid);
+            var snap = (typeof captureFullSnapshot === 'function') ? captureFullSnapshot() : null;
+            function onMove(me) {
+                // ~200px = full sweep; Shift for fine control
+                var scale = me.shiftKey ? 0.25 : 1.0;
+                var dv = (startY - me.clientY) * scale;
+                setTargetDepth(b, pid, startVal + dv);
+                var v = targetDepthOf(b, pid);
+                depthEl.textContent = fmtDepth(v);
+                depthEl.classList.toggle('inv', v < 0);
+                depthEl.classList.toggle('full', v === 100);
+                if (typeof debouncedSync === 'function') debouncedSync(); else syncBlocksToHost();
+            }
+            function onUp() {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                if (snap && targetDepthOf(b, pid) !== startVal) {
+                    undoStack.push({ type: 'full', snapshot: snap });
+                    if (undoStack.length > maxUndo) undoStack.shift();
+                    redoStack = [];
+                    updateUndoBadge();
+                }
+                syncBlocksToHost();
+            }
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        };
+        depthEl.ondblclick = function (e) {
+            e.preventDefault(); e.stopPropagation();
+            if (targetDepthOf(b, pid) === 100) return;
+            if (typeof pushUndoSnapshot === 'function') pushUndoSnapshot();
+            setTargetDepth(b, pid, 100);
+            depthEl.textContent = fmtDepth(100);
+            depthEl.classList.remove('inv');
+            depthEl.classList.add('full');
+            syncBlocksToHost();
         };
     }
     var xBtn = row.querySelector('.tx');
@@ -2464,6 +2579,13 @@ function wireBlocks() {
                 return;
             }
             lane._knobClicks[k] = now;
+            // Editing an effect with two or more points selected confines that effect to
+            // the selected span, and latches it so it outlives the selection.
+            if (!isMorphSnap && (k === 'depth' || k === 'warp' || k === 'steps'
+                                 || k === 'drift' || k === 'driftRange')
+                && typeof laneFxLatchOnEdit === 'function') {
+                laneFxLatchOnEdit(b, li);
+            }
             var startY = e.clientY;
             var startVal = readVal(lane);
             var dragged = false;
@@ -3061,7 +3183,21 @@ function wireBlocks() {
             e.stopPropagation();
             var bId = parseInt(btn.dataset.b), li = parseInt(btn.dataset.li);
             var b = findBlock(bId); if (!b || !b.lanes[li]) return;
-            b.lanes[li].interp = btn.dataset.linterp;
+            var mode = btn.dataset.linterp;
+
+            // With two or more points selected, the mode applies only to the span
+            // between them — the rest of the curve keeps whatever it had. Shift-click
+            // overrides that and sets the whole lane.
+            if (!e.shiftKey && typeof laneApplySegInterp === 'function'
+                && laneSelectedSegments(b.lanes[li]).length > 0) {
+                var nSeg = laneApplySegInterp(b, li, mode);
+                if (typeof showToast === 'function')
+                    showToast(mode + ' applied to ' + nSeg + ' segment' + (nSeg === 1 ? '' : 's')
+                              + ' — shift-click sets the whole lane', 'info', 2600);
+                return;
+            }
+
+            b.lanes[li].interp = mode;
             // Update buttons without re-render
             var wrap = btn.closest('.lane-interp-stack');
             if (wrap) wrap.querySelectorAll('.lane-ibtn').forEach(function (t) { t.classList.toggle('on', t.dataset.linterp === b.lanes[li].interp); });
@@ -3141,15 +3277,8 @@ function wireBlocks() {
         };
     });
     // Free seconds input
-    document.querySelectorAll('.lane-hdr-fsec').forEach(function (inp) {
-        inp.onchange = function () {
-            var bId = parseInt(inp.dataset.b), li = parseInt(inp.dataset.li);
-            var b = findBlock(bId); if (!b || !b.lanes[li]) return;
-            b.lanes[li].freeSecs = parseFloat(inp.value) || 4;
-            laneCanvasSetup(b); // redraw all lanes so overlays recalculate ratio
-            debouncedSync();
-        };
-    });
+    // Free loop length is now a drag control (continuous seconds, no stepping)
+    if (typeof laneSetupFreeSecs === 'function') laneSetupFreeSecs();
     // Wire Add Lane buttons (these use .lane-add-btn, not .lane-add-param-btn)
     document.querySelectorAll('.lane-add-curve-btn').forEach(function (btn) {
         btn.onclick = function (e) {
@@ -3358,7 +3487,8 @@ function syncBlocksToHost() {
         b.targets.forEach(function (id) {
             var p = PMap[id];
             if (!p || p.lk) return; // Skip locked params
-            tList.push({ hostId: p.hostId, paramIndex: p.realIndex });
+            // Per-assignment depth: percent in the UI, 0..1 scale for the DSP (default 100%)
+            tList.push({ hostId: p.hostId, paramIndex: p.realIndex, depth: targetDepthOf(b, id) / 100, curve: targetCurveOf(b, id) });
             tIds.push(id);
         });
         var obj = {
@@ -3454,14 +3584,15 @@ function syncBlocksToHost() {
                 var laneTargets = [];
                 (lane.pids || []).forEach(function (pid) {
                     var t = tIdMap[pid];
-                    if (t) laneTargets.push(t);
+                    // Lane targets share the block's per-assignment depth map
+                    if (t) laneTargets.push({ pluginId: t.pluginId, paramIndex: t.paramIndex, depth: targetDepthOf(b, pid) / 100, curve: targetCurveOf(b, pid) });
                 });
                 // Morph lanes don't require pids — their params are stored in snapshot values
                 // Always send lane data to keep C++ lane indices aligned with JS indices
                 // (C++ skips empty lanes in processBlock via hasCurveData/hasMorphData check)
                 return {
                     targets: laneTargets,
-                    pts: (lane.pts || []).map(function (p) { return { x: p.x, y: p.y }; }),
+                    pts: (lane.pts || []).map(function (p) { var q = { x: p.x, y: p.y }; if (p.ip) q.ip = p.ip; return q; }),
                     loopLen: lane.loopLen || '1/1',
                     steps: lane.steps || 0,
                     depth: (lane.depth != null ? lane.depth : 100) / 100.0,
@@ -3471,6 +3602,8 @@ function syncBlocksToHost() {
                     warp: lane.warp || 0,
 
                     interp: lane.interp || 'smooth',
+                    fxLo: lane.fxLo != null ? lane.fxLo : 0,
+                    fxHi: lane.fxHi != null ? lane.fxHi : 1,
                     playMode: lane.playMode || 'forward',
                     freeSecs: lane.freeSecs || 4,
                     synced: lane.synced !== false,

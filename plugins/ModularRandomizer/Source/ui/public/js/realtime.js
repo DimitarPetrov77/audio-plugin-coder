@@ -440,6 +440,8 @@ function setupRtDataListener() {
                 if (data.touchedParam && typeof setTouchedParam === 'function') {
                     setTouchedParam(data.touchedParam);
                 }
+                // Motion capture → Lane: samples the grabbed param while a lane is armed
+                if (typeof laneCaptureTick === 'function') laneCaptureTick(data);
                 // Morph pad playhead readback
                 if (data.morphHeads) {
                     for (var mi = 0; mi < data.morphHeads.length; mi++) {
@@ -605,6 +607,11 @@ function setupRtDataListener() {
                             var lane = lnb.lanes[lh.li];
                             // Store playhead position for overlay dynamic window
                             lane._phPos = lh.ph;
+                            // Audio-thread diagnostics (see laneDebugText)
+                            lane._dbgLoopBeats = lh.lb;
+                            lane._dbgLoopSecs = lh.ls;
+                            lane._dbgSyncPath = lh.sp;
+                            if (typeof laneDebugTick === 'function') laneDebugTick(lnb, lh.li, lh.ph);
                             if (!lnb.laneModOutputs) lnb.laneModOutputs = {};
                             if (lane.pids) {
                                 if (lane.morphMode && lane.morphSnapshots && lane.morphSnapshots.length >= 2) {
