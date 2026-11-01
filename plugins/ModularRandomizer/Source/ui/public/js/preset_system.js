@@ -622,17 +622,20 @@ function _applySnapshotFromParamMap(entry, paramMap, laneTarget) {
             }
         });
         var spos = getSnapSectorPos(b.snapshots.length);
+        if (typeof pushUndoSnapshot === 'function') pushUndoSnapshot();
         b.snapshots.push({
             x: spos.x, y: spos.y,
             values: vals,
             name: entry.name,
-            source: entry.pluginName + ' (factory)'
+            source: entry.pluginName + ' (factory)',
+            weight: 100, curve: 0, depth: 100
         });
+        b._selectedSnap = b.snapshots.length - 1;
         renderSingleBlock(snapLibBlockId);
         syncBlocksToHost();
         var pad = document.querySelector('.morph-pad[data-b="' + snapLibBlockId + '"]');
         if (pad) { pad.classList.remove('snap-flash'); void pad.offsetWidth; pad.classList.add('snap-flash'); }
-        var chips = document.querySelectorAll('.snap-chip[data-b="' + snapLibBlockId + '"]');
+        var chips = document.querySelectorAll('.morph-snap-row[data-b="' + snapLibBlockId + '"]');
         if (chips.length) { var last = chips[chips.length - 1]; last.classList.add('just-added'); setTimeout(function () { last.classList.remove('just-added'); }, 600); }
         closeSnapshotLibrary();
     }
@@ -746,7 +749,7 @@ function loadSnapshotFromLibrary(entry) {
                 syncBlocksToHost();
                 var pad = document.querySelector('.morph-pad[data-b="' + snapLibBlockId + '"]');
                 if (pad) { pad.classList.remove('snap-flash'); void pad.offsetWidth; pad.classList.add('snap-flash'); }
-                var chips = document.querySelectorAll('.snap-chip[data-b="' + snapLibBlockId + '"]');
+                var chips = document.querySelectorAll('.morph-snap-row[data-b="' + snapLibBlockId + '"]');
                 if (chips.length) { var last = chips[chips.length - 1]; last.classList.add('just-added'); setTimeout(function () { last.classList.remove('just-added'); }, 600); }
                 closeSnapshotLibrary();
             } catch (e) { console.log('Snapshot load error:', e); }
@@ -1026,7 +1029,7 @@ function buildGlobalPresetData() {
                 loopMode: b.loopMode, sampleSpeed: b.sampleSpeed, sampleReverse: b.sampleReverse, jumpMode: b.jumpMode,
                 sampleName: b.sampleName || '', sampleWaveform: b.sampleWaveform || null,
                 // Morph Pad fields
-                snapshots: (b.snapshots || []).map(function (s) { return { x: s.x, y: s.y, name: s.name || '', source: s.source || '', values: s.values || {} }; }),
+                snapshots: (b.snapshots || []).map(function (s) { return { x: s.x, y: s.y, name: s.name || '', source: s.source || '', weight: s.weight != null ? s.weight : 100, curve: s.curve || 0, depth: s.depth != null ? s.depth : 100, values: (typeof morphPruneSnapValues === 'function' ? morphPruneSnapValues(s.values, b.targets) : (s.values || {})) }; }),
                 playheadX: b.playheadX != null ? b.playheadX : 0.5, playheadY: b.playheadY != null ? b.playheadY : 0.5,
                 morphMode: b.morphMode || 'manual', exploreMode: b.exploreMode || 'wander',
                 lfoShape: b.lfoShape || 'circle', lfoDepth: b.lfoDepth != null ? b.lfoDepth : 80, lfoRotation: b.lfoRotation != null ? b.lfoRotation : 0, morphSpeed: b.morphSpeed != null ? b.morphSpeed : 50, morphHz: b.morphHz != null ? b.morphHz : 0.5,
@@ -1210,7 +1213,7 @@ function applyGlobalPreset(data, presetName) {
                 loopMode: sb.loopMode || 'loop', sampleSpeed: sb.sampleSpeed != null ? sb.sampleSpeed : 1.0,
                 sampleReverse: sb.sampleReverse || false, jumpMode: sb.jumpMode || 'restart',
                 sampleName: sb.sampleName || '', sampleWaveform: sb.sampleWaveform || null,
-                snapshots: (sb.snapshots || []).map(function (s) { return { x: s.x != null ? s.x : 0.5, y: s.y != null ? s.y : 0.5, name: s.name || '', source: s.source || '', values: s.values || {} }; }),
+                snapshots: (sb.snapshots || []).map(function (s) { return { x: s.x != null ? s.x : 0.5, y: s.y != null ? s.y : 0.5, name: s.name || '', source: s.source || '', weight: s.weight != null ? s.weight : 100, curve: s.curve || 0, depth: s.depth != null ? s.depth : 100, values: (typeof morphPruneSnapValues === 'function' ? morphPruneSnapValues(s.values, tSet) : (s.values || {})) }; }),
                 playheadX: sb.playheadX != null ? sb.playheadX : 0.5, playheadY: sb.playheadY != null ? sb.playheadY : 0.5,
                 morphMode: sb.morphMode || 'manual', exploreMode: (sb.exploreMode === 'lfo' ? 'shapes' : sb.exploreMode) || 'wander',
                 lfoShape: sb.lfoShape || 'circle', lfoDepth: sb.lfoDepth != null ? sb.lfoDepth : 80, lfoRotation: sb.lfoRotation != null ? sb.lfoRotation : 0, morphSpeed: sb.morphSpeed != null ? sb.morphSpeed : 50, morphHz: sb.morphHz != null ? sb.morphHz : 0.5,

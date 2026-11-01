@@ -3096,6 +3096,7 @@ function weqSetupEvents() {
         btn.onclick = function (e) {
             e.stopPropagation();
             var pid = parseInt(btn.dataset.weqplugbypass);
+            _weqPushUndo();
             var pb = null;
             if (typeof pluginBlocks !== 'undefined') {
                 for (var i = 0; i < pluginBlocks.length; i++) {
@@ -4863,6 +4864,7 @@ function weqShowPluginAssign(ptIdx, evt) {
                 el.onclick = function (ev) {
                     ev.stopPropagation();
                     var idx = pt.pluginIds.indexOf(pb.id);
+                    _weqPushUndo();
                     _weqEnsureUid(pt); // ensure stable uid exists
                     var bandBusId = pt.uid; // Stable UID — survives point reordering
                     if (idx >= 0) {

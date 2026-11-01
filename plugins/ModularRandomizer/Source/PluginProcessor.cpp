@@ -1017,6 +1017,18 @@ void HostesaAudioProcessor::updateLogicBlocks(const juce::String &jsonData) {
           LogicBlock::MorphSnapshot snap;
           snap.x = (float)(double)sObj->getProperty("x");
           snap.y = (float)(double)sObj->getProperty("y");
+          // Per-snapshot shaping — absent in older states, so default to neutral
+          snap.weight = sObj->hasProperty("weight")
+                            ? juce::jlimit(0.0f, 2.0f,
+                                  (float)(double)sObj->getProperty("weight") / 100.0f)
+                            : 1.0f;
+          snap.curve = sObj->hasProperty("curve")
+                           ? (int)sObj->getProperty("curve")
+                           : 0;
+          snap.depth = sObj->hasProperty("depth")
+                           ? juce::jlimit(0.0f, 2.0f,
+                                 (float)(double)sObj->getProperty("depth") / 100.0f)
+                           : 1.0f;
           auto valsVar = sObj->getProperty("targetValues");
           if (valsVar.isArray()) {
             for (int vi = 0; vi < valsVar.size(); ++vi)

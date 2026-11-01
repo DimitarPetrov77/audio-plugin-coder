@@ -1047,8 +1047,19 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                             float dist = std::sqrt (dx * dx + dy * dy);
                             float w = 0.0f;
                             if (dist < radius) {
-                                float t = 1.0f - dist / radius;
-                                w = t * t;  // quadratic: smooth at center, zero at boundary
+                                float t = 1.0f - dist / radius;   // 1 at centre, 0 at boundary
+                                // Per-snapshot falloff shape. Smooth (default) is the
+                                // original quadratic, so existing patches are unchanged.
+                                switch (lb.snapshots[si].curve)
+                                {
+                                    case 1:  w = t; break;                              // linear
+                                    case 2:  w = t * t * t; break;                      // sharp — tight core
+                                    case 3:  w = 1.0f - (1.0f - t) * (1.0f - t); break; // late — wide reach
+                                    default: w = t * t; break;                          // smooth
+                                }
+                                // Weight scales how hard this snapshot pulls against its
+                                // neighbours (normalisation below keeps the mix summing to 1).
+                                w *= lb.snapshots[si].weight;
                             }
                             weights[si] = w;
                             totalWeight += w;
@@ -1061,8 +1072,13 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                             for (size_t ti = 0; ti < lb.targets.size(); ++ti) {
                                 float mixed = 0.0f;
                                 for (int si = 0; si < numSnaps; ++si) {
-                                    if (ti < lb.snapshots[si].targetValues.size())
-                                        mixed += weights[si] * lb.snapshots[si].targetValues[ti];
+                                    if (ti >= lb.snapshots[si].targetValues.size()) continue;
+                                    float sv = lb.snapshots[si].targetValues[ti];
+                                    // Per-snapshot depth pulls this snapshot's own value
+                                    // toward the mid-point — a "weaker" version of itself.
+                                    const float sd = lb.snapshots[si].depth;
+                                    if (sd != 1.0f) sv = 0.5f + (sv - 0.5f) * sd;
+                                    mixed += weights[si] * sv;
                                 }
                                 mixed = juce::jlimit (0.0f, 1.0f, mixed);
                                 // Per-assignment depth: scale the move away from this

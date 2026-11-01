@@ -1218,10 +1218,42 @@ input[type="range"] {
 }
 
 /* XY Pad container — circular */
+/* ── Morph Pad workspace ──────────────────────────────────────────
+   Double height (~2 lane blocks): a large pad on the left, the snapshot list on the
+   right. Everything that used to hide in a cramped chip row is visible at once. */
+.morph-workspace {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+    flex-wrap: nowrap;
+}
+
+/* Every column is the height of the pad, so the row reads as one band. */
+.morph-pad-col,
+.morph-snaps-col,
+.morph-side-col { height: 176px; }
+
+.morph-side-col {
+    flex: 0 0 196px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+/* Push the capture row to the bottom so all three columns end on the same line. */
+.morph-side-col .morph-snap-btns { margin-top: auto; }
+
+.morph-pad-col {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
 .morph-pad {
-    width: 200px;
-    height: 200px;
-    margin: 0 auto;
+    width: 176px;
+    height: 176px;
     background: var(--bg-inset);
     border: 2px solid var(--border);
     border-radius: 50%;
@@ -1305,7 +1337,7 @@ input[type="range"] {
 
 .snap-dot .snap-label {
     position: absolute;
-    bottom: 12px;
+    bottom: calc(100% + 3px);
     left: 50%;
     transform: translateX(-50%);
     font-size: 8px;
@@ -1345,49 +1377,18 @@ input[type="range"] {
 }
 
 /* Snapshot chips */
-.snap-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 3px;
-    margin-top: 4px;
-    align-items: center;
-}
-
-.snap-chip {
-    font-size: 9px;
-    padding: 2px 6px;
-    border-radius: 3px;
-    background: var(--bg-cell);
-    border: 1px solid var(--border);
-    color: var(--text-secondary);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 3px;
-}
-
-.snap-chip:hover {
-    background: var(--bg-cell-hover);
-}
-
-.snap-chip .snap-del {
-    cursor: pointer;
-    opacity: 0.5;
-}
-
-.snap-chip .snap-del:hover {
-    opacity: 1;
-    color: var(--locked-icon);
-}
-
 .snap-add-btn {
-    font-size: 9px;
-    padding: 2px 8px;
+    font-size: 10px;
+    padding: 3px 8px;
     border-radius: 3px;
-    background: var(--morph-color);
+    background: color-mix(in srgb, var(--morph-color) 16%, transparent);
     border: 1px solid var(--morph-color);
-    color: var(--fire-text);
+    color: var(--morph-color);
     cursor: pointer;
+}
+
+.snap-add-btn:hover {
+    background: color-mix(in srgb, var(--morph-color) 30%, transparent);
 }
 
 .snap-add-btn:hover {
@@ -1451,7 +1452,7 @@ input[type="range"] {
     }
 }
 
-.snap-chip.just-added {
+.morph-snap-row.just-added {
     animation: snap-chip-glow 0.6s ease-out;
 }
 
@@ -2789,6 +2790,7 @@ select.lane-morph-knob {
 /* ══════════════════════════════ LINK MODE ══════════════════════════════ */
 
 .lcard.mode-link { width: 100%; min-width: 0; }
+.lcard.mode-morph { width: 100%; min-width: 0; }
 .lcard.mode-link.active { border-color: var(--link-color); }
 .lcard.mode-link.link-active {
     box-shadow: 0 0 0 1px var(--link-color), 0 2px 8px color-mix(in srgb, var(--link-color) 12%, transparent);
@@ -3357,4 +3359,377 @@ select.lane-morph-knob {
     text-align: center;
     font-variant-numeric: tabular-nums;
     padding: 0;
+}
+
+
+/* ── Morph Pad snapshot list ─────────────────────────────────────── */
+.morph-snaps-col {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 176px;
+}
+
+.morph-snaps-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 9px;
+    letter-spacing: .08em;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
+.morph-snap-count {
+    font-family: var(--font-mono);
+    opacity: .7;
+}
+
+.morph-snap-list {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overflow-x: hidden;
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    min-height: 0;
+}
+
+.morph-snap-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 5px;
+    font-size: 10px;
+    line-height: 1.5;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+}
+
+.morph-snap-row:last-child { border-bottom: none; }
+.morph-snap-row:hover { background: var(--bg-cell-hover); }
+
+.morph-snap-row.sel {
+    background: color-mix(in srgb, var(--lk-morph-value, var(--knob-value)) 18%, transparent);
+    box-shadow: inset 2px 0 0 var(--lk-morph-value, var(--knob-value));
+}
+
+.morph-snap-row.dragging { opacity: .4; }
+.morph-snap-row.drop-target { border-top: 2px solid var(--lk-morph-value, var(--knob-value)); }
+
+.morph-snap-idx {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    opacity: .5;
+    min-width: 12px;
+}
+
+.morph-snap-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary);
+}
+
+.morph-snap-edit {
+    width: 100%;
+    background: var(--bg-app);
+    border: 1px solid var(--lk-morph-value, var(--knob-value));
+    border-radius: 2px;
+    color: var(--text-primary);
+    font-size: 11px;
+    font-family: inherit;
+    padding: 0 2px;
+    outline: none;
+}
+
+.morph-snap-n {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    opacity: .45;
+}
+
+.morph-snap-aud,
+.morph-snap-row .snap-del {
+    opacity: .45;
+    cursor: pointer;
+    font-size: 10px;
+    padding: 0 3px;
+}
+
+.morph-snap-aud:hover { opacity: 1; color: var(--lk-morph-value, var(--knob-value)); }
+.morph-snap-row .snap-del:hover { opacity: 1; color: #d05a5a; }
+
+.morph-snap-empty {
+    padding: 10px 8px;
+    text-align: center;
+    font-size: 10px;
+    line-height: 1.6;
+    color: var(--text-muted);
+}
+
+
+
+
+
+.morph-snap-src {
+    font-size: 8px;
+    opacity: .5;
+    font-family: var(--font-mono);
+    white-space: nowrap;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    padding: 0 3px;
+}
+
+
+
+
+
+.morph-snap-upd {
+    flex: 0 0 auto;
+    background: none;
+    border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+    border-radius: 3px;
+    color: var(--text-secondary);
+    font-size: 11px;
+    line-height: 1;
+    padding: 2px 5px;
+    cursor: pointer;
+}
+
+.morph-snap-upd:hover {
+    border-color: var(--lk-morph-value, var(--knob-value));
+    color: var(--text-primary);
+}
+
+.morph-snap-btns {
+    display: flex;
+    gap: 4px;
+}
+
+.morph-snap-btns .snap-add-btn { flex: 1 1 auto; }
+.morph-snap-btns .snap-src-btn,
+.morph-snap-btns .snap-lib-btn { flex: 0 0 auto; padding-left: 7px; padding-right: 7px; }
+
+/* Selected snapshot dot on the pad */
+.snap-dot.sel {
+    box-shadow: 0 0 0 2px var(--lk-morph-value, var(--knob-value)), 0 0 8px rgba(0, 0, 0, .5);
+    z-index: 3;
+}
+
+/* Secondary (ctrl/shift) selection — distinct from the primary, which owns the
+   per-snapshot controls but applies its edits to the whole set. */
+.morph-snap-row.msel {
+    background: color-mix(in srgb, var(--lk-morph-value, var(--knob-value)) 9%, transparent);
+    box-shadow: inset 2px 0 0 color-mix(in srgb, var(--lk-morph-value, var(--knob-value)) 45%, transparent);
+}
+
+.snap-dot.msel {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--lk-morph-value, var(--knob-value)) 50%, transparent);
+    z-index: 2;
+}
+
+
+/* ── Movement / Modifiers: horizontal, labelled groups ───────────────
+   In a full-width card the old column-of-full-width-rows stretched every control
+   across ~870px and cost five rows of height. These flow left-to-right in labelled
+   groups instead, sized to their content, and wrap only when they must. */
+.morph-move {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 14px;
+}
+
+.mv-grp {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    flex: 0 0 auto;
+}
+
+.mv-lbl {
+    font-size: 8px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+/* Segmented controls size to their labels instead of filling the row */
+.morph-move .seg {
+    display: inline-flex;
+    flex: 0 0 auto;
+    width: auto;
+}
+
+.morph-move .seg button {
+    flex: 0 0 auto;
+    padding: 3px 9px;
+    white-space: nowrap;
+}
+
+.mv-shape { max-width: 130px; }
+
+/* Knobs pack to the left rather than spreading across the card */
+.morph-move .knob-row {
+    flex: 0 0 auto;
+    gap: 10px;
+    padding: 0;
+}
+
+.morph-move .behaviour-row,
+.morph-move .sub-row {
+    flex: 0 0 auto;
+}
+
+/* Modifiers row: same treatment — one line, not two stacked columns */
+.mod-columns {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+}
+
+.mod-col { flex: 0 0 auto; }
+.mod-col .knob-row { gap: 10px; padding: 0; }
+
+
+/* Clips the influence rings to the pad's circle. snapRadius is a distance in pad
+   coordinates (pad spans 0..1), so a large radius legitimately reaches past the pad —
+   this bounds the DRAWING without misrepresenting the value. The pad itself keeps
+   overflow:visible because snapshot labels are meant to sit outside it. */
+.morph-ring-layer {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* Resting: just enough to read the reach. Bright only while the Radius knob is moving. */
+.morph-ring-layer .radius-ring {
+    opacity: 0.13;
+    border-color: var(--snap-ring-color, var(--morph-color));
+    background: none;
+    transition: opacity .2s, width .06s linear, height .06s linear;
+}
+
+.morph-ring-layer .radius-ring.active {
+    opacity: var(--snap-ring-opacity, 0.55);
+    background: radial-gradient(circle, transparent 55%,
+                color-mix(in srgb, var(--snap-ring-color, var(--morph-color)), transparent 88%) 100%);
+}
+
+
+/* ── Selected-snapshot strip ──────────────────────────────────────
+   One row of drag pills instead of a bordered panel holding two 32px knobs, a
+   labelled select and a full-width button. Matches the lane footer's density. */
+.morph-sel-strip {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 3px 4px;
+    background: rgba(0, 0, 0, 0.18);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    min-height: 22px;
+}
+
+.morph-sel-name {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-primary);
+    max-width: 52px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 0 1 auto;
+}
+
+.msnap-pill {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-secondary);
+    background: var(--bg-cell);
+    border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+    border-radius: 3px;
+    padding: 1px 5px;
+    cursor: ns-resize;
+    user-select: none;
+    white-space: nowrap;
+    flex: 0 0 auto;
+    transition: color .1s, border-color .1s;
+}
+
+.msnap-pill:hover {
+    color: var(--text-primary);
+    border-color: var(--lk-morph-value, var(--knob-value));
+}
+
+.morph-snap-curve {
+    flex: 1 1 auto;
+    min-width: 0;
+    background: var(--bg-cell);
+    border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+    border-radius: 3px;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 1px 2px;
+    outline: none;
+    cursor: pointer;
+}
+
+/* Capture row — compact, aligned with the strip above it */
+.morph-snap-btns .snap-add-btn,
+.morph-snap-btns .snap-src-btn,
+.morph-snap-btns .snap-lib-btn {
+    font-size: 10px;
+    padding: 3px 6px;
+    line-height: 1.3;
+}
+
+/* ── Movement + Modifiers share one row ───────────────────────────
+   Each on its own line left roughly half the full-width card empty. Movement takes the
+   space it needs; Modifiers sits beside it so the block reads as two ordered bands
+   (pad row, controls row) rather than four ragged ones. */
+.morph-lower {
+    display: flex;
+    align-items: stretch;
+    gap: 10px;
+}
+
+.morph-lower > .block-section {
+    border-bottom: none;
+    padding-bottom: 0;
+    min-width: 0;
+}
+
+.morph-lower > .block-section:first-child { flex: 1 1 auto; }
+.morph-lower > .block-section:last-child  { flex: 0 0 auto; }
+
+.morph-lower .constraints-box { height: 100%; }
+
+/* Knob rows align on a common baseline so groups of differing heights don't stagger */
+.morph-move .knob-row,
+.mod-columns .knob-row { align-items: flex-start; }
+
+.mod-divider {
+    width: 1px;
+    align-self: stretch;
+    background: var(--border);
+    margin: 0 4px;
 }

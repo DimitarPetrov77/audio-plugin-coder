@@ -242,6 +242,7 @@ document.getElementById('pcBypass').onclick = function () {
     var pb = null;
     for (var i = 0; i < pluginBlocks.length; i++) { if (pluginBlocks[i].id === plugCtxPluginId) { pb = pluginBlocks[i]; break; } }
     if (!pb) return;
+    if (typeof pushUndoSnapshot === 'function') pushUndoSnapshot();
     pb.bypassed = !pb.bypassed;
     // Sync to C++ audio thread
     if (window.__JUCE__ && window.__JUCE__.backend) {

@@ -1113,6 +1113,8 @@ function wirePluginCards() {
             if (!pb) return;
             var next = parseInt(sel.value);
             var prev = pb.busId || 0;
+            if (next === prev) return;
+            if (typeof pushUndoSnapshot === 'function') pushUndoSnapshot();
             pb.busId = next;
             if (window.__JUCE__ && window.__JUCE__.backend) {
                 var fn = window.__juceGetNativeFunction('setPluginBus');

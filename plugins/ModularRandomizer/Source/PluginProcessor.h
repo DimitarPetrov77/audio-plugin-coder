@@ -1295,6 +1295,13 @@ private:
         struct MorphSnapshot {
             float x = 0.5f, y = 0.5f;
             std::vector<float> targetValues;
+            // Per-snapshot shaping (mirrors the Morph Lane's snapshot fields).
+            // weight: influence multiplier — a heavier snapshot dominates its neighbourhood.
+            // curve : how its influence falls off with distance (0=smooth,1=linear,2=sharp,3=late).
+            // depth : scales its values toward the parameter mid-point.
+            float weight = 1.0f;
+            int   curve  = 0;
+            float depth  = 1.0f;
         };
         std::vector<MorphSnapshot> snapshots;
         float playheadX = 0.5f, playheadY = 0.5f;

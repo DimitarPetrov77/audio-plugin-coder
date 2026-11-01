@@ -5,7 +5,7 @@
     "ui_framework": "webview",
     "complexity_score": 10,
     "created_at": "2026-02-24T10:19:00Z",
-    "last_modified": "2026-03-12T14:19:00Z",
+    "last_modified": "2026-11-02T00:00:00Z",
     "description": "Mastering-grade multi-plugin parameter randomizer and modulator VST3/Standalone with integrated WrongEQ module. Hosts multiple VST3 plugins in series or parallel (bus-based routing), exposes all their parameters, and modulates them via 7 configurable logic blocks (randomize, envelope follower, sample modulator, morph pad, shapes LFO, shapes range, lane automation). Features a full parametric EQ with drawable breakpoints, wave ripple engine, multiband routing, and Linkwitz-Riley crossovers. WebView2-based UI with real-time visualization, modulation arc display, 13 themes, granular undo/redo, visibility-culled rendering, async plugin loading, hosted-plugin gesture detection, and DAW automation proxy system (2048 AP_ slots).",
     "build": {
         "formats": [
@@ -16,7 +16,7 @@
         "webview_backend": "WebView2",
         "vst3_path": "build/plugins/ModularRandomizer/Hostesa_artefacts/Release/VST3/Hostesa.vst3",
         "standalone_path": "build/plugins/ModularRandomizer/Hostesa_artefacts/Release/Standalone/Hostesa.exe",
-        "last_build": "2026-03-12T14:19:00Z",
+        "last_build": "2026-09-15T10:35:09Z",
         "build_errors": 0,
         "dependencies": [
             "JUCE 8",
@@ -27,42 +27,42 @@
     },
     "architecture": {
         "source_files": {
-            "PluginProcessor.cpp": "2069 lines — Constructor, lifecycle, createParameterLayout (2048 AP_ proxy slots), updateLogicBlocks, state save/restore, sample modulator API, GestureListener registration, rebuildPluginSlots, JUCE boilerplate",
-            "ProcessBlock.cpp": "2698 lines — processBlock (audio pipeline), SEH crash guard, logic block engine (all 7 block types incl. lane), WrongEQ DSP (SmoothBiquad, Linkwitz-Riley crossovers, allpass phase compensation, wave ripple), glide processing, NaN sanitization, dry/wet mix",
-            "PluginHosting.cpp": "1474 lines — Plugin scan with SEH crash isolation, deep scan caching, findPluginDescription, instantiatePlugin (COM-safe), proxy parameter pool (2048 AP_ slots with dynamic name/range sync), DAW automation bridge, glide FIFO API, MPE support",
-            "PluginProcessor.h": "1517 lines — All data structures (HostedPlugin, LogicBlock, GestureListener, ProxyParameter, SmoothBiquad, readback FIFOs, crash event FIFO, pluginSlots[32] O(1) lookup, paramTouched atomic flags)",
-            "PluginEditor.cpp": "1650 lines — WebView2 bridge, 25+ native functions, async plugin loading, 2-tier real-time polling with visibility culling, WrongEQ panel bridge, crash notification relay",
-            "PluginEditor.h": "156 lines — Editor class with WebView, relays, attachments, expandedPluginIds, paramIdentCache, modulatedParamKeys",
+            "PluginProcessor.cpp": "2710 lines — Constructor, lifecycle, createParameterLayout (2048 AP_ proxy slots), updateLogicBlocks, state save/restore, sample modulator API, GestureListener registration, rebuildPluginSlots, JUCE boilerplate",
+            "ProcessBlock.cpp": "3223 lines — processBlock (audio pipeline), SEH crash guard, logic block engine (all 7 block types incl. lane), WrongEQ DSP (SmoothBiquad, Linkwitz-Riley crossovers, allpass phase compensation, wave ripple), glide processing, NaN sanitization, dry/wet mix",
+            "PluginHosting.cpp": "2007 lines — Plugin scan with SEH crash isolation, deep scan caching, findPluginDescription, instantiatePlugin (COM-safe), proxy parameter pool (2048 AP_ slots with dynamic name/range sync), DAW automation bridge, glide FIFO API, MPE support",
+            "PluginProcessor.h": "2085 lines — All data structures (HostedPlugin, LogicBlock, GestureListener, ProxyParameter, SmoothBiquad, readback FIFOs, crash event FIFO, pluginSlots[32] O(1) lookup, paramTouched atomic flags)",
+            "PluginEditor.cpp": "1972 lines — WebView2 bridge, 50 native functions, async plugin loading, 2-tier real-time polling with visibility culling, WrongEQ panel bridge, crash notification relay",
+            "PluginEditor.h": "195 lines — Editor class with WebView, relays, attachments, expandedPluginIds, paramIdentCache, modulatedParamKeys",
             "ParameterIDs.hpp": "Parameter ID string constants (MIX, BYPASS)"
         },
         "ui_modules": {
-            "index.html": "333 lines — Main HTML shell with all panels and modals",
-            "js/state.js": "61 lines — Global state variables and data structures",
-            "js/juce_bridge.js": "47 lines — JUCE WebView native function bridge helpers",
-            "js/juce_integration.js": "56 lines — JUCE relay/attachment integration for MIX and BYPASS",
-            "js/theme_system.js": "1768 lines — 13 themes with comprehensive CSS variable system (150+ vars per theme), settings panel, dynamic slider styling",
-            "js/undo_system.js": "176 lines — Granular undo/redo: single param (setParam), multi-param (applyParamBatch), full-state entry types",
-            "js/plugin_rack.js": "1842 lines — Plugin card rendering, param display, knob SVGs, drag-to-assign, bulk select, loading feedback, visibility culling, scroll-based dirty tracking",
-            "js/logic_blocks.js": "2711 lines — Block card rendering, morph pad, shapes pad, wiring, all block UIs, batch randomize",
-            "js/lane_module.js": "3597 lines — Per-parameter automation lanes with drawable envelopes, draw/erase/line tools, grid snapping, loop modes",
-            "js/context_menus.js": "309 lines — Right-click menus for params and plugins (lock/unlock, bypass, presets)",
-            "js/preset_system.js": "1688 lines — Per-plugin presets (batch IPC), global presets (batch IPC), search, type toggle, delete confirmation, dirty indicator",
-            "js/realtime.js": "739 lines — RT data listener, envelope/sample/morph readback, auto-locate, crash toast, live BPM display, visibility-culled param refresh",
-            "js/controls.js": "544 lines — Header controls, keyboard shortcuts, collapse/expand all, plugin loading state, themed toast notifications",
-            "js/persistence.js": "532 lines — State save/restore to/from processor (survives editor close/reopen)",
-            "js/expose_system.js": "587 lines — DAW parameter expose system with proxy parameter mapping and grouping",
-            "js/help_panel.js": "488 lines — Interactive help panel with contextual documentation",
-            "js/wrongeq_canvas.js": "4460 lines — WrongEQ module: parametric EQ with drawable breakpoints, canvas rendering, band cards, Q-bandwidth visualization, wave ripple engine, multiband routing, slope cascading, segment per-point overrides, EQ presets"
+            "index.html": "361 lines — Main HTML shell with all panels and modals",
+            "js/state.js": "96 lines — Global state variables and data structures",
+            "js/juce_bridge.js": "115 lines — JUCE WebView native function bridge helpers",
+            "js/juce_integration.js": "59 lines — JUCE relay/attachment integration for MIX and BYPASS",
+            "js/theme_system.js": "1630 lines — 13 themes with comprehensive CSS variable system (150+ vars per theme), settings panel, dynamic slider styling",
+            "js/undo_system.js": "187 lines — Granular undo/redo: single param (setParam), multi-param (applyParamBatch), full-state entry types",
+            "js/plugin_rack.js": "2036 lines — Plugin card rendering, param display, knob SVGs, drag-to-assign, bulk select, loading feedback, visibility culling, scroll-based dirty tracking",
+            "js/logic_blocks.js": "4228 lines — Block card rendering, morph pad, shapes pad, wiring, all block UIs, batch randomize",
+            "js/lane_module.js": "4455 lines — Per-parameter automation lanes with drawable envelopes, draw/erase/line tools, grid snapping, loop modes",
+            "js/context_menus.js": "314 lines — Right-click menus for params and plugins (lock/unlock, bypass, presets)",
+            "js/preset_system.js": "1821 lines — Per-plugin presets (batch IPC), global presets (batch IPC), search, type toggle, delete confirmation, dirty indicator",
+            "js/realtime.js": "962 lines — RT data listener, envelope/sample/morph readback, auto-locate, crash toast, live BPM display, visibility-culled param refresh",
+            "js/controls.js": "627 lines — Header controls, keyboard shortcuts, collapse/expand all, plugin loading state, themed toast notifications",
+            "js/persistence.js": "576 lines — State save/restore to/from processor (survives editor close/reopen)",
+            "js/expose_system.js": "674 lines — DAW parameter expose system with proxy parameter mapping and grouping",
+            "js/help_panel.js": "537 lines — Interactive help panel with contextual documentation",
+            "js/wrongeq_canvas.js": "6123 lines — WrongEQ module: parametric EQ with drawable breakpoints, canvas rendering, band cards, Q-bandwidth visualization, wave ripple engine, multiband routing, slope cascading, segment per-point overrides, EQ presets"
         },
         "css_modules": [
             "css/variables.css — 112 CSS custom properties with defaults",
             "css/base.css",
-            "css/header.css — 739 lines, Bus group/header/mute/solo styling with CSS variable theming",
-            "css/plugin_rack.css — 622 lines, Loading cards, preset flash, parameter rows",
-            "css/logic_blocks.css — 2378 lines, All block types, lane automation, modulation UI",
-            "css/dialogs.css — 799 lines, Modals, popups, context menus",
-            "css/style.css — 1297 lines, Main layout and component styles",
-            "css/wrongeq.css — 1720 lines, WrongEQ panel, band cards, canvas, routing sidebar",
+            "css/header.css — 850 lines, Bus group/header/mute/solo styling with CSS variable theming",
+            "css/plugin_rack.css — 748 lines, Loading cards, preset flash, parameter rows",
+            "css/logic_blocks.css — 3735 lines, All block types, lane automation, modulation UI",
+            "css/dialogs.css — 1077 lines, Modals, popups, context menus",
+            "css/style.css — 1481 lines, Main layout and component styles",
+            "css/wrongeq.css — 2316 lines, WrongEQ panel, band cards, canvas, routing sidebar",
             "css/themes.css",
             "css/overrides.css"
         ]
@@ -111,15 +111,33 @@
             "description": "Mastering-grade drawable parametric EQ with integrated wave ripple and multiband routing",
             "eq_engine": {
                 "breakpoints": "Up to 32 drawable EQ points with frequency, gain, Q, and type per point",
-                "filter_types": ["Bell", "LP", "HP", "Notch", "LShf (Low Shelf)", "HShf (High Shelf)"],
+                "filter_types": [
+                    "Bell",
+                    "LP",
+                    "HP",
+                    "Notch",
+                    "LShf (Low Shelf)",
+                    "HShf (High Shelf)"
+                ],
                 "slope_cascading": "12/24/48 dB/oct per band (1/2/4 cascaded biquads), visually reflected on canvas",
                 "biquad_engine": "SmoothBiquad with true linear per-sample coefficient interpolation, Audio EQ Cookbook core with RBJ shelf-slope (S) compliance",
                 "gain_range": "Dynamic ±48dB synchronized between UI and DSP",
-                "global_transforms": ["Depth (0-200%)", "Warp (tanh/power curve)", "Steps (quantization)", "Tilt (frequency-dependent gain offset)"]
+                "global_transforms": [
+                    "Depth (0-200%)",
+                    "Warp (tanh/power curve)",
+                    "Steps (quantization)",
+                    "Tilt (frequency-dependent gain offset)"
+                ]
             },
             "wave_ripple": {
                 "description": "LFO-driven wave animation that modulates point positions",
-                "controls": ["Speed", "Depth", "Shape", "Drift", "Drift Scale"],
+                "controls": [
+                    "Speed",
+                    "Depth",
+                    "Shape",
+                    "Drift",
+                    "Drift Scale"
+                ],
                 "continuous_drift": "Optional continuous frequency drift independent of wave animation"
             },
             "multiband_routing": {
@@ -136,7 +154,17 @@
                 "solo_highlights": "Band region highlighting for soloed points"
             },
             "band_cards": {
-                "controls": ["Type selector", "Slope selector (12/24/48)", "Frequency (drag)", "Gain (drag)", "Q (drag)", "Solo/Mute (always visible)", "Delete (always visible)", "Stereo mode", "Pre-EQ/Split toggle"],
+                "controls": [
+                    "Type selector",
+                    "Slope selector (12/24/48)",
+                    "Frequency (drag)",
+                    "Gain (drag)",
+                    "Q (drag)",
+                    "Solo/Mute (always visible)",
+                    "Delete (always visible)",
+                    "Stereo mode",
+                    "Pre-EQ/Split toggle"
+                ],
                 "value_block": "Frequency + Gain/Q grouped in shared dark inset container",
                 "per_point_routing": "Plugin routing panel per band with bus assignment"
             },
@@ -167,9 +195,22 @@
                 "audio threshold (main or sidechain)"
             ],
             "beat_divisions": [
-                "4/1", "2/1", "1/1", "1/2", "1/2.", "1/2T",
-                "1/4", "1/4.", "1/4T", "1/8", "1/8.", "1/8T",
-                "1/16", "1/16T", "1/32", "1/64"
+                "4/1",
+                "2/1",
+                "1/1",
+                "1/2",
+                "1/2.",
+                "1/2T",
+                "1/4",
+                "1/4.",
+                "1/4T",
+                "1/8",
+                "1/8.",
+                "1/8T",
+                "1/16",
+                "1/16T",
+                "1/32",
+                "1/64"
             ]
         },
         "daw_integration": {
@@ -308,10 +349,13 @@
     },
     "native_functions": [
         "scanPlugins(scanPaths) → ScannedPlugin[]",
+        "getScanProgress",
+        "saveUiState",
+        "getDefaultScanPaths",
+        "getFullState",
         "loadPlugin(pluginPath) → { id, name, params[] } (async: bg thread scan → msg thread instantiate)",
         "removePlugin(pluginId)",
         "setParam(pluginId, paramIndex, value)",
-        "applyParamBatch(jsonString) — [{p, i, v}, ...] in one IPC call",
         "touchParam(pluginId, paramIndex)",
         "untouchParam(pluginId, paramIndex)",
         "getParams(pluginId) → params[]",
@@ -323,19 +367,37 @@
         "browseSample(blockId) → { name, path, waveform[] }",
         "setPluginBypass(pluginId, bypass)",
         "resetPluginCrash(pluginId)",
-        "setExpandedPlugins(pluginIdsJson) — controls C++ visibility culling",
         "savePluginPreset(pluginName, presetName, jsonData)",
         "getPluginPresets(pluginName) → presetNames[]",
         "deletePluginPreset(pluginName, presetName)",
         "loadPluginPreset(pluginName, presetName) → jsonData",
+        "getFactoryPresets",
+        "loadFactoryPreset",
         "saveGlobalPreset(presetName, jsonData)",
         "getGlobalPresets() → presetNames[]",
         "loadGlobalPreset(presetName) → jsonData",
         "deleteGlobalPreset(presetName)",
+        "saveEqPreset",
+        "getEqPresets",
+        "loadEqPreset",
+        "deleteEqPreset",
+        "revealPresetFile",
         "setEditorScale(scale)",
-        "exposeParam(pluginId, paramIndex)",
-        "unexposeParam(pluginId, paramIndex)",
-        "getExposedParams() → exposedParams[]"
+        "setRoutingMode",
+        "setEqCurve",
+        "setEqUiMod",
+        "setEqPointFast",
+        "setPluginBus",
+        "setBusVolume",
+        "setBusMute",
+        "setBusSolo",
+        "reorderPlugins",
+        "applyParamBatch(jsonString) — [{p, i, v}, ...] in one IPC call",
+        "setExpandedPlugins(pluginIdsJson) — controls C++ visibility culling",
+        "fireLaneTrigger",
+        "getParamTextForValue",
+        "setVisibleParams",
+        "updateExposeState"
     ],
     "rt_events": [
         "__rt_data__ → { rms, scRms, bpm, playing, ppq, midi[], envLevels[], trigFired[], sampleHeads[], morphHeads[], params[], touchedParam }",
@@ -435,6 +497,11 @@
             "phase": "ui_refinements",
             "completed_at": "2026-03-12T14:19:00Z",
             "notes": "Plugin renamed to Hostesa. 3 new themes (Deep Space, Pitch Black, Obsidian, Deep Forest — 13 total). EQ card redesign: value block inset, always-visible S/M/× buttons, theme-safe contrast. Slope visible on canvas with correct cascading curve. Segment selection system removed (dead feature cleanup). Footer legend range bug fixed (stable base X). Preset path changed to %APPDATA%/DimitarPetrov/Hostesa."
+        },
+        {
+            "phase": "morph_pad_overhaul",
+            "completed_at": "2026-09-15T10:35:09Z",
+            "notes": "Morph Pad overhaul (see .ideas/morph-pad-overhaul.md): per-snapshot weight/curve/depth wired through to the DSP, snapshot list with select/rename/reorder/audition, lock-respecting capture, value pruning on save and load, undo on plugin bypass/bus/EQ-assign actions. Built; not yet user-verified."
         }
     ],
     "validation": {
@@ -445,31 +512,31 @@
         "design_complete": true,
         "code_complete": true,
         "build_completed": true,
-        "build_timestamp": "2026-03-12T14:19:00Z",
+        "build_timestamp": "2026-09-15T10:35:09Z",
         "build_errors": 0,
         "tests_passed": false,
         "ship_ready": false
     },
     "file_sizes": {
-        "PluginProcessor.cpp": "100KB (2069 lines)",
-        "ProcessBlock.cpp": "154KB (2698 lines)",
-        "PluginHosting.cpp": "63KB (1474 lines)",
-        "PluginProcessor.h": "75KB (1517 lines)",
-        "PluginEditor.cpp": "82KB (1650 lines)",
-        "PluginEditor.h": "7KB (156 lines)",
-        "wrongeq_canvas.js": "225KB (4460 lines)",
-        "lane_module.js": "188KB (3597 lines)",
-        "logic_blocks.js": "161KB (2711 lines)",
-        "theme_system.js": "107KB (1768 lines)",
-        "plugin_rack.js": "97KB (1842 lines)",
-        "preset_system.js": "91KB (1688 lines)",
-        "realtime.js": "44KB (739 lines)",
-        "persistence.js": "35KB (532 lines)",
-        "help_panel.js": "34KB (488 lines)",
-        "expose_system.js": "29KB (587 lines)",
-        "controls.js": "25KB (544 lines)",
-        "context_menus.js": "15KB (309 lines)",
-        "undo_system.js": "7KB (176 lines)",
-        "total_source_estimate": "~1.6MB across 35 source files"
+        "PluginProcessor.cpp": "106KB (2710 lines)",
+        "ProcessBlock.cpp": "171KB (3223 lines)",
+        "PluginHosting.cpp": "79KB (2007 lines)",
+        "PluginProcessor.h": "95KB (2085 lines)",
+        "PluginEditor.cpp": "93KB (1972 lines)",
+        "PluginEditor.h": "8KB (195 lines)",
+        "wrongeq_canvas.js": "287KB (6123 lines)",
+        "lane_module.js": "219KB (4455 lines)",
+        "logic_blocks.js": "232KB (4228 lines)",
+        "theme_system.js": "79KB (1630 lines)",
+        "plugin_rack.js": "102KB (2036 lines)",
+        "preset_system.js": "97KB (1821 lines)",
+        "realtime.js": "55KB (962 lines)",
+        "persistence.js": "38KB (576 lines)",
+        "help_panel.js": "35KB (537 lines)",
+        "expose_system.js": "30KB (674 lines)",
+        "controls.js": "29KB (627 lines)",
+        "context_menus.js": "15KB (314 lines)",
+        "undo_system.js": "7KB (187 lines)",
+        "total_source_estimate": "~2.0MB across 35 source files"
     }
 }
