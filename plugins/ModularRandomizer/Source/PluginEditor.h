@@ -137,6 +137,8 @@ private:
     // Order: Relays → WebView → Attachments
     // ═══════════════════════════════════════════════════════════════
 
+    bool restoreSelfCheckDone = false;  // see verifyHeadlessCompile()
+
     // 1. RELAYS FIRST (destroyed last)
     juce::WebSliderRelay mixRelay       { "MIX" };
     juce::WebToggleButtonRelay bypassRelay  { "BYPASS" };

@@ -358,6 +358,8 @@ public:
 
     /** Update logic blocks from UI JSON (called from Editor native function) */
     void updateLogicBlocks (const juce::String& jsonData);
+    /** Same, from an already-parsed DSP-schema array (used by headless restore) */
+    void updateLogicBlocks (const juce::var& parsed);
 
     /** Lightweight morph playhead update (called from drag — avoids full JSON reparse) */
     void updateMorphPlayhead (int blockId, float x, float y);
@@ -493,6 +495,11 @@ public:
     /** UI state persistence — blocks, mappings, locks, order stored as JSON */
     void setUiState (const juce::String& json);
     juce::String getUiState() const;
+
+    /** Self-check for headless restore: compiles the saved UI state in C++ and diffs it
+        against the blocks the editor just sent (first sync after opening). Result goes
+        to restore_check.txt in the data folder. */
+    void verifyHeadlessCompile (const juce::String& editorBlocksJson);
 
     //==============================================================================
     // Sample Modulator API
@@ -1030,11 +1037,29 @@ private:
         int blockId        = -1;   // >= 0 = logic block param
         juce::String blockParamKey; // e.g. "shapeDepth", "lane.0.depth"
 
+        // Block param definition (from the JS expose payload). Kept so the slot can be
+        // saved/restored exactly and DAW automation applied without the editor.
+        juce::String blockSlotName;          // "Block name - Label" as shown in the DAW
+        juce::String blockParamType;         // "float" | "bool" | "discrete"
+        juce::StringArray blockOptions;      // discrete only
+        float blockMin = 0.0f, blockMax = 100.0f;
+        juce::String blockSuffix;
+
         bool isFree() const { return pluginId < 0 && blockId < 0; }
         bool isBlock() const { return blockId >= 0; }
         bool isPlugin() const { return pluginId >= 0; }
-        void clear() { pluginId = -1; paramIndex = -1; blockId = -1; blockParamKey = ""; }
+        void clear()
+        {
+            pluginId = -1; paramIndex = -1; blockId = -1; blockParamKey = "";
+            blockSlotName = ""; blockParamType = ""; blockOptions.clear();
+            blockMin = 0.0f; blockMax = 100.0f; blockSuffix = "";
+        }
     };
+
+    /** Frees one slot: clears the mapping and resets its DAW-facing name/value. */
+    void releaseProxySlot (int slot);
+    /** Writes a block mapping's name/display info onto its proxy parameter. */
+    void applyBlockSlotDisplay (int slot);
 
     ProxyMapping                  proxyMap[proxyParamCount];
     ProxyParameter*               proxyParams[proxyParamCount] {};  // raw ptrs (owned by APVTS)
@@ -1060,7 +1085,47 @@ private:
     // UI State Persistence
     //==============================================================================
     mutable std::mutex uiStateMutex;
-    juce::String uiStateJson;  // Full UI state as JSON (blocks, mappings, locks)
+    mutable juce::String uiStateJson;  // Full UI state as JSON (blocks, mappings, locks)
+
+    //==============================================================================
+    // Headless state (StateRestore.cpp) — lets a session run fully without the editor.
+    // The UI blob is parsed once into uiStateRoot; DAW automation of exposed block
+    // params edits that tree and recompiles the blocks, and uiStateJson is
+    // re-serialised lazily the next time anyone reads it. All guarded by uiStateMutex.
+    //==============================================================================
+    mutable juce::var uiStateRoot;
+    mutable bool uiStateRootValid = false;
+    mutable bool uiStateJsonStale = false;
+
+    /** Parses uiStateJson into uiStateRoot if needed. Caller holds uiStateMutex. */
+    const juce::var& getUiStateRootLocked() const;
+    /** Re-serialises uiStateRoot into uiStateJson if it was edited. Caller holds uiStateMutex. */
+    void flushUiStateJsonLocked() const;
+
+    /** Applies everything the editor used to push on open (blocks, bypass, bus mixer,
+        routing, WrongEQ, legacy expose state). Called at the end of setStateInformation. */
+    void applySavedUiState (bool proxyMapRestored);
+
+    /** Port of logic_blocks.js syncBlocksToHost(): saved-schema UI state → the DSP-schema
+        array updateLogicBlocks() expects. Missing snapshot values are filled from the
+        live parameter value and written back into `root`, as the JS does. */
+    juce::var compileBlocksForDsp (const juce::var& root);
+
+    /** Port of expose_system.js setBlockParamFromDAW() for when no editor is open. */
+    void applyBlockParamUpdatesHeadless (const std::vector<BlockParamUpdate>& updates);
+
+    /** Exact slot ↔ param map, so DAW automation lanes stay on the same param across reloads. */
+    void saveProxyMap (juce::XmlElement& parent);
+    bool restoreProxyMap (const juce::XmlElement* mapXml, const juce::XmlElement* pluginsXml);
+
+    /** Without an editor nobody drains the proxy caches, so the processor does it itself. */
+    struct HeadlessSyncTimer : public juce::Timer
+    {
+        explicit HeadlessSyncTimer (HostesaAudioProcessor& p) : owner (p) {}
+        void timerCallback() override;
+        HostesaAudioProcessor& owner;
+    };
+    HeadlessSyncTimer headlessSyncTimer { *this };
 
     //==============================================================================
     // Glide Engine — per-buffer parameter interpolation

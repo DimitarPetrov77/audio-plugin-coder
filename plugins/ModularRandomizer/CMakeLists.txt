@@ -102,6 +102,7 @@ target_sources(Hostesa
         Source/PluginProcessor.h
         Source/ProcessBlock.cpp
         Source/PluginHosting.cpp
+        Source/StateRestore.cpp
         Source/PluginEditor.cpp
         Source/PluginEditor.h
         Source/ParameterIDs.hpp

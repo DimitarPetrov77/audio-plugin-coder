@@ -4120,6 +4120,7 @@ function syncBlocksToHost() {
         return obj;
     });
     fn(JSON.stringify(data));
+    if (typeof reconcileBlockExpose === 'function') reconcileBlockExpose();
     saveUiStateToHost();
 }
 

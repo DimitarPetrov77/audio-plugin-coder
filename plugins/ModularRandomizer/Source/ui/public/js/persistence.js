@@ -6,8 +6,14 @@
 // STATE PERSISTENCE — save/restore across editor close/reopen
 // ==========================================================
 
+// True while restoreFromHost() is rebuilding the UI. Saves are suppressed meanwhile:
+// steps like applyTheme() would otherwise push a half-restored state (default BPM,
+// routing, empty EQ) over the processor's copy until the restore finished.
+var _restoringFromHost = false;
+
 // Serialize full UI state to JSON and send to processor
 function saveUiStateToHost() {
+    if (_restoringFromHost) return;
     _stateDirty = false; // clear so auto-save doesn't redundantly fire
     // Mark global preset as dirty (any state save implies a change was made)
     if (typeof markGpDirty === 'function') markGpDirty();
@@ -176,6 +182,8 @@ function restoreFromHost() {
             return;
         }
 
+        _restoringFromHost = true;
+
         // Rebuild pluginBlocks and PMap from hosted plugins
         pluginBlocks = [];
         PMap = {};
@@ -249,13 +257,16 @@ function restoreFromHost() {
                     });
                 }
                 // Restore blocks
+                // WrongEQ virtual params only enter PMap later (weqSetVisible below), so
+                // in WrongEQ mode keep their targets instead of dropping them as missing.
+                var weqTargetPrefix = (saved.routingMode === 2 && typeof WEQ_VIRTUAL_ID !== 'undefined') ? WEQ_VIRTUAL_ID + ':' : null;
                 if (saved.blocks && saved.blocks.length > 0) {
                     blocks = saved.blocks.map(function (sb) {
                         // Convert targets array back to Set
                         var tSet = new Set();
                         if (sb.targets) sb.targets.forEach(function (t) {
                             // Only restore target if the param still exists
-                            if (PMap[t]) tSet.add(t);
+                            if (PMap[t] || (weqTargetPrefix && String(t).indexOf(weqTargetPrefix) === 0)) tSet.add(t);
                         });
                         return {
                             id: sb.id, mode: sb.mode || 'randomize', targets: tSet, targetBases: sb.targetBases || {}, targetRanges: sb.targetRanges || {}, targetRangeBases: sb.targetRangeBases || {}, targetDepths: sb.targetDepths || {}, targetCurves: sb.targetCurves || {},
@@ -414,6 +425,12 @@ function restoreFromHost() {
             }
             // Show WrongEQ button if mode 2, sync restored state to C++
             if (typeof weqSetVisible === 'function') weqSetVisible(routingMode === 2);
+            // Locks on WrongEQ virtual params can only be applied now that they exist
+            if (saved && saved.locks && routingMode === 2) {
+                for (var wlid in saved.locks) {
+                    if (PMap[wlid] && PMap[wlid].hostId === WEQ_VIRTUAL_ID) PMap[wlid].lk = true;
+                }
+            }
             if (routingMode === 2 && typeof weqSyncToHost === 'function') {
                 weqSyncToHost();
                 // Retry sync after delay — the initial call may fire before the
@@ -507,6 +524,7 @@ function restoreFromHost() {
             addBlock('randomize');
         }
 
+        _restoringFromHost = false;
         renderAllPlugins();
         renderBlocks();
         updCounts();
@@ -514,6 +532,7 @@ function restoreFromHost() {
         syncExpandedPlugins();
         processRealTimeData();
     }).catch(function (e) {
+        _restoringFromHost = false;
         console.log('getFullState error:', e);
         addBlock('randomize');
         processRealTimeData();

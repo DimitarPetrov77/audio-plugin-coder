@@ -572,6 +572,33 @@ function _syncExposeStateToHost() {
     if (typeof markStateDirty === 'function') markStateDirty();
 }
 
+// ── Keep block slots in step with the blocks (called after every syncBlocksToHost) ──
+// Frees the DAW slots of blocks that no longer exist (delete, preset load) and re-sends
+// the expose state when an exposed block's param list changes (lanes / macros added or
+// removed), so new per-lane params appear and stale ones are released.
+var _exposeBlockSig = '';
+function reconcileBlockExpose() {
+    if (!window._exposeState || !window._exposeState.blocks) return;
+    var removed = {}, anyRemoved = false, sig = [];
+    for (var bid in window._exposeState.blocks) {
+        var b = typeof findBlock === 'function' ? findBlock(parseInt(bid)) : null;
+        if (!b) { removed[bid] = { exposed: false, excluded: [] }; anyRemoved = true; continue; }
+        if (window._exposeState.blocks[bid].exposed) {
+            sig.push(bid + ':' + getExposableParamsForBlock(b).map(function (p) { return p.key; }).join(','));
+        }
+    }
+    if (anyRemoved) {
+        for (var rid in removed) delete window._exposeState.blocks[rid];
+        var fn = window.__juceGetNativeFunction ? window.__juceGetNativeFunction('updateExposeState') : null;
+        if (fn) fn(JSON.stringify({ plugins: {}, blocks: removed }));
+    }
+    var s = sig.join('|');
+    if (s !== _exposeBlockSig) {
+        _exposeBlockSig = s;
+        _syncExposeStateToHost();
+    }
+}
+
 // ── Persistence helpers (called by persistence.js) ──
 
 function getExposeStateForSave() {

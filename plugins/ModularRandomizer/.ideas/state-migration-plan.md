@@ -6,7 +6,40 @@ editor ever opening. JS becomes a view that renders state and sends commands. Th
 prerequisite for a native (Visage) UI, which can then be built screen by screen against the
 same model.
 
-**Status:** Plan only. Nothing implemented yet.
+**Status (2026-11-02):** Phase 1 (headless restore) is implemented on this branch. The
+full native-UI migration (Phases 2–4, Visage) is **not** being pursued; the decision was
+to perfect the existing WebView UI instead.
+
+### Phase 1 — what was done
+- `Source/StateRestore.cpp`: C++ port of the restore + `syncBlocksToHost` transforms;
+  `setStateInformation` now restores blocks, bypass, bus mixer, routing and full WrongEQ
+  without the editor. Sample-modulator audio files are saved and reloaded.
+- **State nesting bug fixed:** `setStateInformation` used to pass the whole XML to
+  `apvts.replaceState()`, so every load/save cycle stacked another stale copy of
+  `HOSTED_PLUGINS`/`UI_STATE` (with the UI text dropped) *before* the real one, and restore
+  read the oldest. Sessions reopened twice came back with their first-ever plugin list and
+  no blocks. Sections are now kept out of the APVTS tree and read from their last
+  occurrence, which also recovers existing bloated states.
+- **DAW exposure:** exact AP_ slot map saved/restored (`PROXY_MAP`, guarded by the plugin
+  list); re-exposing a plugin now gets its slots back; block-param automation no longer
+  dropped by `syncProxyCacheToHost`; block automation and proxy → DAW sync run without the
+  editor (`HeadlessSyncTimer`); slots of deleted blocks are freed and lane params refresh.
+- **JS:** WrongEQ targets/locks no longer dropped on reopen; no half-restored state saved
+  while the UI restores.
+- **Self-check:** on each editor open the processor compiles the saved state itself and
+  diffs it against what the editor sends → `%APPDATA%\DimitarPetrov\Hostesa\restore_check.txt`.
+  Verified exact on a synthetic session (all 8 block types, quirks, locks, EQ routing) and
+  across repeated reloads in the Standalone.
+
+### Not covered yet
+- WrongEQ internal gain LFO / drift / Q-mod is still computed in JS (`weqAnimTick` →
+  `setEqUiMod`), so it only moves while the editor is open and freezes when it closes.
+- Exposed `lane.N.speed` maps to a field the DSP never reads (no effect).
+- Not yet tested in a DAW: headless block automation, sample reload.
+
+---
+
+The original plan follows for reference.
 
 ---
 

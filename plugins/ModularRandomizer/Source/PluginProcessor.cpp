@@ -280,9 +280,14 @@ HostesaAudioProcessor::HostesaAudioProcessor()
   // Pre-compute Hann window coefficients (used by FFT spectrum analyzer)
   for (int i = 0; i < fftCurrentSize; ++i)
       hannWindow[i] = 0.5f * (1.0f - std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) (fftCurrentSize - 1)));
+
+  // Drains DAW automation / proxy value sync while no editor is open
+  headlessSyncTimer.startTimerHz(30);
 }
 
 HostesaAudioProcessor::~HostesaAudioProcessor() {
+  headlessSyncTimer.stopTimer();
+
   // Unregister proxy listeners (unified pool)
   for (int i = 0; i < proxyParamCount; ++i) {
     auto id = juce::String("AP_") + juce::String(i).paddedLeft('0', 4);
@@ -455,6 +460,10 @@ void HostesaAudioProcessor::syncProxyCacheToHost() {
 
   proxySyncActive.store(true);
   for (int i = 0; i < proxyParamCount; ++i) {
+    // Block slots carry DAW → block automation values; those belong to
+    // drainBlockProxyCache(). Consuming them here silently dropped them.
+    if (proxyMap[i].isBlock())
+      continue;
     float cached =
         proxyValueCache[i].exchange(-999.0f, std::memory_order_relaxed);
     if (cached > -998.0f && proxyParams[i] != nullptr) {
@@ -530,7 +539,10 @@ bool HostesaAudioProcessor::isBusesLayoutSupported(
 #endif
 
 void HostesaAudioProcessor::updateLogicBlocks(const juce::String &jsonData) {
-  auto parsed = juce::JSON::parse(jsonData);
+  updateLogicBlocks(juce::JSON::parse(jsonData));
+}
+
+void HostesaAudioProcessor::updateLogicBlocks(const juce::var &parsed) {
   if (!parsed.isArray())
     return;
 
@@ -2139,10 +2151,14 @@ void HostesaAudioProcessor::setEqPointFast(int pointIndex,
 void HostesaAudioProcessor::setUiState(const juce::String &json) {
   std::lock_guard<std::mutex> lock(uiStateMutex);
   uiStateJson = json;
+  // The editor is now the source of truth again — drop the parsed copy.
+  uiStateRootValid = false;
+  uiStateJsonStale = false;
 }
 
 juce::String HostesaAudioProcessor::getUiState() const {
   std::lock_guard<std::mutex> lock(uiStateMutex);
+  flushUiStateJsonLocked();
   return uiStateJson;
 }
 
@@ -2263,9 +2279,33 @@ const juce::String HostesaAudioProcessor::getProgramName(int) { return {}; }
 void HostesaAudioProcessor::changeProgramName(int, const juce::String &) {}
 
 //==============================================================================
+// State sections Hostesa appends next to the APVTS parameters. They must never
+// end up inside the APVTS ValueTree: older builds passed the whole XML to
+// replaceState(), so every load/save cycle nested another stale copy (with the
+// UI_STATE text dropped) in front of the real one, and getChildByName() then
+// read the oldest copy. Readers below therefore take the LAST occurrence, which
+// is the real data even in states saved by those builds.
+static const char *const kStateSections[] = {"HOSTED_PLUGINS", "UI_STATE",
+                                             "PROXY_MAP", "BLOCK_SAMPLES"};
+
+static void stripStateSections(juce::XmlElement &xml) {
+  for (auto *tag : kStateSections)
+    xml.deleteAllChildElementsWithTagName(tag);
+}
+
+static const juce::XmlElement *lastChildNamed(const juce::XmlElement &xml,
+                                              const char *tag) {
+  const juce::XmlElement *found = nullptr;
+  for (auto *child : xml.getChildWithTagNameIterator(tag))
+    found = child;
+  return found;
+}
+
+//==============================================================================
 void HostesaAudioProcessor::getStateInformation(juce::MemoryBlock &destData) {
   auto state = apvts.copyState();
   std::unique_ptr<juce::XmlElement> xml(state.createXml());
+  stripStateSections(*xml); // drop stale copies a bloated old state left in APVTS
 
   // Save hosted plugins (defensive: if a plugin crashes during param read,
   // we still save the rest of the state)
@@ -2307,8 +2347,27 @@ void HostesaAudioProcessor::getStateInformation(juce::MemoryBlock &destData) {
   // Save UI state (blocks, mappings, locks)
   {
     std::lock_guard<std::mutex> lock(uiStateMutex);
+    flushUiStateJsonLocked();
     if (uiStateJson.isNotEmpty())
       xml->createNewChildElement("UI_STATE")->addTextElement(uiStateJson);
+  }
+
+  // Exact DAW slot assignments — automation lanes are bound to slot numbers
+  saveProxyMap(*xml);
+
+  // Sample modulator audio files (the UI state only keeps name + waveform)
+  {
+    std::lock_guard<std::mutex> lock(blockMutex);
+    juce::XmlElement *samplesXml = nullptr;
+    for (const auto &lb : logicBlocks) {
+      if (lb.sampleData == nullptr || lb.sampleData->filePath.isEmpty())
+        continue;
+      if (samplesXml == nullptr)
+        samplesXml = xml->createNewChildElement("BLOCK_SAMPLES");
+      auto *el = samplesXml->createNewChildElement("S");
+      el->setAttribute("block", lb.id);
+      el->setAttribute("path", lb.sampleData->filePath);
+    }
   }
 
   copyXmlToBinary(*xml, destData);
@@ -2321,15 +2380,27 @@ void HostesaAudioProcessor::setStateInformation(const void *data,
   if (xmlState == nullptr)
     return;
 
-  // Restore APVTS
-  if (xmlState->hasTagName(apvts.state.getType()))
-    apvts.replaceState(juce::ValueTree::fromXml(*xmlState));
+  // Restore APVTS — parameters only, never Hostesa's own sections
+  if (xmlState->hasTagName(apvts.state.getType())) {
+    juce::XmlElement paramsOnly(*xmlState);
+    stripStateSections(paramsOnly);
+    apvts.replaceState(juce::ValueTree::fromXml(paramsOnly));
+  }
 
   // Restore hosted plugins
-  auto *pluginsXml = xmlState->getChildByName("HOSTED_PLUGINS");
+  auto *pluginsXml = lastChildNamed(*xmlState, "HOSTED_PLUGINS");
   if (pluginsXml != nullptr) {
     int restoredNextId = pluginsXml->getIntAttribute("nextId", 0);
     routingMode.store(pluginsXml->getIntAttribute("routingMode", 0));
+
+    // Drop the previous session's blocks outright. Their targets point at
+    // plugins about to be destroyed (and IDs get reused), so letting
+    // updateLogicBlocks "restore base values" for them, or carry their runtime
+    // state over by block ID, would leak stale values into the new session.
+    {
+      std::lock_guard<std::mutex> lock(blockMutex);
+      logicBlocks.clear();
+    }
 
     // Clear existing plugins safely � audio thread doesn't hold pluginMutex.
     // Single lock scope: null instances + clear vector atomically so the audio
@@ -2444,157 +2515,30 @@ void HostesaAudioProcessor::setStateInformation(const void *data,
     nextPluginId = juce::jmax(nextPluginId, restoredNextId);
   }
 
+  // Restore exact DAW slot assignments (falls back to load-order assignment
+  // above for sessions saved before the map existed)
+  bool proxyMapRestored = restoreProxyMap(lastChildNamed(*xmlState, "PROXY_MAP"),
+                      lastChildNamed(*xmlState, "HOSTED_PLUGINS"));
+
   // Restore UI state
-  auto *uiStateXml = xmlState->getChildByName("UI_STATE");
-  if (uiStateXml != nullptr) {
+  {
+    auto *uiStateXml = lastChildNamed(*xmlState, "UI_STATE");
     std::lock_guard<std::mutex> lock(uiStateMutex);
-    uiStateJson = uiStateXml->getAllSubText().trim();
-
-    // -- Pre-populate EQ points from saved UI state so audio processing starts
-    // immediately without waiting for the WebView to load and call setEqCurve.
-    // --
-    if (routingMode.load() == 2 && uiStateJson.isNotEmpty()) {
-      auto parsed = juce::JSON::parse(uiStateJson);
-      if (auto *root = parsed.getDynamicObject()) {
-        auto weqVar = root->getProperty("wrongEq");
-        if (auto *weq = weqVar.getDynamicObject()) {
-          // Restore global params
-          float dbRange = weq->hasProperty("dbRange")
-                              ? (float)(double)weq->getProperty("dbRange")
-                              : 24.0f;
-          eqDbRange.store(juce::jlimit(6.0f, 48.0f, dbRange));
-          if (weq->hasProperty("depth"))
-            eqGlobalDepth.store(juce::jlimit(
-                0.0f, 200.0f, (float)(double)weq->getProperty("depth")));
-          if (weq->hasProperty("warp"))
-            eqGlobalWarp.store(juce::jlimit(
-                -100.0f, 100.0f, (float)(double)weq->getProperty("warp")));
-          if (weq->hasProperty("steps"))
-            eqGlobalSteps.store(
-                juce::jlimit(0, 64, (int)weq->getProperty("steps")));
-          if (weq->hasProperty("tilt"))
-            eqGlobalTilt.store(juce::jlimit(
-                -100.0f, 100.0f, (float)(double)weq->getProperty("tilt")));
-          if (weq->hasProperty("reso"))
-            eqGlobalReso.store(juce::jlimit(
-                0.0f, 100.0f, (float)(double)weq->getProperty("reso")));
-          if (weq->hasProperty("bypass"))
-            eqGlobalBypass.store((bool)weq->getProperty("bypass"));
-
-          // Restore oversampling factor
-          if (weq->hasProperty("oversample")) {
-            int osf = juce::jlimit(1, 4, (int)weq->getProperty("oversample"));
-            if (osf == 3)
-              osf = 2;
-            eqOversampleFactor.store(osf);
-            // Oversampler will be configured in prepareToPlay
-          }
-
-          auto ptsVar = weq->getProperty("points");
-          if (auto *ptsArr = ptsVar.getArray()) {
-            float maxDB = eqDbRange.load();
-            int n = juce::jmin((int)ptsArr->size(), (int)maxEqBands);
-
-            struct PtRestore {
-              float hz;
-              float db;
-              int busId;
-              bool solo;
-              bool mute;
-              float q;
-              int ft;
-              float drift;
-              bool preEq;
-              int stereoMode;
-              int slope;
-            };
-            std::vector<PtRestore> pts;
-            pts.reserve(n);
-
-            for (int i = 0; i < n; ++i) {
-              if (auto *pt = (*ptsArr)[i].getDynamicObject()) {
-                // Convert normalized x (0-1 log scale) ? freq Hz
-                float xNorm = (float)(double)pt->getProperty("x");
-                float hz =
-                    20.0f * std::pow(1000.0f, juce::jlimit(0.0f, 1.0f, xNorm));
-
-                // Convert normalized y (0=top=+maxDB, 1=bottom=-maxDB) ? dB
-                float yNorm = (float)(double)pt->getProperty("y");
-                float db = (-maxDB) + (1.0f - juce::jlimit(0.0f, 1.0f, yNorm)) *
-                                          (maxDB * 2.0f);
-
-                int ft = 0; // Bell default
-                auto typeStr = pt->getProperty("type").toString().toLowerCase();
-                if (typeStr == "lp")
-                  ft = 1;
-                else if (typeStr == "hp")
-                  ft = 2;
-                else if (typeStr == "notch")
-                  ft = 3;
-                else if (typeStr == "lshf")
-                  ft = 4;
-                else if (typeStr == "hshf")
-                  ft = 5;
-
-                pts.push_back(
-                    {hz, db,
-                     pt->hasProperty("uid") ? (int)pt->getProperty("uid")
-                                            : (i + 1),
-                     (bool)pt->getProperty("solo"),
-                     (bool)pt->getProperty("mute"),
-                     pt->hasProperty("q") ? (float)(double)pt->getProperty("q")
-                                          : 0.707f,
-                     ft,
-                     pt->hasProperty("drift")
-                         ? (float)(double)pt->getProperty("drift")
-                         : 0.0f,
-                     pt->hasProperty("preEq") ? (bool)pt->getProperty("preEq")
-                                              : true,
-                     pt->hasProperty("stereoMode")
-                         ? (int)pt->getProperty("stereoMode")
-                         : 0,
-                     pt->hasProperty("slope") ? (int)pt->getProperty("slope")
-                                              : 1});
-              }
-            }
-
-            // Sort by frequency (same as setEqCurve)
-            std::sort(pts.begin(), pts.end(),
-                      [](const PtRestore &a, const PtRestore &b) {
-                        return a.hz < b.hz;
-                      });
-
-            numEqPoints.store((int)pts.size());
-            for (int i = 0; i < (int)pts.size(); ++i) {
-              eqPoints[i].freqHz.store(
-                  juce::jlimit(20.0f, 20000.0f, pts[i].hz));
-              eqPoints[i].gainDB.store(juce::jlimit(-maxDB, maxDB, pts[i].db));
-              eqPoints[i].busId.store(pts[i].busId);
-              eqPoints[i].solo.store(pts[i].solo);
-              eqPoints[i].mute.store(pts[i].mute);
-              eqPoints[i].q.store(juce::jlimit(0.025f, 40.0f, pts[i].q));
-              eqPoints[i].filterType.store(pts[i].ft);
-              eqPoints[i].driftPct.store(
-                  juce::jlimit(0.0f, 100.0f, pts[i].drift));
-              eqPoints[i].preEq.store(pts[i].preEq);
-              eqPoints[i].stereoMode.store(
-                  juce::jlimit(0, 2, pts[i].stereoMode));
-              eqPoints[i].slope.store(juce::jlimit(1, 4, pts[i].slope));
-              // Sorted order = identity (pts are already sorted by frequency)
-              eqSortOrder[i] = i;
-            }
-            for (int i = (int)pts.size(); i < maxEqBands; ++i) {
-              eqPoints[i].busId.store(-1);
-              eqPoints[i].solo.store(false);
-              eqPoints[i].mute.store(false);
-              eqSortOrder[i] = -1; // clear unused sort order slots
-            }
-            eqDirty.store(true);
-          }
-        }
-      }
-    }
+    uiStateJson = uiStateXml != nullptr ? uiStateXml->getAllSubText().trim()
+                                        : juce::String();
+    uiStateRootValid = false;
+    uiStateJsonStale = false;
   }
+
+  // Apply everything the editor used to push on open, so the session runs
+  // (modulation, bypass, buses, EQ, automation) without the editor ever opening.
+  applySavedUiState(proxyMapRestored);
+
+  // Reload sample modulator audio into the blocks just created
+  if (auto *samplesXml = lastChildNamed(*xmlState, "BLOCK_SAMPLES"))
+    for (auto *el : samplesXml->getChildIterator())
+      loadSampleForBlock(el->getIntAttribute("block", -1),
+                         el->getStringAttribute("path"));
 }
 
 //==============================================================================

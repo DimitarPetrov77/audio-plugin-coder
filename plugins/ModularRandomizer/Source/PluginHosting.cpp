@@ -1746,6 +1746,37 @@ void HostesaAudioProcessor::parameterChanged (const juce::String& parameterID, f
 // Expose State - Selective proxy slot management
 //==============================================================================
 
+void HostesaAudioProcessor::releaseProxySlot (int slot)
+{
+    proxyMap[slot].clear();
+    if (proxyParams[slot] != nullptr)
+    {
+        proxyParams[slot]->setDynamicName (juce::String ("Slot ") + juce::String (slot + 1));
+        proxyParams[slot]->clearDisplayInfo();
+        proxySyncActive.store (true);
+        proxyParams[slot]->setValueNotifyingHost (0.0f);
+        proxySyncActive.store (false);
+    }
+}
+
+void HostesaAudioProcessor::applyBlockSlotDisplay (int slot)
+{
+    auto& m = proxyMap[slot];
+    auto* param = proxyParams[slot];
+    if (param == nullptr || ! m.isBlock()) return;
+
+    param->setDynamicName (m.blockSlotName);
+    if (m.blockParamType == "discrete")
+    {
+        if (m.blockOptions.size() > 0)
+            param->setDiscreteOptions (m.blockOptions);
+    }
+    else if (m.blockParamType == "bool")
+        param->setDiscreteOptions ({ "Off", "On" });
+    else
+        param->setDisplayInfo (m.blockSuffix, m.blockMin, m.blockMax);
+}
+
 void HostesaAudioProcessor::updateExposeState (const juce::String& jsonData)
 {
     auto parsed = juce::JSON::parse (jsonData);
@@ -1754,254 +1785,161 @@ void HostesaAudioProcessor::updateExposeState (const juce::String& jsonData)
     auto* root = parsed.getDynamicObject();
     if (! root) return;
 
+    bool changed = false;
+
     // -- Handle plugin expose state --
     auto pluginsVar = root->getProperty ("plugins");
-    if (pluginsVar.isObject())
+    if (auto* pluginsObj = pluginsVar.getDynamicObject())
     {
-        auto* pluginsObj = pluginsVar.getDynamicObject();
-        if (pluginsObj)
+        for (auto& prop : pluginsObj->getProperties())
         {
-            for (auto& prop : pluginsObj->getProperties())
+            int pluginId = prop.name.toString().getIntValue();
+            auto* pState = prop.value.getDynamicObject();
+            if (! pState) continue;
+
+            bool exposed = pState->getProperty ("exposed");
+            auto excludedVar = pState->getProperty ("excluded");
+
+            std::unordered_set<int> excludedParams;
+            if (excludedVar.isArray())
+                for (int i = 0; i < excludedVar.size(); ++i)
+                    excludedParams.insert ((int) excludedVar[i]);
+
+            // Free every slot of this plugin that should no longer be exposed
+            std::unordered_set<int> assigned;
+            for (int i = 0; i < proxyParamCount; ++i)
             {
-                int pluginId = prop.name.toString().getIntValue();
-                auto* pState = prop.value.getDynamicObject();
-                if (! pState) continue;
-
-                bool exposed = pState->getProperty ("exposed");
-                auto excludedVar = pState->getProperty ("excluded");
-
-                // Build excluded set
-                std::unordered_set<int> excludedParams;
-                if (excludedVar.isArray())
+                if (proxyMap[i].pluginId != pluginId) continue;
+                if (! exposed || excludedParams.count (proxyMap[i].paramIndex) > 0)
                 {
-                    for (int i = 0; i < excludedVar.size(); ++i)
-                        excludedParams.insert ((int) excludedVar[i]);
+                    releaseProxySlot (i);
+                    changed = true;
                 }
-
-                if (! exposed)
+                else
                 {
-                    // Unexpose entire plugin - free all its proxy slots
-                    freeProxySlotsForPlugin (pluginId);
+                    assigned.insert (proxyMap[i].paramIndex);
                 }
-                else if (! excludedParams.empty())
+            }
+
+            if (! exposed) continue;
+
+            // (Re)assign every included param that has no slot. This used to run only
+            // when the plugin had exclusions, so re-exposing a whole plugin - or
+            // re-including its last excluded param - never got its slots back.
+            std::lock_guard<std::mutex> lock (pluginMutex);
+            HostedPlugin* target = nullptr;
+            for (auto& hp : hostedPlugins)
+                if (hp->id == pluginId && hp->instance != nullptr) { target = hp.get(); break; }
+            if (target == nullptr) continue;
+
+            auto& hostedParams = target->instance->getParameters();
+            int si = 0;
+            for (int pi = 0; pi < (int) hostedParams.size(); ++pi)
+            {
+                if (excludedParams.count (pi) > 0 || assigned.count (pi) > 0) continue;
+
+                while (si < proxyParamCount && ! proxyMap[si].isFree()) ++si;
+                if (si >= proxyParamCount) break; // pool exhausted
+
+                proxyMap[si].pluginId   = pluginId;
+                proxyMap[si].paramIndex = pi;
+                if (proxyParams[si] != nullptr)
                 {
-                    // Selectively free excluded params
-                    for (int i = 0; i < proxyParamCount; ++i)
-                    {
-                        if (proxyMap[i].pluginId == pluginId
-                            && excludedParams.count (proxyMap[i].paramIndex) > 0)
-                        {
-                            // Free this specific slot
-                            proxyMap[i].clear();
-                            if (proxyParams[i] != nullptr)
-                            {
-                                proxyParams[i]->setDynamicName (juce::String ("Slot ") + juce::String (i + 1));
-                                proxyParams[i]->clearDisplayInfo();
-                                proxySyncActive.store (true);
-                                proxyParams[i]->setValueNotifyingHost (0.0f);
-                                proxySyncActive.store (false);
-                            }
-                        }
-                    }
-
-                    // Check if any params from this plugin need to be re-assigned
-                    // (user may have previously excluded then re-included)
-                    std::lock_guard<std::mutex> lock (pluginMutex);
-                    HostedPlugin* target = nullptr;
-                    for (auto& hp : hostedPlugins)
-                    {
-                        if (hp->id == pluginId && hp->instance != nullptr)
-                        {
-                            target = hp.get();
-                            break;
-                        }
-                    }
-                    if (target)
-                    {
-                        auto& hostedParams = target->instance->getParameters();
-                        for (int pi = 0; pi < (int) hostedParams.size(); ++pi)
-                        {
-                            // Skip excluded params
-                            if (excludedParams.count (pi) > 0) continue;
-
-                            // Check if already assigned
-                            bool alreadyAssigned = false;
-                            for (int si = 0; si < proxyParamCount; ++si)
-                            {
-                                if (proxyMap[si].pluginId == pluginId && proxyMap[si].paramIndex == pi)
-                                {
-                                    alreadyAssigned = true;
-                                    break;
-                                }
-                            }
-                            if (alreadyAssigned) continue;
-
-                            // Find free slot and assign
-                            for (int si = 0; si < proxyParamCount; ++si)
-                            {
-                                if (proxyMap[si].isFree())
-                                {
-                                    proxyMap[si].pluginId   = pluginId;
-                                    proxyMap[si].paramIndex = pi;
-                                    if (proxyParams[si] != nullptr)
-                                    {
-                                        auto paramName = hostedParams[pi]->getName (128);
-                                        proxyParams[si]->setDynamicName (target->name + ": " + paramName);
-                                        proxySyncActive.store (true);
-                                        proxyParams[si]->setValueNotifyingHost (hostedParams[pi]->getValue());
-                                        proxySyncActive.store (false);
-                                    }
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    updateHostDisplay (juce::AudioProcessor::ChangeDetails{}.withParameterInfoChanged (true));
+                    proxyParams[si]->setDynamicName (target->name + ": " + hostedParams[pi]->getName (128));
+                    proxySyncActive.store (true);
+                    proxyParams[si]->setValueNotifyingHost (hostedParams[pi]->getValue());
+                    proxySyncActive.store (false);
                 }
+                changed = true;
             }
         }
     }
 
     // -- Handle block expose state (unified pool) --
     auto blocksVar = root->getProperty ("blocks");
-    if (blocksVar.isObject())
+    if (auto* blocksObj = blocksVar.getDynamicObject())
     {
-        auto* blocksObj = blocksVar.getDynamicObject();
-        if (blocksObj)
+        for (auto& prop : blocksObj->getProperties())
         {
-            for (auto& prop : blocksObj->getProperties())
+            int blockId = prop.name.toString().getIntValue();
+            auto* bState = prop.value.getDynamicObject();
+            if (! bState) continue;
+
+            bool exposed = bState->getProperty ("exposed");
+            auto excludedVar = bState->getProperty ("excluded");
+
+            std::unordered_set<std::string> excludedKeys;
+            if (excludedVar.isArray())
+                for (int i = 0; i < excludedVar.size(); ++i)
+                    excludedKeys.insert (excludedVar[i].toString().toStdString());
+
+            auto blockNameVar = bState->getProperty ("name");
+            juce::String blockName = blockNameVar.isString() ? blockNameVar.toString()
+                                                              : (juce::String ("Block ") + juce::String (blockId));
+
+            // Keys the block can currently expose (lanes / macros come and go)
+            auto paramsVar = bState->getProperty ("params");
+            std::unordered_set<std::string> offeredKeys;
+            if (paramsVar.isArray())
+                for (int pi = 0; pi < paramsVar.size(); ++pi)
+                    if (auto* po = paramsVar[pi].getDynamicObject())
+                        offeredKeys.insert (po->getProperty ("key").toString().toStdString());
+
+            // Free slots that are unexposed, excluded, or no longer offered by the block
+            for (int i = 0; i < proxyParamCount; ++i)
             {
-                int blockId = prop.name.toString().getIntValue();
-                auto* bState = prop.value.getDynamicObject();
-                if (! bState) continue;
-
-                bool exposed = bState->getProperty ("exposed");
-                auto excludedVar = bState->getProperty ("excluded");
-
-                std::unordered_set<std::string> excludedKeys;
-                if (excludedVar.isArray())
+                if (proxyMap[i].blockId != blockId) continue;
+                auto key = proxyMap[i].blockParamKey.toStdString();
+                if (! exposed || excludedKeys.count (key) > 0
+                    || (paramsVar.isArray() && offeredKeys.count (key) == 0))
                 {
-                    for (int i = 0; i < excludedVar.size(); ++i)
-                        excludedKeys.insert (excludedVar[i].toString().toStdString());
-                }
-
-                auto blockNameVar = bState->getProperty ("name");
-                juce::String blockName = blockNameVar.isString() ? blockNameVar.toString()
-                                                                  : (juce::String ("Block ") + juce::String (blockId));
-
-                auto paramsVar = bState->getProperty ("params");
-
-                if (! exposed)
-                {
-                    // Free all unified pool slots for this block
-                    for (int i = 0; i < proxyParamCount; ++i)
-                    {
-                        if (proxyMap[i].blockId == blockId)
-                        {
-                            proxyMap[i].clear();
-                            if (proxyParams[i] != nullptr)
-                            {
-                                proxyParams[i]->setDynamicName (juce::String ("Slot ") + juce::String (i + 1));
-                                proxyParams[i]->clearDisplayInfo();
-                                proxySyncActive.store (true);
-                                proxyParams[i]->setValueNotifyingHost (0.0f);
-                                proxySyncActive.store (false);
-                            }
-                        }
-                    }
-                }
-                else
-                {
-                    if (paramsVar.isArray())
-                    {
-                        for (int pi = 0; pi < paramsVar.size(); ++pi)
-                        {
-                            auto* paramObj = paramsVar[pi].getDynamicObject();
-                            if (! paramObj) continue;
-
-                            auto key = paramObj->getProperty ("key").toString();
-                            auto label = paramObj->getProperty ("label").toString();
-                            auto type = paramObj->getProperty ("type").toString();
-
-                            if (excludedKeys.count (key.toStdString()) > 0) continue;
-
-                            // Check if already assigned in unified pool
-                            bool alreadyAssigned = false;
-                            for (int si = 0; si < proxyParamCount; ++si)
-                            {
-                                if (proxyMap[si].blockId == blockId && proxyMap[si].blockParamKey == key)
-                                {
-                                    alreadyAssigned = true;
-                                    break;
-                                }
-                            }
-                            if (alreadyAssigned) continue;
-
-                            // Find free slot in unified pool
-                            for (int si = 0; si < proxyParamCount; ++si)
-                            {
-                                if (proxyMap[si].isFree())
-                                {
-                                    proxyMap[si].blockId = blockId;
-                                    proxyMap[si].blockParamKey = key;
-                                    if (proxyParams[si] != nullptr)
-                                    {
-                                        proxyParams[si]->setDynamicName (blockName + " - " + label);
-
-                                        // Configure display info based on param type
-                                        if (type == "discrete")
-                                        {
-                                            auto optsVar = paramObj->getProperty ("options");
-                                            if (optsVar.isArray())
-                                            {
-                                                juce::StringArray opts;
-                                                for (int oi = 0; oi < optsVar.size(); ++oi)
-                                                    opts.add (optsVar[oi].toString());
-                                                proxyParams[si]->setDiscreteOptions (opts);
-                                            }
-                                        }
-                                        else if (type == "bool")
-                                        {
-                                            proxyParams[si]->setDiscreteOptions ({ "Off", "On" });
-                                        }
-                                        else // float
-                                        {
-                                            float dispMin = paramObj->getProperty ("min");
-                                            float dispMax = paramObj->getProperty ("max");
-                                            auto suffix = paramObj->getProperty ("suffix").toString();
-                                            proxyParams[si]->setDisplayInfo (suffix, dispMin, dispMax);
-                                        }
-                                    }
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    // Free excluded params
-                    for (int i = 0; i < proxyParamCount; ++i)
-                    {
-                        if (proxyMap[i].blockId == blockId
-                            && excludedKeys.count (proxyMap[i].blockParamKey.toStdString()) > 0)
-                        {
-                            proxyMap[i].clear();
-                            if (proxyParams[i] != nullptr)
-                            {
-                                proxyParams[i]->setDynamicName (juce::String ("Slot ") + juce::String (i + 1));
-                                proxyParams[i]->clearDisplayInfo();
-                                proxySyncActive.store (true);
-                                proxyParams[i]->setValueNotifyingHost (0.0f);
-                                proxySyncActive.store (false);
-                            }
-                        }
-                    }
+                    releaseProxySlot (i);
+                    changed = true;
                 }
             }
-        }
 
-        updateHostDisplay (juce::AudioProcessor::ChangeDetails{}.withParameterInfoChanged (true));
+            if (! exposed || ! paramsVar.isArray()) continue;
+
+            for (int pi = 0; pi < paramsVar.size(); ++pi)
+            {
+                auto* paramObj = paramsVar[pi].getDynamicObject();
+                if (! paramObj) continue;
+
+                auto key = paramObj->getProperty ("key").toString();
+                if (excludedKeys.count (key.toStdString()) > 0) continue;
+
+                // An existing slot keeps its number; otherwise take the first free one
+                int slot = -1;
+                for (int si = 0; si < proxyParamCount; ++si)
+                    if (proxyMap[si].blockId == blockId && proxyMap[si].blockParamKey == key) { slot = si; break; }
+                bool isNew = slot < 0;
+                if (isNew)
+                    for (int si = 0; si < proxyParamCount; ++si)
+                        if (proxyMap[si].isFree()) { slot = si; break; }
+                if (slot < 0) break; // pool exhausted
+
+                auto& m = proxyMap[slot];
+                m.blockId        = blockId;
+                m.blockParamKey  = key;
+                m.blockSlotName  = blockName + " - " + paramObj->getProperty ("label").toString();
+                m.blockParamType = paramObj->getProperty ("type").toString();
+                if (m.blockParamType.isEmpty()) m.blockParamType = "float";
+                m.blockOptions.clear();
+                auto optsVar = paramObj->getProperty ("options");
+                if (optsVar.isArray())
+                    for (int oi = 0; oi < optsVar.size(); ++oi)
+                        m.blockOptions.add (optsVar[oi].toString());
+                m.blockMin = paramObj->hasProperty ("min") ? (float) paramObj->getProperty ("min") : 0.0f;
+                m.blockMax = paramObj->hasProperty ("max") ? (float) paramObj->getProperty ("max") : 100.0f;
+                m.blockSuffix = paramObj->getProperty ("suffix").toString();
+                applyBlockSlotDisplay (slot);
+                if (isNew) changed = true;
+            }
+        }
     }
+
+    if (changed)
+        updateHostDisplay (juce::AudioProcessor::ChangeDetails{}.withParameterInfoChanged (true));
 
     LOG_TO_FILE ("updateExposeState: processed expose state update");
 }

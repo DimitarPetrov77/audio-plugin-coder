@@ -472,6 +472,13 @@ HostesaAudioProcessorEditor::HostesaAudioProcessorEditor (
                     if (args.size() > 0)
                     {
                         auto jsonStr = args[0].toString();
+                        // First sync after opening = the editor's own restore; check
+                        // the processor's headless restore produced the same blocks.
+                        if (! restoreSelfCheckDone)
+                        {
+                            restoreSelfCheckDone = true;
+                            audioProcessor.verifyHeadlessCompile (jsonStr);
+                        }
                         audioProcessor.updateLogicBlocks (jsonStr);
                     }
                     completion (juce::var ("ok"));
