@@ -103,6 +103,7 @@ target_sources(Hostesa
         Source/ProcessBlock.cpp
         Source/PluginHosting.cpp
         Source/StateRestore.cpp
+        Source/EqInternalMod.cpp
         Source/PluginEditor.cpp
         Source/PluginEditor.h
         Source/ParameterIDs.hpp

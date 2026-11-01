@@ -112,7 +112,8 @@ function saveUiStateToHost() {
                 // During animation, save the stable base positions — not the animated jittering values
                 var saveX = (typeof weqAnimRafId !== 'undefined' && weqAnimRafId && typeof weqAnimBaseX !== 'undefined' && weqAnimBaseX.length > idx) ? weqAnimBaseX[idx] : p.x;
                 var saveY = (typeof weqAnimRafId !== 'undefined' && weqAnimRafId && typeof weqAnimBaseY !== 'undefined' && weqAnimBaseY.length > idx) ? weqAnimBaseY[idx] : p.y;
-                return { uid: p.uid, x: saveX, y: saveY, pluginIds: p.pluginIds || [], seg: p.seg || null, solo: p.solo || false, mute: p.mute || false, q: p.q != null ? p.q : 0.707, type: p.type || 'Bell', drift: p.drift || 0, preEq: p.preEq !== false, stereoMode: p.stereoMode || 0, slope: p.slope || 1, modExclude: p.modExclude || 0 };
+                var saveQ = (typeof weqAnimRafId !== 'undefined' && weqAnimRafId && typeof weqAnimBaseQ !== 'undefined' && weqAnimBaseQ.length > idx) ? weqAnimBaseQ[idx] : (p.q != null ? p.q : 0.707);
+                return { uid: p.uid, x: saveX, y: saveY, pluginIds: p.pluginIds || [], seg: p.seg || null, solo: p.solo || false, mute: p.mute || false, q: saveQ, type: p.type || 'Bell', drift: p.drift || 0, preEq: p.preEq !== false, stereoMode: p.stereoMode || 0, slope: p.slope || 1, modExclude: p.modExclude || 0, modGainDepth: p.modGainDepth, modQDepth: p.modQDepth, modDriftDepth: p.modDriftDepth };
             }),
             interp: typeof weqGlobalInterp !== 'undefined' ? weqGlobalInterp : 'smooth',
             depth: typeof weqGlobalDepth !== 'undefined' ? weqGlobalDepth : 100,
@@ -372,6 +373,9 @@ function restoreFromHost() {
                     wrongEqPoints = weq.points.map(function (p) {
                         var pt = { x: p.x, y: p.y, pluginIds: p.pluginIds || [], seg: p.seg || null, solo: p.solo || false, mute: p.mute || false, q: p.q != null ? p.q : 0.707, type: p.type || 'Bell', drift: p.drift || 0, preEq: p.preEq !== undefined ? p.preEq : (weq.preEq !== undefined ? weq.preEq : true), stereoMode: p.stereoMode || 0, slope: p.slope || 1, modExclude: p.modExclude || 0 };
                         if (p.uid) pt.uid = p.uid; // restore saved uid
+                        if (p.modGainDepth != null) pt.modGainDepth = p.modGainDepth;
+                        if (p.modQDepth != null) pt.modQDepth = p.modQDepth;
+                        if (p.modDriftDepth != null) pt.modDriftDepth = p.modDriftDepth;
                         return pt;
                     });
                     // Ensure all points have uids and sync the counter

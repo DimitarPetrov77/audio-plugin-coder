@@ -31,9 +31,20 @@ to perfect the existing WebView UI instead.
   Verified exact on a synthetic session (all 8 block types, quirks, locks, EQ routing) and
   across repeated reloads in the Standalone.
 
+### WrongEQ internal modulation moved to the audio engine
+- `Source/EqInternalMod.cpp` is a line-for-line port of `weqAnimTick` (gain LFO shapes,
+  drift textures, continuous noise, Q-mod shapes, tempo sync, zones, per-point
+  exclusion/depth). It runs per block on the audio thread, so the EQ moves with the editor
+  closed and in offline renders. `setEqUiMod` (editor → audio offsets) is gone.
+- The editor still draws at full frame rate and eases its clocks toward the engine's
+  (`eqGainPhase` / `eqDriftTime` in `__rt_data__`, ~250 ms ease).
+- Per-point mod depths are now saved with the session, and a running Q-mod no longer
+  bakes its animated Q into the saved band Q.
+- Verified in the Standalone: 31 configs match the JS maths exactly (the only
+  mismatches were one-block read skew in the test, confirmed by a time-shift search);
+  drawing tracks the audio clock within ~3 ms median / 8 ms max, clock speed ±3% per frame.
+
 ### Not covered yet
-- WrongEQ internal gain LFO / drift / Q-mod is still computed in JS (`weqAnimTick` →
-  `setEqUiMod`), so it only moves while the editor is open and freezes when it closes.
 - Exposed `lane.N.speed` maps to a field the DSP never reads (no effect).
 - Not yet tested in a DAW: headless block automation, sample reload.
 

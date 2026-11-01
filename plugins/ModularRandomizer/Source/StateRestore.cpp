@@ -586,6 +586,19 @@ void HostesaAudioProcessor::applySavedUiState (bool proxyMapRestored)
         put (eq, "globalSteps", nnDef (prop (weq, "steps"), 0));
         put (eq, "globalTilt", nnDef (prop (weq, "tilt"), 0));
 
+        // Internal modulation (gain LFO / drift / Q mod) — wrongeq_canvas.js defaults
+        const std::pair<const char*, juce::var> modDefaults[] = {
+            { "modEnabled", true }, { "animSpeed", 0 }, { "animDepth", 6 }, { "animShape", "sine" },
+            { "animSpread", 0 }, { "gainSync", false }, { "gainSyncDiv", "1/4" },
+            { "drift", 0 }, { "driftRange", 5 }, { "driftScale", "1/1" }, { "driftContinuous", false },
+            { "driftTexture", "smooth" }, { "gainLoCut", 20 }, { "gainHiCut", 20000 },
+            { "driftLoCut", 20 }, { "driftHiCut", 20000 }, { "qModSpeed", 0 }, { "qModDepth", 30 },
+            { "qModShape", "sine" }, { "qModSpread", 0 }, { "qSync", false }, { "qSyncDiv", "1/4" },
+            { "qLoCut", 20 }, { "qHiCut", 20000 }, { "syncSource", "daw" } };
+        for (auto& d : modDefaults)
+            put (eq, d.first, nnDef (prop (weq, d.first), d.second));
+        put (eq, "internalBpm", orDef (prop (root, "internalBpm"), 120));
+
         auto points = newArray();
         auto savedPts = prop (weq, "points");
         int nextUid = 1; // _weqEnsureUid() for points saved before uids existed
@@ -611,6 +624,10 @@ void HostesaAudioProcessor::applySavedUiState (bool proxyMapRestored)
                 put (po, "stereoMode", orDef (prop (p, "stereoMode"), 0));
                 put (po, "slope", orDef (prop (p, "slope"), 1));
                 put (po, "seg", orDef (prop (p, "seg"), juce::var()));
+                put (po, "modExclude", orDef (prop (p, "modExclude"), 0));
+                for (auto* key : { "modGainDepth", "modDriftDepth", "modQDepth" })
+                    if (! isNull (prop (p, key)))
+                        put (po, key, prop (p, key));
                 points.append (po);
             }
         }

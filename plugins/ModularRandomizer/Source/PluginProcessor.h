@@ -429,11 +429,10 @@ public:
     /** WrongEQ: receive EQ curve data from JS */
     void setEqCurve (const juce::String& jsonData);
 
-    /** WrongEQ: receive the editor's own internal LFO/drift/Q-mod OFFSETS so they
-        drive the audio (previously the internal EQ modulation was visual-only).
-        Payload: JSON array indexed by point — [{f:HzOffset, g:dBOffset, q:offset}, ...].
-        Points beyond the array (or all-zero) have their UI modulation cleared. */
-    void setEqUiMod (const juce::String& jsonData);
+    /** WrongEQ internal modulation clocks (gain LFO phase 0..1, drift time in seconds),
+        published once per block so the editor can draw the animation in lock-step. */
+    double getEqModGainPhase() const { return eqIntModGainPhaseOut.load (std::memory_order_relaxed); }
+    double getEqModDriftTime() const { return eqIntModDriftTimeOut.load (std::memory_order_relaxed); }
 
     /** WrongEQ fast path: update a single field on one EQ point (no JSON, no alloc).
         field: "freq", "gain", "q", "solo", "mute", "type", "slope", "drift", "stereo" */
@@ -902,16 +901,20 @@ private:
         std::atomic<float> modQ      { 0.0f };  // offset (added to q)
         std::atomic<bool>  modActive { false };  // true = modulation is applied
 
-        // UI-modulation offsets — written by the editor (message thread) from the EQ's
-        // OWN internal LFO/drift/Q-mod engine. Unlike modFreqHz above, these are NOT
-        // reset per block; they persist until the editor updates them, so audio-rate
-        // reads pick up the latest value and the per-sample SVF interpolation smooths
-        // between the ~60 Hz editor updates. Zero when the internal modulation is off →
-        // the audio path is byte-identical to before for un-modulated sessions.
+        // Internal-modulation offsets — the EQ's OWN gain LFO / drift / Q-mod, computed
+        // once per block on the audio thread by advanceEqInternalMod() (EqInternalMod.cpp).
+        // Zero when the internal modulation is off → the audio path is byte-identical to
+        // before for un-modulated sessions.
         std::atomic<float> uiModFreqHz { 0.0f };
         std::atomic<float> uiModGainDB { 0.0f };
         std::atomic<float> uiModQ      { 0.0f };
         std::atomic<bool>  uiModActive { false };
+
+        // Per-point internal-modulation settings (from setEqCurve)
+        std::atomic<int>   modExclude    { 0 };      // bit0 gain LFO, bit1 Q mod, bit2 drift
+        std::atomic<float> modGainDepth  { 100.0f }; // % of the global depth
+        std::atomic<float> modDriftDepth { 100.0f };
+        std::atomic<float> modQDepth     { 100.0f };
 
         // Display snapshot — the ACTUAL modulated point position the audio is using this
         // block (base + external modulation + internal LFO), written once per block after
@@ -923,6 +926,46 @@ private:
     };
     EqPointData eqPoints[maxEqBands];
     std::atomic<int> numEqPoints { 0 };
+
+    // WrongEQ internal modulation (gain LFO, drift, Q mod). Settings arrive with
+    // setEqCurve; advanceEqInternalMod() evaluates them once per block. C++ port of
+    // wrongeq_canvas.js weqAnimTick(), which used to run only while the editor was open.
+    struct EqInternalModSettings
+    {
+        std::atomic<bool>  enabled         { true };
+        std::atomic<float> gainSpeedHz     { 0.0f };
+        std::atomic<float> gainDepthDB     { 6.0f };
+        std::atomic<float> gainSpread      { 0.0f };
+        std::atomic<int>   gainShape       { 0 };
+        std::atomic<bool>  gainSync        { false };
+        std::atomic<float> gainSyncBeats   { 1.0f };
+        std::atomic<float> drift           { 0.0f };
+        std::atomic<float> driftRange      { 5.0f };
+        std::atomic<float> driftPeriodSec  { 2.0f };
+        std::atomic<bool>  driftContinuous { false };
+        std::atomic<int>   driftTexture    { 0 };
+        std::atomic<float> gainLoCut  { 20.0f }, gainHiCut  { 20000.0f };
+        std::atomic<float> driftLoCut { 20.0f }, driftHiCut { 20000.0f };
+        std::atomic<float> qSpeedHz        { 0.0f };
+        std::atomic<float> qDepth          { 30.0f };
+        std::atomic<float> qSpread         { 0.0f };
+        std::atomic<int>   qShape          { 0 };
+        std::atomic<bool>  qSync           { false };
+        std::atomic<float> qSyncBeats      { 1.0f };
+        std::atomic<float> qLoCut     { 20.0f }, qHiCut     { 20000.0f };
+        std::atomic<bool>  syncInternal    { false };
+        std::atomic<float> internalBpm     { 120.0f };
+    };
+    EqInternalModSettings eqIntMod;
+    double eqIntModGainPhase = 0.0;   // audio thread only
+    double eqIntModDriftTime = 0.0;   // audio thread only
+    std::atomic<double> eqIntModGainPhaseOut { 0.0 };
+    std::atomic<double> eqIntModDriftTimeOut { 0.0 };
+
+    /** Reads the internal-modulation fields of a setEqCurve payload (message thread). */
+    void parseEqInternalModSettings (const juce::DynamicObject& eq);
+    /** Advances the clocks and writes each point's uiMod offsets (audio thread). */
+    void advanceEqInternalMod (int nPts, int numSamples);
     std::atomic<bool> eqDirty { false }; // set by setEqCurve, consumed by processBlock to reconfigure filters
     std::atomic<int> eqSortOrder[maxEqBands]; // maps sorted position → original JS index for crossover
 

@@ -775,32 +775,42 @@ function _weqRefreshShapeSvg(wrapperId, shapeMap, selectedKey) {
     el.innerHTML = svg;
 }
 
-// Push the internal EQ modulation (LFO/drift/Q-mod) to the audio engine as per-point
-// OFFSETS from the base positions, so what you SEE moving is what you HEAR. The offset
-// is persistent in C++ until the next call; _weqSendUiMod(true) clears it on stop.
-var _weqUiModFn = null, _weqUiModFnChecked = false, _weqUiModCounter = 0;
-function _weqSendUiMod(clear) {
-    if (!window.__JUCE__ || !window.__JUCE__.backend) return;
-    if (!_weqUiModFnChecked) {
-        _weqUiModFnChecked = true;
-        try { _weqUiModFn = window.__juceGetNativeFunction('setEqUiMod'); }
-        catch (e) { _weqUiModFn = null; }
+// The internal EQ modulation (gain LFO / drift / Q mod) is computed by the audio engine
+// (EqInternalMod.cpp), so it runs with the editor closed and renders offline. The editor
+// only draws it: weqAnimTick() advances its own clocks every frame for smooth motion and
+// eases them toward the engine's clocks (rtData.eqGainPhase / eqDriftTime), so what is
+// drawn is what is heard.
+var _weqHostClock = { drift: -1, gain: 0, at: 0 };
+var _weqClockSnap = true; // next follow jumps straight to the engine clocks (after (re)start)
+function _weqFollowHostClock(dt) {
+    if (typeof rtData === 'undefined' || rtData.eqDriftTime == null) return;
+    var now = performance.now();
+    if (rtData.eqDriftTime !== _weqHostClock.drift) {
+        _weqHostClock.drift = rtData.eqDriftTime;
+        _weqHostClock.gain = rtData.eqGainPhase || 0;
+        _weqHostClock.at = now;
     }
-    if (!_weqUiModFn) return;
-    if (clear) { _weqUiModFn('[]'); return; }
-    var arr = [];
-    for (var i = 0; i < wrongEqPoints.length; i++) {
-        var p = wrongEqPoints[i];
-        var bx = (i < weqAnimBaseX.length) ? weqAnimBaseX[i] : p.x;
-        var by = (i < weqAnimBaseY.length) ? weqAnimBaseY[i] : p.y;
-        var bq = (i < weqAnimBaseQ.length) ? weqAnimBaseQ[i] : (p.q != null ? p.q : 0.707);
-        arr.push({
-            f: weqXToFreq(p.x) - weqXToFreq(bx),                        // Hz offset
-            g: weqYToDB(p.y) - weqYToDB(by),                            // dB offset
-            q: (p.q != null ? p.q : 0.707) - bq                        // Q offset
-        });
+    // Engine not advancing (audio stopped / EQ bypassed): keep drawing from our own clock
+    if (now - _weqHostClock.at > 250 || _weqHostClock.drift <= 0) return;
+    var elapsed = (now - _weqHostClock.at) / 1000;
+    var targetT = _weqHostClock.drift + elapsed;
+    var targetP = _weqHostClock.gain + elapsed * _weqEffGainRate();
+    targetP -= Math.floor(targetP);
+    var errT = targetT - _weqDriftTimeAccum;
+    var errP = targetP - weqAnimPhase;
+    errP -= Math.round(errP); // shortest way round the cycle
+    if (_weqClockSnap || Math.abs(errT) > 1) {
+        _weqDriftTimeAccum = targetT;
+        weqAnimPhase = targetP;
+        _weqClockSnap = false;
+    } else {
+        // Ease out small timing differences over ~250 ms instead of jumping: filters the
+        // arrival jitter of the engine updates so motion stays even at any frame rate
+        var k = 1 - Math.exp(-Math.max(0, dt) / 0.25);
+        _weqDriftTimeAccum += errT * k;
+        weqAnimPhase += errP * k;
+        weqAnimPhase -= Math.floor(weqAnimPhase);
     }
-    _weqUiModFn(JSON.stringify(arr));
 }
 
 function weqAnimStart() {
@@ -815,6 +825,7 @@ function weqAnimStart() {
     weqAnimBaseQ = wrongEqPoints.map(function (p) { return p.q || 0.707; });
     weqAnimLastTime = performance.now();
     _weqDriftTimeAccum = 0;
+    _weqClockSnap = true; // pick up the engine's clocks on the first frame
     weqAnimRafId = requestAnimationFrame(weqAnimTick);
 }
 function weqAnimStop() {
@@ -832,7 +843,6 @@ function weqAnimStop() {
     }
     weqAnimPhase = 0;
     _weqDriftTimeAccum = 0;
-    _weqSendUiMod(true); // clear audio modulation → EQ returns to base positions
     weqDrawCanvas();
     weqSyncToHost();
 }
@@ -863,6 +873,9 @@ function weqAnimTick(now) {
 
         // Advance drift time
         _weqDriftTimeAccum += dt;
+
+        // Stay in step with the audio engine, which computes what is actually heard
+        _weqFollowHostClock(dt);
 
         var nPts = wrongEqPoints.length;
         if (nPts === 0) { weqAnimRafId = requestAnimationFrame(weqAnimTick); return; }
@@ -977,12 +990,6 @@ function weqAnimTick(now) {
                 wrongEqPoints[i].q = weqAnimBaseQ[i];
             }
         }
-
-        // Push modulation to the audio engine (~30 Hz — every other frame). The DSP's
-        // per-sample coefficient interpolation smooths between these updates, so the EQ
-        // is HEARD moving exactly as it's drawn.
-        _weqUiModCounter++;
-        if ((_weqUiModCounter & 1) === 0) _weqSendUiMod(false);
 
         // Redraw canvas only when popup is visible (save CPU)
         var overlay = document.getElementById('weqOverlay');
@@ -5336,9 +5343,16 @@ function _weqDoSync() {
                     preEq: p.preEq !== false,
                     stereoMode: p.stereoMode || 0,
                     slope: p.slope || 1,
-                    seg: p.seg || null
+                    seg: p.seg || null,
+                    // Per-point internal-modulation settings (the engine runs in C++)
+                    modExclude: p.modExclude || 0,
+                    modGainDepth: p.modGainDepth,
+                    modDriftDepth: p.modDriftDepth,
+                    modQDepth: p.modQDepth
                 };
             }),
+            modEnabled: weqModEnabled,
+            internalBpm: (typeof internalBpm !== 'undefined' && internalBpm > 0) ? internalBpm : 120,
             globalDepth: weqGlobalDepth,
             globalWarp: weqGlobalWarp,
             globalSteps: weqGlobalSteps,

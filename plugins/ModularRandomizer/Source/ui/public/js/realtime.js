@@ -300,6 +300,9 @@ function setupRtDataListener() {
                 rtData.bpm = data.bpm || 120;
                 rtData.playing = data.playing || false;
                 rtData.ppq = data.ppq || 0;
+                // WrongEQ internal modulation clocks (the engine computes the modulation)
+                rtData.eqGainPhase = data.eqGainPhase || 0;
+                rtData.eqDriftTime = data.eqDriftTime || 0;
                 // Sync actual sample rate from C++ for EQ curve accuracy
                 if (data.sr && data.sr > 0 && typeof _WEQ_REF_FS !== 'undefined')
                     _WEQ_REF_FS = data.sr;

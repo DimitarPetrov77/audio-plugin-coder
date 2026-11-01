@@ -1108,17 +1108,6 @@ HostesaAudioProcessorEditor::HostesaAudioProcessorEditor (
                 }
             )
             .withNativeFunction (
-                "setEqUiMod",
-                [this] (const juce::Array<juce::var>& args,
-                        juce::WebBrowserComponent::NativeFunctionCompletion completion)
-                {
-                    // Editor's internal EQ LFO/drift/Q-mod offsets → audio (persistent).
-                    if (args.size() >= 1 && args[0].isString())
-                        audioProcessor.setEqUiMod (args[0].toString());
-                    completion (juce::var ("ok"));
-                }
-            )
-            .withNativeFunction (
                 "setEqPointFast",
                 [this] (const juce::Array<juce::var>& args,
                         juce::WebBrowserComponent::NativeFunctionCompletion completion)
@@ -1369,6 +1358,10 @@ void HostesaAudioProcessorEditor::timerCallback()
     data->setProperty ("bpm", audioProcessor.currentBpm.load());
     data->setProperty ("playing", audioProcessor.isPlaying.load());
     data->setProperty ("ppq", audioProcessor.ppqPosition.load());
+
+    // WrongEQ internal modulation clocks — the editor draws the animation from these
+    data->setProperty ("eqGainPhase", audioProcessor.getEqModGainPhase());
+    data->setProperty ("eqDriftTime", audioProcessor.getEqModDriftTime());
 
     // Sample rate: sent once per tick so JS EQ visualization uses actual rate (not hardcoded 48k)
     data->setProperty ("sr", audioProcessor.getSampleRate());

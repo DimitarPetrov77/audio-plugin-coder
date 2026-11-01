@@ -2538,6 +2538,9 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 }
             }
 
+            // ── WrongEQ internal modulation (gain LFO / drift / Q mod) → uiMod offsets ──
+            advanceEqInternalMod (nPts, numSamples);
+
             // ── Parametric EQ: read parameters for SVF per-sample processing ──
             // SVF TPT filters compute coefficients internally per-sample, so we just
             // read the parameters from atomics — no coefficient computation needed.

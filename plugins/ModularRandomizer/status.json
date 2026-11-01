@@ -5,7 +5,7 @@
     "ui_framework": "webview",
     "complexity_score": 10,
     "created_at": "2026-02-24T10:19:00Z",
-    "last_modified": "2026-11-02T00:56:00Z",
+    "last_modified": "2026-11-02T01:20:00Z",
     "description": "Mastering-grade multi-plugin parameter randomizer and modulator VST3/Standalone with integrated WrongEQ module. Hosts multiple VST3 plugins in series or parallel (bus-based routing), exposes all their parameters, and modulates them via 7 configurable logic blocks (randomize, envelope follower, sample modulator, morph pad, shapes LFO, shapes range, lane automation). Features a full parametric EQ with drawable breakpoints, wave ripple engine, multiband routing, and Linkwitz-Riley crossovers. WebView2-based UI with real-time visualization, modulation arc display, 13 themes, granular undo/redo, visibility-culled rendering, async plugin loading, hosted-plugin gesture detection, and DAW automation proxy system (2048 AP_ slots).",
     "build": {
         "formats": [
@@ -16,7 +16,7 @@
         "webview_backend": "WebView2",
         "vst3_path": "build/plugins/ModularRandomizer/Hostesa_artefacts/Release/VST3/Hostesa.vst3",
         "standalone_path": "build/plugins/ModularRandomizer/Hostesa_artefacts/Release/Standalone/Hostesa.exe",
-        "last_build": "2026-11-02T00:53:48Z",
+        "last_build": "2026-11-02T01:15:00Z",
         "build_errors": 0,
         "dependencies": [
             "JUCE 8",
@@ -34,7 +34,8 @@
             "PluginEditor.cpp": "1972 lines — WebView2 bridge, 50 native functions, async plugin loading, 2-tier real-time polling with visibility culling, WrongEQ panel bridge, crash notification relay",
             "PluginEditor.h": "195 lines — Editor class with WebView, relays, attachments, expandedPluginIds, paramIdentCache, modulatedParamKeys",
             "ParameterIDs.hpp": "Parameter ID string constants (MIX, BYPASS)",
-            "StateRestore.cpp": "Headless session restore: C++ port of the UI restore/syncBlocksToHost, saved-state application (blocks, bypass, buses, routing, WrongEQ), exact AP_ slot map save/restore, headless DAW automation timer, restore self-check"
+            "StateRestore.cpp": "Headless session restore: C++ port of the UI restore/syncBlocksToHost, saved-state application (blocks, bypass, buses, routing, WrongEQ), exact AP_ slot map save/restore, headless DAW automation timer, restore self-check",
+            "EqInternalMod.cpp": "WrongEQ internal modulation engine (gain LFO, drift, continuous noise, Q mod) evaluated per block on the audio thread; port of wrongeq_canvas.js weqAnimTick"
         },
         "ui_modules": {
             "index.html": "361 lines — Main HTML shell with all panels and modals",
@@ -386,7 +387,6 @@
         "setEditorScale(scale)",
         "setRoutingMode",
         "setEqCurve",
-        "setEqUiMod",
         "setEqPointFast",
         "setPluginBus",
         "setBusVolume",
@@ -508,6 +508,11 @@
             "phase": "headless_restore",
             "completed_at": "2026-11-02T00:56:00Z",
             "notes": "Sessions now run without opening the editor. Fixed state nesting bug (stale HOSTED_PLUGINS/UI_STATE copies stacked in the APVTS tree; restore read the oldest). Exact DAW slot map persisted; expose system fixes (re-expose, dropped block automation, deleted-block slots, headless automation). Sample files reloaded. WrongEQ targets/locks kept on reopen. Verified with a restore self-check in the Standalone; DAW testing pending. Branch: hostesa/state-in-processor."
+        },
+        {
+            "phase": "eq_internal_mod_engine",
+            "completed_at": "2026-11-02T01:20:00Z",
+            "notes": "WrongEQ gain LFO / drift / Q-mod now computed in C++ (EqInternalMod.cpp) instead of the editor: runs with the editor closed and in offline renders. Editor draws from the engine clocks with a time-based ease. setEqUiMod removed. Per-point mod depths persisted; animated Q no longer saved as base. Verified exact against the JS maths across 31 configs."
         }
     ],
     "validation": {
@@ -518,7 +523,7 @@
         "design_complete": true,
         "code_complete": true,
         "build_completed": true,
-        "build_timestamp": "2026-11-02T00:53:48Z",
+        "build_timestamp": "2026-11-02T01:15:00Z",
         "build_errors": 0,
         "tests_passed": false,
         "ship_ready": false

@@ -1716,35 +1716,6 @@ void HostesaAudioProcessor::updateReportedLatency() {
   setLatencySamples(lat);
 }
 
-void HostesaAudioProcessor::setEqUiMod(const juce::String &jsonData) {
-  // Editor pushes the EQ's own internal LFO/drift/Q-mod as per-point OFFSETS.
-  // Format: [{f:HzOffset, g:dBOffset, q:offset}, ...] indexed by EQ point.
-  // Persistent (not reset per block); the audio thread adds them on top of base +
-  // external modulation, and the per-sample SVF interpolation smooths between updates.
-  auto parsed = juce::JSON::parse(jsonData);
-  int n = numEqPoints.load(std::memory_order_relaxed);
-  int arrN = parsed.isArray() ? parsed.size() : 0;
-  for (int i = 0; i < maxEqBands; ++i) {
-    if (i < arrN && i < n) {
-      auto *obj = parsed[i].getDynamicObject();
-      float f = obj ? (float)(double)obj->getProperty("f") : 0.0f;
-      float g = obj ? (float)(double)obj->getProperty("g") : 0.0f;
-      float q = obj ? (float)(double)obj->getProperty("q") : 0.0f;
-      bool active = (std::abs(f) > 1e-6f || std::abs(g) > 1e-6f || std::abs(q) > 1e-6f);
-      eqPoints[i].uiModFreqHz.store(f, std::memory_order_relaxed);
-      eqPoints[i].uiModGainDB.store(g, std::memory_order_relaxed);
-      eqPoints[i].uiModQ.store(q, std::memory_order_relaxed);
-      eqPoints[i].uiModActive.store(active, std::memory_order_relaxed);
-    } else {
-      // Not in payload → clear (animation stopped or point removed)
-      eqPoints[i].uiModActive.store(false, std::memory_order_relaxed);
-      eqPoints[i].uiModFreqHz.store(0.0f, std::memory_order_relaxed);
-      eqPoints[i].uiModGainDB.store(0.0f, std::memory_order_relaxed);
-      eqPoints[i].uiModQ.store(0.0f, std::memory_order_relaxed);
-    }
-  }
-}
-
 void HostesaAudioProcessor::applyParamBatch(const juce::String &jsonBatch) {
   // Batch param apply � sets N params in a single call.
   // JSON format: [{"p":pluginId,"i":paramIndex,"v":value}, ...]
@@ -1912,6 +1883,9 @@ void HostesaAudioProcessor::setEqCurve(const juce::String &jsonData) {
     else order = 10;
     setFftOrder(order);
   }
+  // Internal modulation (gain LFO / drift / Q mod) settings
+  parseEqInternalModSettings(*obj);
+
   // Snapshot old global values to detect changes
   float oldDepth = eqGlobalDepth.load();
   float oldWarp = eqGlobalWarp.load();
