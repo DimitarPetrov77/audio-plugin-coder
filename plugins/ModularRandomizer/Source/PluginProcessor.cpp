@@ -1765,6 +1765,7 @@ HostesaAudioProcessor::getHostedPluginList() {
         hp->instance ? (int)hp->instance->getParameters().size() : 0;
     info.busId = hp->busId;
     info.isInstrument = hp->isInstrument;
+    info.missing = hp->isMissing();
     result.push_back(info);
   }
   return result;
@@ -1978,16 +1979,19 @@ void HostesaAudioProcessor::setEqCurve(const juce::String &jsonData) {
         if (sl != 1 && sl != 2 && sl != 4)
           sl = 1;
 
+        // Non-finite values would break the sort below and poison the filters
+        auto num = [pt](const char *key, float def) {
+          if (!pt->hasProperty(key))
+            return def;
+          const auto v = (double)pt->getProperty(key);
+          return std::isfinite(v) ? (float)v : def;
+        };
+
         sorted.push_back(
-            {(float)(double)pt->getProperty("freqHz"),
-             (float)(double)pt->getProperty("gainDB"),
+            {num("freqHz", 1000.0f), num("gainDB", 0.0f),
              (int)pt->getProperty("busId"), (bool)pt->getProperty("solo"),
-             (bool)pt->getProperty("mute"),
-             pt->hasProperty("q") ? (float)(double)pt->getProperty("q")
-                                  : 0.707f,
-             ft,
-             pt->hasProperty("drift") ? (float)(double)pt->getProperty("drift")
-                                      : 0.0f,
+             (bool)pt->getProperty("mute"), num("q", 0.707f), ft,
+             num("drift", 0.0f),
              pt->hasProperty("preEq") ? (bool)pt->getProperty("preEq") : true,
              pt->hasProperty("stereoMode") ? (int)pt->getProperty("stereoMode")
                                            : 0,
@@ -2069,7 +2073,8 @@ void HostesaAudioProcessor::setEqCurve(const juce::String &jsonData) {
 void HostesaAudioProcessor::setEqPointFast(int pointIndex,
                                             const juce::String &field,
                                             double value) {
-  if (pointIndex < 0 || pointIndex >= numEqPoints.load())
+  if (pointIndex < 0 || pointIndex >= numEqPoints.load() ||
+      !std::isfinite(value))
     return;
 
   float maxDB = eqDbRange.load();
@@ -2289,6 +2294,15 @@ void HostesaAudioProcessor::getStateInformation(juce::MemoryBlock &destData) {
     for (auto &hp : hostedPlugins) {
       if (hp->id < 0)
         continue; // skip dead entries
+      if (hp->isMissing()) {
+        // Not loaded: write back what was saved, so the plugin, its values and
+        // the slots/targets pointing at it survive until it can be loaded again
+        auto *plugEl = new juce::XmlElement(*hp->missingState);
+        plugEl->setAttribute("id", hp->id);
+        plugEl->setAttribute("busId", hp->busId);
+        pluginsXml->addChildElement(plugEl);
+        continue;
+      }
       auto *plugEl = pluginsXml->createNewChildElement("PLUGIN");
       plugEl->setAttribute("id", hp->id);
       plugEl->setAttribute("name", hp->name);
@@ -2305,6 +2319,11 @@ void HostesaAudioProcessor::getStateInformation(juce::MemoryBlock &destData) {
             auto *pEl = paramsEl->createNewChildElement("P");
             pEl->setAttribute("i", i);
             pEl->setAttribute("v", (double)params[i]->getValue());
+            // Name + hidden flag let a placeholder list the params if this
+            // plugin is missing next time
+            pEl->setAttribute("n", params[i]->getName(64));
+            if (isHiddenHostedParam(*params[i]))
+              pEl->setAttribute("h", 1);
           }
         } catch (...) {
           LOG_TO_FILE("getState: exception reading params for plugin '"
@@ -2425,6 +2444,14 @@ void HostesaAudioProcessor::setStateInformation(const void *data,
       proxyValueCache[i].store(-999.0f);
     }
 
+    // Fresh IDs from loadPlugin() must never equal a saved ID: the patch-up
+    // below finds the new plugin by its fresh ID, and a reordered chain (saved
+    // ids 2,1) would otherwise rename the wrong plugin and give it the other
+    // plugin's parameter values.
+    nextPluginId = juce::jmax(nextPluginId, restoredNextId);
+    for (auto *plugEl : pluginsXml->getChildWithTagNameIterator("PLUGIN"))
+      nextPluginId = juce::jmax(nextPluginId, plugEl->getIntAttribute("id", 0));
+
     // Reload each plugin from its saved path � wrapped per-plugin so
     // one crashing VST3 doesn't prevent restoring the others.
     for (auto *plugEl : pluginsXml->getChildIterator()) {
@@ -2437,14 +2464,17 @@ void HostesaAudioProcessor::setStateInformation(const void *data,
       if (savedPath.isEmpty())
         continue;
 
+      bool reloaded = false;
       try {
         // Load the plugin (this handles scanning + instantiation)
         int newId = loadPlugin(savedPath);
         if (newId < 0) {
           LOG_TO_FILE("State restore: failed to reload plugin from "
-                      << savedPath.toStdString());
+                      << savedPath.toStdString() << " - keeping a placeholder");
+          addMissingPlugin(*plugEl, savedId);
           continue;
         }
+        reloaded = true;
 
         // Patch the plugin ID to match saved ID (preserves block target refs)
         {
@@ -2481,12 +2511,21 @@ void HostesaAudioProcessor::setStateInformation(const void *data,
       } catch (...) {
         LOG_TO_FILE("State restore: EXCEPTION loading plugin '"
                     << savedPath.toStdString() << "' (id " << savedId
-                    << "). Skipping.");
+                    << "). Keeping a placeholder.");
+        if (!reloaded)
+          addMissingPlugin(*plugEl, savedId);
       }
     }
 
     // Restore nextPluginId to avoid ID collisions
     nextPluginId = juce::jmax(nextPluginId, restoredNextId);
+
+    // The last plugin was renamed to its saved id after loadPlugin() built the
+    // id -> slot table
+    {
+      std::lock_guard<std::mutex> lock(pluginMutex);
+      rebuildPluginSlots();
+    }
   }
 
   // Restore exact DAW slot assignments (falls back to load-order assignment

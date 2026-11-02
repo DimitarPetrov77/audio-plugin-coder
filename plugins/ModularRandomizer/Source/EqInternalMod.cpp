@@ -18,6 +18,7 @@ namespace
 // _weqHashI(): integer hash → [-1, 1)
 double hashI (double n)
 {
+    if (! std::isfinite (n)) n = 0.0;
     auto h = (uint32_t) (int32_t) (int64_t) n;
     h = (h >> 16) ^ h; h *= 0x45d9f3bu;
     h = (h >> 16) ^ h; h *= 0x45d9f3bu;
@@ -164,9 +165,13 @@ bool inZone (float freq, float lo, float hi)
 void HostesaAudioProcessor::parseEqInternalModSettings (const juce::DynamicObject& eq)
 {
     auto& s = eqIntMod;
+    // Bad values (NaN, strings, inf) are ignored: one non-finite offset would poison the
+    // EQ filters' state until reload.
     auto f = [&] (const char* key, std::atomic<float>& dst)
     {
-        if (eq.hasProperty (key)) dst.store ((float) (double) eq.getProperty (key));
+        if (! eq.hasProperty (key)) return;
+        const auto v = (double) eq.getProperty (key);
+        if (std::isfinite (v)) dst.store ((float) v);
     };
     auto b = [&] (const char* key, std::atomic<bool>& dst)
     {
@@ -209,7 +214,8 @@ void HostesaAudioProcessor::parseEqInternalModSettings (const juce::DynamicObjec
             auto depth = [&] (const char* key)
             {
                 auto v = pt.getProperty (key, {});
-                return v.isVoid() ? 100.0f : (float) (double) v; // _weqPtDepth(): missing = 100
+                const auto d = v.isVoid() ? 100.0 : (double) v; // _weqPtDepth(): missing = 100
+                return std::isfinite (d) ? (float) d : 100.0f;
             };
             eqPoints[i].modExclude.store ((int) pt.getProperty ("modExclude", 0));
             eqPoints[i].modGainDepth.store (depth ("modGainDepth"));
@@ -267,13 +273,13 @@ void HostesaAudioProcessor::advanceEqInternalMod (int nPts, int numSamples)
     double bpm = s.syncInternal.load (std::memory_order_relaxed)
                      ? (double) s.internalBpm.load (std::memory_order_relaxed)
                      : currentBpm.load (std::memory_order_relaxed);
-    if (bpm <= 0.0) bpm = 120.0;
+    if (! std::isfinite (bpm) || bpm <= 0.0) bpm = 120.0;
     const double gainRate = gainSync ? (bpm / 60.0) / s.gainSyncBeats.load (std::memory_order_relaxed) : gainSpeed;
     const double qRate    = qSync    ? (bpm / 60.0) / s.qSyncBeats.load (std::memory_order_relaxed)    : qSpeed;
 
     // Advance the clocks
     const double dt = (double) numSamples / juce::jmax (1.0, currentSampleRate);
-    if (hasSine)
+    if (hasSine && std::isfinite (gainRate))
     {
         eqIntModGainPhase += dt * gainRate;
         if (eqIntModGainPhase > 1.0) eqIntModGainPhase -= std::floor (eqIntModGainPhase);
@@ -354,7 +360,7 @@ void HostesaAudioProcessor::advanceEqInternalMod (int nPts, int numSamples)
         }
 
         const double newDB = juce::jlimit (-maxDB, maxDB, baseDB + totalModDB);
-        const double gainOffset = newDB - baseDB;
+        double gainOffset = newDB - baseDB;
 
         // 3) Q mod
         if (hasQMod && inZone ((float) baseFreq, qLo, qHi) && ! (excl & 2))
@@ -365,6 +371,10 @@ void HostesaAudioProcessor::advanceEqInternalMod (int nPts, int numSamples)
             const double newQ = juce::jlimit (0.1, 30.0, baseQ * std::pow (2.0, qShape (qShapeIdx, qPhase, seed) * depthMul));
             qOffset = newQ - baseQ;
         }
+
+        if (! std::isfinite (freqOffset)) freqOffset = 0.0;
+        if (! std::isfinite (gainOffset)) gainOffset = 0.0;
+        if (! std::isfinite (qOffset))    qOffset = 0.0;
 
         const bool active = std::abs (freqOffset) > 1e-6 || std::abs (gainOffset) > 1e-6 || std::abs (qOffset) > 1e-6;
         pt.uiModFreqHz.store ((float) freqOffset, std::memory_order_relaxed);

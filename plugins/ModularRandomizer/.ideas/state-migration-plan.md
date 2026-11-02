@@ -44,9 +44,28 @@ to perfect the existing WebView UI instead.
   mismatches were one-block read skew in the test, confirmed by a time-shift search);
   drawing tracks the audio clock within ~3 ms median / 8 ms max, clock speed ±3% per frame.
 
+### Robustness pass
+- **Reordered chains reload correctly.** Fresh ids from `loadPlugin()` used to collide with
+  saved ids in a fresh instance, so a reordered chain could swap two plugins' ids and
+  parameter values. New ids now start above every saved id, and `allocatePluginId()` skips
+  ids whose `slotForId()` (id % 32) a live plugin already uses.
+- **Missing plugins are kept.** A saved plugin that fails to load becomes a placeholder
+  (`HostedPlugin::missingState`, no instance). It keeps its id, place in the chain, bus and
+  DAW slots, is written back verbatim on save, and its params (names saved since this
+  change, otherwise "Param N") stay in the UI so block targets, locks and snapshots survive.
+  The card shows "Not found" with Retry (`retryMissingPlugin` → `reviveMissingPlugin`),
+  which loads the instance into the same entry and applies the saved values.
+- **Non-finite values can't reach the EQ filters** (EQ engine settings, `setEqCurve`,
+  `setEqPointFast`, last check before the filters). A NaN used to pass `jlimit`, stick in the
+  SVF state, and `setEqCurve`'s sort with a NaN frequency was undefined behaviour.
+- `restore_check.txt` is only written when the restore self-check finds a difference.
+- Verified in the Standalone: reordered chain + reload; missing plugin → saved → reopened →
+  plugin put back → Retry → reopened, with targets, lock, morph snapshot, values and DAW
+  slots intact at every step; all earlier self-check sessions still match.
+
 ### Not covered yet
 - Exposed `lane.N.speed` maps to a field the DSP never reads (no effect).
-- Not yet tested in a DAW: headless block automation, sample reload.
+- Not yet tested in a DAW: headless block automation, sample reload, missing plugins.
 
 ---
 

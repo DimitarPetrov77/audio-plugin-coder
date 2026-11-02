@@ -196,7 +196,7 @@ function restoreFromHost() {
                     PMap[fid] = param;
                     return param;
                 });
-                pluginBlocks.push({ id: plug.id, hostId: plug.id, name: plug.name, path: plug.path || '', manufacturer: plug.manufacturer || '', params: params, expanded: true, searchFilter: '' });
+                pluginBlocks.push({ id: plug.id, hostId: plug.id, name: plug.name, path: plug.path || '', manufacturer: plug.manufacturer || '', params: params, expanded: true, searchFilter: '', missing: !!plug.missing });
             });
         }
 

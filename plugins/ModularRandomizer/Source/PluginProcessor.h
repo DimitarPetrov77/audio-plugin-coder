@@ -81,7 +81,16 @@ struct HostedPlugin
     bool isInstrument = false;  // true if synth/sampler — buffer zeroed before processBlock
     int crashCount = 0;         // lifetime crash counter
     int busId = 0;              // parallel bus ID (0 = default/main)
+
+    /** Set when a saved session's plugin could not be loaded: its saved <PLUGIN>
+        element, kept verbatim so saving the session doesn't lose it. The entry keeps
+        its id, chain position, bus and DAW slots but has no instance. */
+    std::unique_ptr<juce::XmlElement> missingState;
+    bool isMissing() const { return missingState != nullptr; }
 };
+
+/** Params the UI never lists (not automatable, VST3 MIDI CC / aftertouch / pitchbend). */
+bool isHiddenHostedParam (juce::AudioProcessorParameter& param);
 
 /** SEH-guarded processBlock wrapper.
     Isolated as a free function because __try/__except cannot coexist
@@ -327,8 +336,16 @@ public:
     bool findPluginDescription (const juce::String& pluginPath,
                                  juce::PluginDescription& descOut);
 
-    /** Phase 2: Instantiate from description (message thread only — COM) */
-    int instantiatePlugin (const juce::PluginDescription& desc);
+    /** Phase 2: Instantiate from description (message thread only — COM).
+        asReplacement: no DAW slots and starts bypassed, because the caller moves the
+        instance into another entry (reviveMissingPlugin). */
+    int instantiatePlugin (const juce::PluginDescription& desc, bool asReplacement = false);
+
+    /** Loads a missing plugin's instance into its placeholder (same id, place in the
+        chain, bus, DAW slots) and applies its saved values. Message thread. Returns
+        the plugin id, or -1 if it still can't be loaded. */
+    int reviveMissingPlugin (int placeholderId, const juce::PluginDescription& desc);
+    juce::String getMissingPluginPath (int placeholderId);
 
     /** Remove a hosted plugin by ID */
     void removePlugin (int pluginId);
@@ -386,6 +403,7 @@ public:
         int numParams;
         int busId;
         bool isInstrument;
+        bool missing = false;   // placeholder for a plugin that couldn't be loaded
     };
     std::vector<HostedPluginInfo> getHostedPluginList();
 
@@ -496,8 +514,8 @@ public:
     juce::String getUiState() const;
 
     /** Self-check for headless restore: compiles the saved UI state in C++ and diffs it
-        against the blocks the editor just sent (first sync after opening). Result goes
-        to restore_check.txt in the data folder. */
+        against the blocks the editor just sent (first sync after opening). Differences
+        are written to restore_check.txt in the data folder; a match deletes it. */
     void verifyHeadlessCompile (const juce::String& editorBlocksJson);
 
     //==============================================================================
@@ -1116,6 +1134,11 @@ private:
 
     /** Block proxy dirty flag — set when DAW automates a block param slot */
     std::atomic<bool>             blockProxyDirty { false };
+
+    /** Next plugin id whose slotForId() no live plugin uses (message thread) */
+    int allocatePluginId();
+    /** Placeholder entry for a saved plugin that failed to load */
+    void addMissingPlugin (const juce::XmlElement& plugEl, int savedId);
 
     /** Assign proxy slots when a plugin is loaded, free them on remove */
     void assignProxySlotsForPlugin (int pluginId);

@@ -139,6 +139,9 @@ private:
 
     bool restoreSelfCheckDone = false;  // see verifyHeadlessCompile()
 
+    /** { id, name, manufacturer, isInstrument, params[] } for loadPlugin / retryMissingPlugin */
+    juce::var describeHostedPlugin (int pluginId);
+
     // 1. RELAYS FIRST (destroyed last)
     juce::WebSliderRelay mixRelay       { "MIX" };
     juce::WebToggleButtonRelay bypassRelay  { "BYPASS" };

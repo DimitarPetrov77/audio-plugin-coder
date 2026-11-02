@@ -105,6 +105,51 @@ function addPlugin(pluginPath) {
         showLoadError(plugName, err);
     });
 }
+// Load a plugin the session couldn't load into its placeholder. It keeps its id, so
+// block targets, locks, bus and DAW slots on it reconnect.
+function retryMissingPlugin(pid, btn) {
+    var pb = null;
+    for (var i = 0; i < pluginBlocks.length; i++) { if (pluginBlocks[i].id === pid) { pb = pluginBlocks[i]; break; } }
+    if (!pb || !pb.missing || pb._retrying || !(window.__JUCE__ && window.__JUCE__.backend)) return;
+    pb._retrying = true;
+    if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+    var done = function (ok, msg) {
+        pb._retrying = false;
+        if (!ok) {
+            if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
+            showToast(msg || (pb.name + ' still not found'), 'error', 3500);
+        }
+    };
+    var fn = window.__juceGetNativeFunction('retryMissingPlugin');
+    fn(pb.hostId).then(function (result) {
+        if (!result || result.error) { done(false, result && result.error); return; }
+        done(true);
+        var keep = {};
+        var params = (result.params || []).map(function (p) {
+            var fid = pb.hostId + ':' + p.index;
+            var param = PMap[fid];
+            if (param) { param.name = p.name; param.v = p.value; param.disp = p.disp || ''; }
+            else { param = { id: fid, name: p.name, v: p.value, disp: p.disp || '', lk: false, alk: false, realIndex: p.index, hostId: pb.hostId }; PMap[fid] = param; }
+            keep[fid] = true;
+            return param;
+        });
+        // Params the plugin doesn't have (any more): unassign them like removePlugin does
+        pb.params.forEach(function (p) {
+            if (keep[p.id]) return;
+            delete PMap[p.id];
+            blocks.forEach(function (b) { if (b.targets.has(p.id)) { b.targets.delete(p.id); cleanBlockAfterUnassign(b, p.id); } });
+        });
+        pb.params = params;
+        pb.name = result.name || pb.name;
+        pb.manufacturer = result.manufacturer || '';
+        pb.missing = false;
+        showToast(pb.name + ' loaded (' + params.length + ' params)', 'success', 2500);
+        renderAllPlugins(); renderBlocks(); updCounts(); syncBlocksToHost(); syncExpandedPlugins();
+        if (typeof _syncExposeStateToHost === 'function') _syncExposeStateToHost(); // slots for newly listed params
+        saveUiStateToHost();
+        if (routingMode === 2 && typeof weqRenderPanel === 'function') weqRenderPanel();
+    }).catch(function (err) { done(false, pb.name + ' still not found'); console.log('retryMissingPlugin:', err); });
+}
 function removePlugin(pid) {
     var pb; for (var i = 0; i < pluginBlocks.length; i++) { if (pluginBlocks[i].id === pid) { pb = pluginBlocks[i]; break; } }
     if (!pb) return;
@@ -173,6 +218,14 @@ function buildPluginCard(pb, pi, isA, aBlk, aCol) {
     }
 
     card.setAttribute('draggable', 'true');
+    // Plugin the session couldn't load: its params are listed (so block targets on them
+    // survive) but can't be used until Retry finds the plugin.
+    if (pb.missing) {
+        card.classList.add('pcard-missing');
+        card.innerHTML = '<div class="pcard-head" data-plugid="' + pb.id + '"><span class="lchev ' + (pb.expanded ? 'open' : '') + '">&#9654;</span><span class="pcard-name" title="' + (pb.path || '') + '">' + pb.name + '</span><span class="pcard-missing-tag">Not found</span><button class="sm-btn" style="font-size:9px;padding:2px 6px" data-plugretry="' + pb.id + '" title="Try to load it again">Retry</button><button class="pcard-close" data-plugrm="' + pb.id + '">x</button></div><div class="pcard-body ' + (pb.expanded ? '' : 'hide') + '"><div class="pcard-missing-note">Couldn\'t load this plugin. Its settings, modulation and automation are kept and come back when it loads.</div><div class="pcard-params" data-plugparams="' + pb.id + '"></div></div>';
+        fillPluginParams(card.querySelector('[data-plugparams="' + pb.id + '"]'), pb, false, null, '');
+        return card;
+    }
     var bulkBtns = isA ? '<button class="sm-btn bulk-all" style="font-size:9px;padding:2px 6px;margin-left:4px" data-plugbulk="' + pb.id + '" data-bulkmode="all">All</button><button class="sm-btn bulk-none" style="font-size:9px;padding:2px 6px" data-plugbulk="' + pb.id + '" data-bulkmode="none">None</button>' : '';
     // Bus dropdown (parallel mode and WrongEQ mode)
     var busBadge = '';
@@ -857,7 +910,7 @@ function updateModBases(pid, newVal) {
 // Stamp for detecting structural changes (plugin add/remove/reorder)
 var _pluginStamp = '';
 var _expectedChildCount = 0;
-function getPluginStamp() { return pluginBlocks.map(function (pb) { return pb.id + ':' + (pb.busId || 0); }).join(',') + '|' + (assignMode !== null ? assignMode : '') + '|' + routingMode + '|' + busMutes.join(',') + '|' + busSolos.join(',') + '|' + busCollapsed.join(',') + '|weq' + wrongEqPoints.map(function (p) { return (p.mute ? 'm' : '') + (p.solo ? 's' : '') + (p.preEq !== false ? 'e' : ''); }).join(''); }
+function getPluginStamp() { return pluginBlocks.map(function (pb) { return pb.id + ':' + (pb.busId || 0) + (pb.missing ? 'm' : ''); }).join(',') + '|' + (assignMode !== null ? assignMode : '') + '|' + routingMode + '|' + busMutes.join(',') + '|' + busSolos.join(',') + '|' + busCollapsed.join(',') + '|weq' + wrongEqPoints.map(function (p) { return (p.mute ? 'm' : '') + (p.solo ? 's' : '') + (p.preEq !== false ? 'e' : ''); }).join(''); }
 // dB <-> linear helpers for bus volume
 function linToDb(lin) { return lin <= 0.001 ? -60 : 20 * Math.log10(lin); }
 function dbToLin(db) { return db <= -59.9 ? 0 : Math.pow(10, db / 20); }
@@ -1072,7 +1125,7 @@ function renderAllPlugins() {
 
         // Patch param rows (search filter or assign state change)
         var paramC = card.querySelector('[data-plugparams="' + pb.id + '"]');
-        if (paramC) fillPluginParams(paramC, pb, isA, aBlk, aCol);
+        if (paramC) { if (pb.missing) fillPluginParams(paramC, pb, false, null, ''); else fillPluginParams(paramC, pb, isA, aBlk, aCol); }
 
         // Restore search input value (fillPluginParams doesn't touch it)
         var searchInp = card.querySelector('[data-plugsearch="' + pb.id + '"]');
@@ -1086,7 +1139,7 @@ function renderAllPlugins() {
 function wirePluginCards() {
     document.querySelectorAll('.pcard-head').forEach(function (h) {
         h.onclick = function (e) {
-            if (e.target.closest('[data-plugrm]') || e.target.closest('[data-pluged]') || e.target.closest('[data-plugbulk]') || e.target.closest('[data-plugpreset]') || e.target.closest('.pcard-bus-sel')) return;
+            if (e.target.closest('[data-plugrm]') || e.target.closest('[data-pluged]') || e.target.closest('[data-plugretry]') || e.target.closest('[data-plugbulk]') || e.target.closest('[data-plugpreset]') || e.target.closest('.pcard-bus-sel')) return;
             var id = parseInt(h.dataset.plugid);
             var pb = null;
             for (var i = 0; i < pluginBlocks.length; i++) {
@@ -1151,6 +1204,7 @@ function wirePluginCards() {
         sel.onclick = function (e) { e.stopPropagation(); };
     });
     document.querySelectorAll('[data-plugrm]').forEach(function (b) { b.onclick = function (e) { e.stopPropagation(); removePlugin(parseInt(b.dataset.plugrm)); }; });
+    document.querySelectorAll('[data-plugretry]').forEach(function (b) { b.onclick = function (e) { e.stopPropagation(); retryMissingPlugin(parseInt(b.dataset.plugretry), b); }; });
     document.querySelectorAll('[data-pluged]').forEach(function (b) {
         b.onclick = function (e) {
             e.stopPropagation();

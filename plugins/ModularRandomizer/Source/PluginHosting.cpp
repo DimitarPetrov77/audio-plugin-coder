@@ -751,7 +751,7 @@ bool HostesaAudioProcessor::findPluginDescription (
 }
 
 // -- Phase 2: Instantiate plugin (message thread only - COM requirement) --
-int HostesaAudioProcessor::instantiatePlugin (const juce::PluginDescription& desc)
+int HostesaAudioProcessor::instantiatePlugin (const juce::PluginDescription& desc, bool asReplacement)
 {
     juce::String errorMessage;
     std::unique_ptr<juce::AudioPluginInstance> instance;
@@ -881,13 +881,14 @@ int HostesaAudioProcessor::instantiatePlugin (const juce::PluginDescription& des
 
     // Create hosted plugin entry
     auto hp = std::make_unique<HostedPlugin>();
-    hp->id = ++nextPluginId;
+    hp->id = allocatePluginId();
     hp->name = desc.name;
     hp->path = desc.fileOrIdentifier;
     hp->description = desc;
     hp->instance = std::move (instance);
     hp->prepared = true;
     hp->isInstrument = pluginIsInstrument;
+    hp->bypassed = asReplacement; // must not play at the end of the chain meanwhile
 
     int id = hp->id;
     int paramCount = (int) hp->instance->getParameters().size();
@@ -915,9 +916,112 @@ int HostesaAudioProcessor::instantiatePlugin (const juce::PluginDescription& des
     LOG_TO_FILE ("  Loaded plugin: " << desc.name.toStdString()
                  << " (ID: " << id << ", Params: " << paramCount << ")");
 
-    assignProxySlotsForPlugin (id);
+    if (! asReplacement)
+        assignProxySlotsForPlugin (id);
 
     return id;
+}
+
+int HostesaAudioProcessor::allocatePluginId()
+{
+    // slotForId() is id % kMaxPlugins, and two live plugins sharing a slot would mix
+    // up their modulation, so skip ids whose slot is taken.
+    for (int attempt = 0; attempt < kMaxPlugins; ++attempt)
+    {
+        const int id = ++nextPluginId;
+        bool taken = false;
+        for (auto& hp : hostedPlugins)
+            if (hp->id >= 0 && slotForId (hp->id) == slotForId (id)) { taken = true; break; }
+        if (! taken) return id;
+    }
+    return ++nextPluginId;
+}
+
+void HostesaAudioProcessor::addMissingPlugin (const juce::XmlElement& plugEl, int savedId)
+{
+    auto hp = std::make_unique<HostedPlugin>();
+    hp->id = savedId;
+    hp->name = plugEl.getStringAttribute ("name");
+    hp->path = plugEl.getStringAttribute ("path");
+    hp->busId = plugEl.getIntAttribute ("busId", 0);
+    hp->missingState = std::make_unique<juce::XmlElement> (plugEl);
+
+    std::lock_guard<std::mutex> lock (pluginMutex);
+    if (hostedPlugins.size() >= hostedPlugins.capacity()) return; // same limit as loading
+    hostedPlugins.push_back (std::move (hp));
+    rebuildPluginSlots();
+}
+
+juce::String HostesaAudioProcessor::getMissingPluginPath (int placeholderId)
+{
+    std::lock_guard<std::mutex> lock (pluginMutex);
+    for (auto& hp : hostedPlugins)
+        if (hp->id == placeholderId && hp->isMissing())
+            return hp->path;
+    return {};
+}
+
+int HostesaAudioProcessor::reviveMissingPlugin (int placeholderId, const juce::PluginDescription& desc)
+{
+    if (getMissingPluginPath (placeholderId).isEmpty()) return -1;
+
+    // The placeholder already holds the session's DAW slots, so the new instance gets none
+    const int tempId = instantiatePlugin (desc, true);
+    if (tempId < 0) return -1;
+
+    std::vector<std::pair<int, juce::String>> slotNames;
+    {
+        std::lock_guard<std::mutex> lock (pluginMutex);
+        HostedPlugin* fresh = nullptr;
+        HostedPlugin* holder = nullptr;
+        for (auto& hp : hostedPlugins)
+        {
+            if (hp->id == tempId) fresh = hp.get();
+            else if (hp->id == placeholderId && hp->isMissing()) holder = hp.get();
+        }
+        if (fresh == nullptr || holder == nullptr) return -1;
+
+        // Move the instance into the placeholder's entry so it keeps its id, place in
+        // the chain, bus and bypass. The emptied entry is purged in prepareToPlay.
+        holder->name = fresh->name;
+        holder->description = fresh->description;
+        holder->isInstrument = fresh->isInstrument;
+        holder->prepared = fresh->prepared;
+        holder->instance = std::move (fresh->instance);
+        fresh->id = -1;
+
+        auto& params = holder->instance->getParameters();
+        if (auto* paramsEl = holder->missingState->getChildByName ("PARAMS"))
+            for (auto* pEl : paramsEl->getChildWithTagNameIterator ("P"))
+            {
+                const int idx = pEl->getIntAttribute ("i", -1);
+                if (idx >= 0 && idx < (int) params.size())
+                    params[idx]->setValue ((float) pEl->getDoubleAttribute ("v", 0.0));
+            }
+        holder->missingState.reset();
+
+        for (int i = 0; i < proxyParamCount; ++i)
+        {
+            if (proxyMap[i].pluginId != placeholderId) continue;
+            const int idx = proxyMap[i].paramIndex;
+            slotNames.emplace_back (i, idx >= 0 && idx < (int) params.size()
+                                           ? holder->name + ": " + params[idx]->getName (128)
+                                           : juce::String());
+        }
+        rebuildPluginSlots();
+    }
+
+    // Rename the DAW slots after the real params; drop any the plugin no longer has
+    for (auto& [slot, name] : slotNames)
+    {
+        if (name.isEmpty())
+            releaseProxySlot (slot);
+        else if (proxyParams[slot] != nullptr)
+            proxyParams[slot]->setDynamicName (name);
+    }
+    updateHostDisplay (juce::AudioProcessor::ChangeDetails{}.withParameterInfoChanged (true));
+    updateReportedLatency();
+    return placeholderId;
 }
 
 // -- Convenience wrapper: scan + instantiate (used by setStateInformation) --
@@ -1033,6 +1137,14 @@ void HostesaAudioProcessor::reorderPlugins (const std::vector<int>& orderedIds)
     rebuildPluginSlots();
 }
 
+bool isHiddenHostedParam (juce::AudioProcessorParameter& param)
+{
+    if (! param.isAutomatable())
+        return true;
+    auto name = param.getName (64);
+    return name.startsWith ("MIDI CC") || name.startsWith ("Aftertouch") || name.startsWith ("Pitchbend");
+}
+
 std::vector<HostesaAudioProcessor::ParamInfo>
 HostesaAudioProcessor::getHostedParams (int pluginId)
 {
@@ -1041,27 +1153,36 @@ HostesaAudioProcessor::getHostedParams (int pluginId)
 
     for (auto& hp : hostedPlugins)
     {
+        if (hp->id == pluginId && hp->isMissing())
+        {
+            // Placeholder: the params as saved (names only in sessions saved since
+            // names were stored)
+            if (auto* paramsEl = hp->missingState->getChildByName ("PARAMS"))
+                for (auto* pEl : paramsEl->getChildWithTagNameIterator ("P"))
+                {
+                    const int idx = pEl->getIntAttribute ("i", -1);
+                    if (idx < 0 || pEl->getBoolAttribute ("h")) continue;
+                    ParamInfo info;
+                    info.index = idx;
+                    info.name = pEl->getStringAttribute ("n", "Param " + juce::String (idx + 1));
+                    info.value = (float) pEl->getDoubleAttribute ("v", 0.0);
+                    info.automatable = true;
+                    result.push_back (info);
+                }
+            break;
+        }
         if (hp->id == pluginId && hp->instance != nullptr)
         {
             auto& params = hp->instance->getParameters();
             for (int i = 0; i < params.size(); ++i)
             {
                 auto* p = params[i];
-
-                // Skip non-automatable parameters
-                if (! p->isAutomatable())
-                    continue;
-
-                // Skip VST3 internal MIDI CC / Aftertouch / Pitchbend parameters
-                auto name = p->getName (64);
-                if (name.startsWith ("MIDI CC")
-                    || name.startsWith ("Aftertouch")
-                    || name.startsWith ("Pitchbend"))
+                if (isHiddenHostedParam (*p))
                     continue;
 
                 ParamInfo info;
                 info.index = i;
-                info.name = name;
+                info.name = p->getName (64);
                 info.value = p->getValue(); // normalised 0-1
                 info.label = p->getLabel();
                 info.displayText = p->getText (p->getValue(), 32);

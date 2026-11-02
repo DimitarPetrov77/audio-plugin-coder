@@ -237,6 +237,7 @@ HostesaAudioProcessorEditor::HostesaAudioProcessorEditor (
                         pObj->setProperty ("params", juce::var (paramArr));
                         pObj->setProperty ("busId", info.busId);
                         pObj->setProperty ("isInstrument", info.isInstrument);
+                        pObj->setProperty ("missing", info.missing);
                         plugArr.add (juce::var (pObj));
                     }
                     result->setProperty ("plugins", juce::var (plugArr));
@@ -294,37 +295,49 @@ HostesaAudioProcessorEditor::HostesaAudioProcessorEditor (
                                 return;
                             }
 
-                            auto params = audioProcessor.getHostedParams (pluginId);
-                            auto* result = new juce::DynamicObject();
-                            result->setProperty ("id", pluginId);
+                            completion (describeHostedPlugin (pluginId));
+                        });
+                    });
+                }
+            )
+            .withNativeFunction (
+                "retryMissingPlugin",
+                [this] (const juce::Array<juce::var>& args,
+                        juce::WebBrowserComponent::NativeFunctionCompletion completion)
+                {
+                    auto fail = [] (const juce::String& msg)
+                    {
+                        auto* err = new juce::DynamicObject();
+                        err->setProperty ("error", msg);
+                        return juce::var (err);
+                    };
+                    const int pluginId = args.isEmpty() ? -1 : (int) args[0];
+                    auto pluginPath = audioProcessor.getMissingPluginPath (pluginId);
+                    if (pluginPath.isEmpty())
+                    {
+                        completion (fail ("Not a missing plugin"));
+                        return;
+                    }
 
-                            auto hosted = audioProcessor.getHostedPluginList();
-                            for (auto& h : hosted)
+                    // Same two phases as loadPlugin: scan off the message thread,
+                    // instantiate on it (COM)
+                    auto& proc = audioProcessor;
+                    juce::Component::SafePointer<HostesaAudioProcessorEditor> safeThis (this);
+                    juce::Thread::launch ([&proc, safeThis, pluginId, pluginPath, fail,
+                                           completion = std::move (completion)]() mutable
+                    {
+                        juce::PluginDescription desc;
+                        const bool found = proc.findPluginDescription (pluginPath, desc);
+                        juce::MessageManager::callAsync ([&proc, safeThis, pluginId, pluginPath, fail, found, desc,
+                                                          completion = std::move (completion)]() mutable
+                        {
+                            if (safeThis == nullptr) return;
+                            if (! found || proc.reviveMissingPlugin (pluginId, desc) < 0)
                             {
-                                if (h.id == pluginId)
-                                {
-                                    result->setProperty ("name", h.name);
-                                    result->setProperty ("manufacturer", h.manufacturer);
-                                    result->setProperty ("isInstrument", h.isInstrument);
-                                    break;
-                                }
+                                completion (fail ("Still can't load " + pluginPath));
+                                return;
                             }
-
-                            juce::Array<juce::var> paramList;
-                            for (const auto& p : params)
-                            {
-                                auto* pObj = new juce::DynamicObject();
-                                pObj->setProperty ("index", p.index);
-                                pObj->setProperty ("name",  p.name);
-                                pObj->setProperty ("value", (double) p.value);
-                                pObj->setProperty ("label", p.label);
-                                pObj->setProperty ("disp",  p.displayText);
-                                pObj->setProperty ("automatable", p.automatable);
-                                paramList.add (juce::var (pObj));
-                            }
-                            result->setProperty ("params", juce::var (paramList));
-
-                            completion (juce::var (result));
+                            completion (safeThis->describeHostedPlugin (pluginId));
                         });
                     });
                 }
@@ -1317,6 +1330,38 @@ HostesaAudioProcessorEditor::HostesaAudioProcessorEditor (
 #endif
 
     DBG ("Hostesa: Editor constructor completed");
+}
+
+juce::var HostesaAudioProcessorEditor::describeHostedPlugin (int pluginId)
+{
+    auto* result = new juce::DynamicObject();
+    result->setProperty ("id", pluginId);
+
+    for (auto& h : audioProcessor.getHostedPluginList())
+    {
+        if (h.id == pluginId)
+        {
+            result->setProperty ("name", h.name);
+            result->setProperty ("manufacturer", h.manufacturer);
+            result->setProperty ("isInstrument", h.isInstrument);
+            break;
+        }
+    }
+
+    juce::Array<juce::var> paramList;
+    for (const auto& p : audioProcessor.getHostedParams (pluginId))
+    {
+        auto* pObj = new juce::DynamicObject();
+        pObj->setProperty ("index", p.index);
+        pObj->setProperty ("name",  p.name);
+        pObj->setProperty ("value", (double) p.value);
+        pObj->setProperty ("label", p.label);
+        pObj->setProperty ("disp",  p.displayText);
+        pObj->setProperty ("automatable", p.automatable);
+        paramList.add (juce::var (pObj));
+    }
+    result->setProperty ("params", juce::var (paramList));
+    return juce::var (result);
 }
 
 HostesaAudioProcessorEditor::~HostesaAudioProcessorEditor()

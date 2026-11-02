@@ -177,11 +177,28 @@ juce::var HostesaAudioProcessor::compileBlocksForDsp (const juce::var& root)
         std::lock_guard<std::mutex> lock (pluginMutex);
         for (auto& hp : hostedPlugins)
         {
-            if (hp->id < 0 || hp->instance == nullptr) continue;
-            auto& params = hp->instance->getParameters();
-            std::vector<float> values ((size_t) params.size());
-            for (int i = 0; i < (int) params.size(); ++i)
-                values[(size_t) i] = params[i]->getValue();
+            if (hp->id < 0) continue;
+            std::vector<float> values;
+            if (hp->instance != nullptr)
+            {
+                auto& params = hp->instance->getParameters();
+                values.resize ((size_t) params.size());
+                for (int i = 0; i < (int) params.size(); ++i)
+                    values[(size_t) i] = params[i]->getValue();
+            }
+            else if (hp->isMissing())
+            {
+                // Placeholder: the editor lists its saved params, so they exist here too
+                if (auto* paramsEl = hp->missingState->getChildByName ("PARAMS"))
+                    for (auto* pEl : paramsEl->getChildWithTagNameIterator ("P"))
+                    {
+                        const int idx = pEl->getIntAttribute ("i", -1);
+                        if (idx < 0 || idx > 100000) continue;
+                        if ((size_t) idx >= values.size()) values.resize ((size_t) idx + 1, 0.0f);
+                        values[(size_t) idx] = (float) pEl->getDoubleAttribute ("v", 0.0);
+                    }
+            }
+            else continue;
             u.pluginValues[hp->id] = std::move (values);
         }
     }
@@ -767,6 +784,15 @@ juce::String pluginListSignature (const std::vector<std::pair<int, juce::String>
 }
 } // namespace
 
+static juce::String missingParamName (const juce::XmlElement& plugEl, int paramIndex)
+{
+    if (auto* paramsEl = plugEl.getChildByName ("PARAMS"))
+        for (auto* pEl : paramsEl->getChildWithTagNameIterator ("P"))
+            if (pEl->getIntAttribute ("i", -1) == paramIndex)
+                return pEl->getStringAttribute ("n", "Param " + juce::String (paramIndex + 1));
+    return "Param " + juce::String (paramIndex + 1);
+}
+
 void HostesaAudioProcessor::saveProxyMap (juce::XmlElement& parent)
 {
     // Must describe the same plugins HOSTED_PLUGINS saves (live entries, in order)
@@ -847,7 +873,19 @@ bool HostesaAudioProcessor::restoreProxyMap (const juce::XmlElement* mapXml, con
             std::lock_guard<std::mutex> lock (pluginMutex);
             for (auto& hp : hostedPlugins)
             {
-                if (hp->id != pluginId || hp->instance == nullptr) continue;
+                if (hp->id != pluginId) continue;
+                if (hp->isMissing())
+                {
+                    // Keep the slot so the DAW lane is still there when the plugin is back
+                    if (paramIndex < 0) break;
+                    m.pluginId = pluginId;
+                    m.paramIndex = paramIndex;
+                    if (proxyParams[slot] != nullptr)
+                        proxyParams[slot]->setDynamicName (hp->name + ": "
+                            + missingParamName (*hp->missingState, paramIndex) + " (missing)");
+                    break;
+                }
+                if (hp->instance == nullptr) continue;
                 auto& params = hp->instance->getParameters();
                 if (paramIndex < 0 || paramIndex >= (int) params.size()) break; // plugin changed
 
@@ -952,12 +990,17 @@ void HostesaAudioProcessor::verifyHeadlessCompile (const juce::String& editorBlo
     juce::StringArray diffs;
     diffVars (ours, juce::JSON::parse (editorBlocksJson), "blocks", diffs);
 
-    juce::String report;
-    report << juce::Time::getCurrentTime().toString (true, true) << "\n";
+    // Only a mismatch leaves a file behind (a field diagnostic for "the session
+    // sounded different before I opened the window").
+    auto file = getDataRoot().getChildFile ("restore_check.txt");
     if (diffs.isEmpty())
-        report << "OK - C++ restore matches the editor exactly.\n";
-    else
-        report << "DIFFERENCES (bases/values read live may differ slightly if modulation was running):\n"
-               << diffs.joinIntoString ("\n") << "\n";
-    getDataRoot().getChildFile ("restore_check.txt").replaceWithText (report);
+    {
+        file.deleteFile();
+        return;
+    }
+    juce::String report;
+    report << juce::Time::getCurrentTime().toString (true, true) << "\n"
+           << "DIFFERENCES (bases/values read live may differ slightly if modulation was running):\n"
+           << diffs.joinIntoString ("\n") << "\n";
+    file.replaceWithText (report);
 }

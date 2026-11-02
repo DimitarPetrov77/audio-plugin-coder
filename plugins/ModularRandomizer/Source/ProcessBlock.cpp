@@ -2586,6 +2586,10 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                         gainBase += eqPoints[i].uiModGainDB.load (std::memory_order_relaxed);
                         qBase    += eqPoints[i].uiModQ.load (std::memory_order_relaxed);
                     }
+                    // jlimit passes NaN straight through and the SVFs would keep it forever
+                    if (! std::isfinite (freqBase)) freqBase = eqPoints[i].freqHz.load();
+                    if (! std::isfinite (gainBase)) gainBase = eqPoints[i].gainDB.load();
+                    if (! std::isfinite (qBase))    qBase    = eqPoints[i].q.load();
                     float gain  = juce::jlimit (-maxDB, maxDB, gainBase) * depthScale;
 
                     // Apply global warp to target gain
