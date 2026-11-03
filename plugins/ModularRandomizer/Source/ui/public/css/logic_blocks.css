@@ -3806,7 +3806,8 @@ select.lane-morph-knob {
 .snap-dot .snap-label {
     font-size: 10px;
     color: var(--text-secondary);
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+    /* Halo in the pad's own colour: readable over the gridlines in dark and light themes */
+    text-shadow: 0 0 3px var(--bg-inset), 0 0 3px var(--bg-inset);
 }
 
 .snap-dot.sel .snap-label { color: var(--text-primary); }
@@ -3901,6 +3902,24 @@ select.lane-morph-knob {
 }
 
 .morph-kernel { margin-left: 6px; }
+
+/* Movement panel: every row caption looks like MODE / EXPLORE / SHAPE (Trigger and Auto
+   rows used a mix of large uppercase and plain labels) */
+.morph-move .behaviour-row > .blbl,
+.morph-move .behaviour-row > .sub-lbl:first-child,
+.morph-move .sub-row > .sub-lbl:first-child {
+    font-size: 8px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    font-weight: normal;
+    min-width: 0;
+}
+
+.morph-move .sub-row > .sub-lbl:not(:first-child) {
+    font-size: 9px;
+    color: var(--text-muted);
+}
 
 /* Capture menu matches the rest of the UI */
 .morph-ctx .lane-add-menu-item {

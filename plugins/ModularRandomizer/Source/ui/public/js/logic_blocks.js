@@ -1929,7 +1929,7 @@ function renderMorphBody(b) {
     // Exact: standing on a snapshot gives exactly that snapshot. Soft: the original
     // blend, kept for patches made before Exact existed (they sound as they always did).
     var kern = b.morphKernel || 'blend';
-    h += '<div class="mv-grp morph-kernel"><span class="mv-lbl">Snapshots</span><div class="seg-inline" data-b="' + b.id + '" data-f="morphKernel">'
+    h += '<div class="mv-grp morph-kernel"><span class="mv-lbl">Blend</span><div class="seg-inline" data-b="' + b.id + '" data-f="morphKernel">'
        + '<button class="' + (kern === 'exact' ? 'on' : '') + '" data-v="exact" title="Standing on a snapshot gives exactly that snapshot">Exact</button>'
        + '<button class="' + (kern !== 'exact' ? 'on' : '') + '" data-v="blend" title="Every snapshot in reach always blends in (the original behaviour)">Soft</button></div></div>';
     h += '</div>';
