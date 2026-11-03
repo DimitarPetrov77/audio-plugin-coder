@@ -3926,3 +3926,84 @@ select.lane-morph-knob {
     font-family: var(--font-sans);
     font-size: 11px;
 }
+
+
+/* ── Morph Pad: Movement / Modifiers grid ─────────────────────────
+   Caption column + control column, one setting per row, everything on one left edge. */
+.morph-move,
+.morph-mods { display: block; padding: 10px 12px; }
+
+.mv-grid {
+    display: grid;
+    grid-template-columns: 56px minmax(0, 1fr);
+    column-gap: 10px;
+    row-gap: 9px;
+    align-items: center;
+    align-content: start;
+}
+
+.mv-grid > .mv-lbl {
+    font-size: 8px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.mv-ctl {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-width: 0;
+}
+
+.mv-full { grid-column: 1 / -1; }
+
+.mv-grid .knob-row {
+    display: flex;
+    gap: 14px;
+    padding: 0;
+    justify-content: flex-start;
+    align-items: flex-start;
+}
+
+.mv-grid .seg,
+.mv-grid .seg-inline {
+    display: inline-flex;
+    flex: 0 0 auto;
+    width: auto;
+}
+
+.mv-grid .seg button,
+.mv-grid .seg-inline button {
+    flex: 0 0 auto;
+    padding: 3px 9px;
+    white-space: nowrap;
+}
+
+.mv-grid .mv-shape { min-width: 150px; max-width: 190px; }
+
+/* One height and one typeface for every control in the grid */
+.mv-grid .seg button,
+.mv-grid .seg-inline button { font-size: 11px; height: 24px; line-height: 1; }
+.mv-grid .sub-sel,
+.mv-grid .sub-input {
+    font-family: var(--font-sans);
+    font-size: 11px;
+    height: 24px;
+    box-sizing: border-box;
+}
+.mv-grid .sub-input { width: 54px; }
+.mv-grid .tgl-lbl { font-size: 11px; color: var(--text-secondary); }
+
+/* Secondary captions inside a row (Ch, Threshold, dB) */
+.mv-sublbl {
+    font-size: 9px;
+    color: var(--text-muted);
+    margin-left: 6px;
+}
+
+/* Modifiers: knobs evenly spread across the panel width */
+.morph-mods .mv-full .knob-row { justify-content: space-between; padding: 0 4px; }
+.morph-lower > .block-section:last-child { flex: 0 0 236px; }

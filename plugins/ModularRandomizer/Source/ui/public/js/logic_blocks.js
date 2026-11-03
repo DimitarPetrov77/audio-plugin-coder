@@ -1818,121 +1818,87 @@ function renderMorphBody(b) {
 
     h += '</div></div>';   // workspace, block-section
 
-    // â”€â”€ 2. MOVEMENT â€” mode + explore/trigger + knobs + sync all in one inset box â”€â”€
+    // ── 2. MOVEMENT + 3. MODIFIERS ──
+    // Both panels are a two-column grid: captions in a fixed left column, controls on one
+    // shared left edge, one setting per row. (They were wrapping flex rows, so every
+    // control landed wherever the row happened to break.)
+    var row = function (lbl, ctl) { return '<span class="mv-lbl">' + lbl + '</span><div class="mv-ctl">' + ctl + '</div>'; };
+    var seg = function (field, opts, cur, inline) {
+        var s = '<div class="' + (inline ? 'seg-inline' : 'seg') + '" data-b="' + b.id + '" data-f="' + field + '">';
+        opts.forEach(function (o) { s += '<button class="' + (cur === o[0] ? 'on' : '') + '" data-v="' + o[0] + '"' + (o[2] ? ' title="' + o[2] + '"' : '') + '>' + o[1] + '</button>'; });
+        return s + '</div>';
+    };
+    var knob = function (val, min, max, field, label, unit, fmt) { return buildBlockKnob(val, min, max, 36, 'morph', field, b.id, label, unit, fmt); };
+    var speedKnob = function () { return knob(pctFromHz(b.morphHz), 0, 100, 'morphHzPct', 'Speed', 'Hz', function (p) { return fmtHz(hzFromPct(p)); }); };
+
     h += '<div class="morph-lower">';
     h += '<div class="block-section"><span class="block-section-label">Movement</span>';
-    h += '<div class="constraints-box morph-move">';
-    // Mode selector
-    h += '<div class="mv-grp"><span class="mv-lbl">Mode</span>';
-    h += '<div class="seg" data-b="' + b.id + '" data-f="morphMode">';
-    h += '<button class="' + (b.morphMode === 'manual' ? 'on' : '') + '" data-v="manual">Manual</button>';
-    h += '<button class="' + (b.morphMode === 'auto' ? 'on' : '') + '" data-v="auto">Auto</button>';
-    h += '<button class="' + (b.morphMode === 'trigger' ? 'on' : '') + '" data-v="trigger">Trigger</button>';
-    h += '</div></div>';
+    h += '<div class="constraints-box morph-move"><div class="mv-grid">';
+    h += row('Mode', seg('morphMode', [['manual', 'Manual'], ['auto', 'Auto'], ['trigger', 'Trigger']], b.morphMode));
 
-    // Auto sub-panel
     if (b.morphMode === 'auto') {
-        // Explore mode
-        h += '<div class="mv-grp"><span class="mv-lbl">Explore</span>';
-        h += '<div class="seg" data-b="' + b.id + '" data-f="exploreMode">';
-        h += '<button class="' + (b.exploreMode === 'wander' ? 'on' : '') + '" data-v="wander">Wander</button>';
-        h += '<button class="' + (b.exploreMode === 'bounce' ? 'on' : '') + '" data-v="bounce">Bounce</button>';
-        h += '<button class="' + (b.exploreMode === 'shapes' ? 'on' : '') + '" data-v="shapes">Shapes</button>';
-        h += '<button class="' + (b.exploreMode === 'orbit' ? 'on' : '') + '" data-v="orbit">Orbit</button>';
-        h += '<button class="' + (b.exploreMode === 'path' ? 'on' : '') + '" data-v="path">Path</button>';
-        h += '</div></div>';
-        // Shape selector (shapes explore only)
         var morphSynced = !!b.morphTempoSync;
         // Migrate legacy % speed → explicit Hz (unified Hz|Sync)
         if (b.morphHz == null) b.morphHz = 0.02 + Math.pow((b.morphSpeed != null ? b.morphSpeed : 50) / 100, 2) * 4.0;
+        h += row('Explore', seg('exploreMode', [['wander', 'Wander'], ['bounce', 'Bounce'], ['shapes', 'Shapes'], ['orbit', 'Orbit'], ['path', 'Path']], b.exploreMode));
         if (b.exploreMode === 'shapes') {
-            h += '<div class="mv-grp"><span class="mv-lbl">Shape</span>';
-            h += '<select class="sub-sel mv-shape" data-b="' + b.id + '" data-f="lfoShape">';
-            h += buildShapeOptions('lfoShape', b);
-            h += '</select></div>';
-            // LFO knobs: Size, Spin, Speed
-            var mKnobs = buildBlockKnob(b.lfoDepth != null ? b.lfoDepth : 80, 0, 100, 36, 'morph', 'lfoDepth', b.id, 'Size', '%') +
-                buildBlockKnob(b.lfoRotation || 0, -100, 100, 36, 'morph', 'lfoRotation', b.id, 'Spin', '\u00b1');
-            if (!morphSynced)
-                mKnobs += buildBlockKnob(pctFromHz(b.morphHz), 0, 100, 36, 'morph', 'morphHzPct', b.id, 'Speed', 'Hz', function (p) { return fmtHz(hzFromPct(p)); });
-            h += buildKnobRow(mKnobs);
+            h += row('Shape', '<select class="sub-sel mv-shape" data-b="' + b.id + '" data-f="lfoShape">' + buildShapeOptions('lfoShape', b) + '</select>');
+            h += row('Motion', '<div class="knob-row">'
+                + knob(b.lfoDepth != null ? b.lfoDepth : 80, 0, 100, 'lfoDepth', 'Size', '%')
+                + knob(b.lfoRotation || 0, -100, 100, 'lfoRotation', 'Spin', '\u00b1')
+                + (morphSynced ? '' : speedKnob()) + '</div>');
         } else if (!morphSynced) {
-            // Non-shapes explore modes: Speed knob on its own row
-            h += buildKnobRow(buildBlockKnob(pctFromHz(b.morphHz), 0, 100, 36, 'morph', 'morphHzPct', b.id, 'Speed', 'Hz', function (p) { return fmtHz(hzFromPct(p)); }));
+            h += row('Motion', '<div class="knob-row">' + speedKnob() + '</div>');
         }
-        // \u2500\u2500 Rate: Free (Speed knob above, in Hz) or Sync (musical measure) \u2500\u2500
-        h += '<div class="behaviour-row"><span class="sub-lbl">Rate</span><div class="tgl ' + (b.morphTempoSync ? 'on' : '') + '" data-b="' + b.id + '" data-f="morphTempoSync"></div><span class="tgl-lbl">Sync</span>';
-        if (b.morphTempoSync) {
-            h += renderBeatDivSelect(b.id, 'morphSyncDiv', b.morphSyncDiv, MORPH_DIVS);
-            h += '<div class="seg-inline" data-b="' + b.id + '" data-f="clockSource"><button class="' + ((b.clockSource || 'daw') === 'daw' ? 'on' : '') + '" data-v="daw">DAW</button><button class="' + (b.clockSource === 'internal' ? 'on' : '') + '" data-v="internal">Int</button></div>';
+        // Rate: free (Speed knob, in Hz) or synced to a musical division
+        var rate = '<div class="tgl ' + (morphSynced ? 'on' : '') + '" data-b="' + b.id + '" data-f="morphTempoSync"></div><span class="tgl-lbl">Sync</span>';
+        if (morphSynced) {
+            rate += renderBeatDivSelect(b.id, 'morphSyncDiv', b.morphSyncDiv, MORPH_DIVS);
+            rate += seg('clockSource', [['daw', 'DAW'], ['internal', 'Int']], b.clockSource || 'daw', true);
         }
-        h += '</div>';
+        h += row('Rate', rate);
     }
 
-    // Trigger sub-panel
     if (b.morphMode === 'trigger') {
-        h += '<div class="behaviour-row"><span class="blbl">Action</span><div class="seg-inline" data-b="' + b.id + '" data-f="morphAction">';
-        h += '<button class="' + (b.morphAction === 'jump' ? 'on' : '') + '" data-v="jump">Jump</button>';
-        h += '<button class="' + (b.morphAction === 'step' ? 'on' : '') + '" data-v="step">Step</button>';
-        h += '</div>';
-        if (b.morphAction === 'step') {
-            h += '<div class="seg-inline" data-b="' + b.id + '" data-f="stepOrder">';
-            h += '<button class="' + (b.stepOrder === 'cycle' ? 'on' : '') + '" data-v="cycle">Cycle</button>';
-            h += '<button class="' + (b.stepOrder === 'random' ? 'on' : '') + '" data-v="random">Rand</button>';
-            h += '</div>';
-        }
-        h += '</div>';
-        h += '<div class="behaviour-row"><span class="blbl">Source</span><div class="seg-inline" data-b="' + b.id + '" data-f="morphSource">';
-        h += '<button class="' + (b.morphSource === 'midi' ? 'on' : '') + '" data-v="midi">MIDI</button>';
-        h += '<button class="' + (b.morphSource === 'tempo' ? 'on' : '') + '" data-v="tempo">Tempo</button>';
-        h += '<button class="' + (b.morphSource === 'audio' ? 'on' : '') + '" data-v="audio">Audio</button>';
-        h += '</div></div>';
-        // Source sub-options
+        var act = seg('morphAction', [['jump', 'Jump'], ['step', 'Step']], b.morphAction);
+        if (b.morphAction === 'step') act += seg('stepOrder', [['cycle', 'Cycle'], ['random', 'Random']], b.stepOrder);
+        h += row('Action', act);
+        h += row('Source', seg('morphSource', [['midi', 'MIDI'], ['tempo', 'Tempo'], ['audio', 'Audio']], b.morphSource));
         if (b.morphSource === 'tempo') {
-            h += '<div class="sub-row">' + renderTrigRateRow(b, 'Rate') + '</div>';
+            // renderTrigRateRow brings its own caption; the grid supplies it here
+            h += row('Rate', renderTrigRateRow(b, 'Rate').replace(/^<span class="sub-lbl">[^<]*<\/span>/, ''));
         } else if (b.morphSource === 'midi') {
-            h += '<div class="sub-row"><span class="sub-lbl">Mode</span><select class="sub-sel" data-b="' + b.id + '" data-f="midiMode">';
-            h += '<option value="any_note"' + (b.midiMode === 'any_note' ? ' selected' : '') + '>Any Note</option>';
-            h += '<option value="specific_note"' + (b.midiMode === 'specific_note' ? ' selected' : '') + '>Note</option>';
-            h += '<option value="cc"' + (b.midiMode === 'cc' ? ' selected' : '') + '>CC</option></select>';
-            if (b.midiMode === 'specific_note') h += '<input class="sub-input" type="number" min="0" max="127" value="' + b.midiNote + '" data-b="' + b.id + '" data-f="midiNote">';
-            if (b.midiMode === 'cc') h += '<input class="sub-input" type="number" min="0" max="127" value="' + b.midiCC + '" data-b="' + b.id + '" data-f="midiCC">';
-            h += '<span class="sub-lbl">Ch</span><select class="sub-sel" data-b="' + b.id + '" data-f="midiCh"><option value="0"' + (b.midiCh == 0 ? ' selected' : '') + '>Any</option>';
-            for (var c = 1; c <= 16; c++)h += '<option value="' + c + '"' + (parseInt(b.midiCh) === c ? ' selected' : '') + '>' + c + '</option>';
-            h += '</select></div>';
+            var mi = '<select class="sub-sel" data-b="' + b.id + '" data-f="midiMode">'
+                + '<option value="any_note"' + (b.midiMode === 'any_note' ? ' selected' : '') + '>Any Note</option>'
+                + '<option value="specific_note"' + (b.midiMode === 'specific_note' ? ' selected' : '') + '>Note</option>'
+                + '<option value="cc"' + (b.midiMode === 'cc' ? ' selected' : '') + '>CC</option></select>';
+            if (b.midiMode === 'specific_note') mi += '<input class="sub-input" type="number" min="0" max="127" value="' + b.midiNote + '" data-b="' + b.id + '" data-f="midiNote">';
+            if (b.midiMode === 'cc') mi += '<input class="sub-input" type="number" min="0" max="127" value="' + b.midiCC + '" data-b="' + b.id + '" data-f="midiCC">';
+            mi += '<span class="mv-sublbl">Ch</span><select class="sub-sel" data-b="' + b.id + '" data-f="midiCh"><option value="0"' + (b.midiCh == 0 ? ' selected' : '') + '>Any</option>';
+            for (var c = 1; c <= 16; c++) mi += '<option value="' + c + '"' + (parseInt(b.midiCh) === c ? ' selected' : '') + '>' + c + '</option>';
+            mi += '</select>';
+            h += row('Input', mi);
         } else if (b.morphSource === 'audio') {
-            h += '<div class="sub-row"><span class="sub-lbl">Src</span><select class="sub-sel" data-b="' + b.id + '" data-f="audioSrc">';
-            h += '<option value="main"' + (b.audioSrc === 'main' ? ' selected' : '') + '>Main</option>';
-            h += '<option value="sidechain"' + (b.audioSrc === 'sidechain' ? ' selected' : '') + '>SC</option></select>';
-            h += '<span class="sub-lbl">Thr</span><input class="sub-input" type="number" min="-60" max="0" value="' + b.threshold + '" data-b="' + b.id + '" data-f="threshold"><span class="sub-lbl">dB</span></div>';
+            h += row('Input', '<select class="sub-sel" data-b="' + b.id + '" data-f="audioSrc">'
+                + '<option value="main"' + (b.audioSrc === 'main' ? ' selected' : '') + '>Main</option>'
+                + '<option value="sidechain"' + (b.audioSrc === 'sidechain' ? ' selected' : '') + '>SC</option></select>'
+                + '<span class="mv-sublbl">Threshold</span><input class="sub-input" type="number" min="-60" max="0" value="' + b.threshold + '" data-b="' + b.id + '" data-f="threshold"><span class="mv-sublbl">dB</span>');
         }
     }
-    h += '</div></div>';
+    h += '</div></div></div>';
 
-    // â”€â”€ 3. MODIFIERS â€” two columns: movement (jitter+glide) | snapshots (radius) â”€â”€
+    // Modifiers: the three knobs as one evenly spaced row, Blend beneath on the grid
+    var kern = b.morphKernel || 'blend';
     h += '<div class="block-section"><span class="block-section-label">Modifiers</span>';
-    h += '<div class="constraints-box"><div class="mod-columns">';
-    // Left: Movement modifiers
-    h += '<div class="mod-col">';
-    h += buildKnobRow(
-        buildBlockKnob(b.jitter, 0, 100, 36, 'morph', 'jitter', b.id, 'Jitter', '%') +
-        buildBlockKnob(b.morphGlide, 1, 2000, 36, 'morph', 'morphGlide', b.id, 'Glide', 'ms')
-    );
-    h += '</div>';
-    // Divider
-    h += '<div class="mod-divider"></div>';
-    // Right: Snapshot radius
-    h += '<div class="mod-col">';
-    h += buildKnobRow(
-        buildBlockKnob(b.snapRadius || 100, 5, 100, 36, 'morph', 'snapRadius', b.id, 'Radius', '%')
-    );
+    h += '<div class="constraints-box morph-mods"><div class="mv-grid">';
+    h += '<div class="mv-full"><div class="knob-row">'
+        + knob(b.jitter, 0, 100, 'jitter', 'Jitter', '%')
+        + knob(b.morphGlide, 1, 2000, 'morphGlide', 'Glide', 'ms')
+        + knob(b.snapRadius || 100, 5, 100, 'snapRadius', 'Radius', '%') + '</div></div>';
     // Exact: standing on a snapshot gives exactly that snapshot. Soft: the original
     // blend, kept for patches made before Exact existed (they sound as they always did).
-    var kern = b.morphKernel || 'blend';
-    h += '<div class="mv-grp morph-kernel"><span class="mv-lbl">Blend</span><div class="seg-inline" data-b="' + b.id + '" data-f="morphKernel">'
-       + '<button class="' + (kern === 'exact' ? 'on' : '') + '" data-v="exact" title="Standing on a snapshot gives exactly that snapshot">Exact</button>'
-       + '<button class="' + (kern !== 'exact' ? 'on' : '') + '" data-v="blend" title="Every snapshot in reach always blends in (the original behaviour)">Soft</button></div></div>';
-    h += '</div>';
+    h += row('Blend', seg('morphKernel', [['exact', 'Exact', 'Standing on a snapshot gives exactly that snapshot'],
+                                          ['blend', 'Soft', 'Every snapshot in reach always blends in (the original behaviour)']], kern === 'exact' ? 'exact' : 'blend'));
     h += '</div></div></div>';
     h += '</div>';   // morph-lower
 
@@ -2671,7 +2637,7 @@ function wireBlocks() {
             renderSingleBlock(bId); debouncedSync();
         }, { passive: false });
     });
-    document.querySelectorAll('.sub-input').forEach(function (inp) { if (!inp.dataset.b || inp.classList.contains('hz-input')) return; inp.onchange = function () { var b = findBlock(parseInt(inp.dataset.b)); if (b) { b[inp.dataset.f] = Math.max(0, Math.min(128, parseInt(inp.value) || 0)); syncBlocksToHost(); } }; });
+    document.querySelectorAll('.sub-input').forEach(function (inp) { if (!inp.dataset.b || inp.classList.contains('hz-input')) return; inp.onchange = function () { var b = findBlock(parseInt(inp.dataset.b)); if (b) { /* clamp to the input's own range: a fixed 0..128 made negative fields like the dB threshold impossible */ var lo = inp.min !== '' ? parseFloat(inp.min) : 0, hi = inp.max !== '' ? parseFloat(inp.max) : 128; b[inp.dataset.f] = Math.max(lo, Math.min(hi, parseInt(inp.value) || 0)); syncBlocksToHost(); } }; });
     // Hz rate inputs (float, 0.01–20 Hz) — unified Hz|Sync free mode
     document.querySelectorAll('.hz-input').forEach(function (inp) { if (!inp.dataset.b) return; inp.onchange = function () { var b = findBlock(parseInt(inp.dataset.b)); if (b) { b[inp.dataset.f] = Math.max(0.01, Math.min(20, parseFloat(inp.value) || 0.5)); renderSingleBlock(parseInt(inp.dataset.b)); syncBlocksToHost(); } }; });
     document.querySelectorAll('.fire').forEach(function (btn) { btn.onclick = function (e) { e.stopPropagation(); btn.classList.add('flash'); setTimeout(function () { btn.classList.remove('flash'); }, 250); var bId = parseInt(btn.dataset.b); var blk = findBlock(bId); if (blk) { var ov = []; blk.targets.forEach(function (pid) { var p = PMap[pid]; if (p && !p.lk && !p.alk) ov.push({ id: pid, val: p.v }); }); randomize(bId); if (ov.length) pushMultiParamUndo(ov); } flashDot('midiD'); }; });
