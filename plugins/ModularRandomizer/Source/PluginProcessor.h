@@ -452,6 +452,30 @@ public:
     double getEqModGainPhase() const { return eqIntModGainPhaseOut.load (std::memory_order_relaxed); }
     double getEqModDriftTime() const { return eqIntModDriftTimeOut.load (std::memory_order_relaxed); }
 
+    /** Timing of audio-thread work, accumulated by the audio thread and read (and reset)
+        by the editor for its performance readout. Lock-free, a few ns per block. */
+    struct PerfAccumulator
+    {
+        std::atomic<int64_t> sumNs { 0 }, maxNs { 0 }, count { 0 };
+        void add (int64_t ns) noexcept
+        {
+            sumNs.fetch_add (ns, std::memory_order_relaxed);
+            count.fetch_add (1, std::memory_order_relaxed);
+            if (ns > maxNs.load (std::memory_order_relaxed)) maxNs.store (ns, std::memory_order_relaxed);
+        }
+    };
+    struct PerfScope
+    {
+        explicit PerfScope (PerfAccumulator& a) noexcept : acc (a) {}
+        ~PerfScope() { acc.add ((int64_t) (juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - t0) * 1.0e9)); }
+        PerfAccumulator& acc;
+        const juce::int64 t0 = juce::Time::getHighResolutionTicks();
+    };
+    PerfAccumulator perfAudio;          // whole processBlock
+    PerfAccumulator perfLogic;          // logic blocks + modulation bus
+    PerfAccumulator perfBlockUpdate;    // updateLogicBlocks (message thread, holds blockMutex)
+    std::atomic<int> perfLockMisses { 0 };   // blocks where the logic engine couldn't get blockMutex
+
     /** WrongEQ fast path: update a single field on one EQ point (no JSON, no alloc).
         field: "freq", "gain", "q", "solo", "mute", "type", "slope", "drift", "stereo" */
     void setEqPointFast (int pointIndex, const juce::String& field, double value);
@@ -1457,6 +1481,8 @@ private:
         juce::String morphSyncDiv;
         float morphSyncDivBeats = 1.0f;  // pre-computed
         float snapRadius = 1.0f;
+        bool  morphExact = false;   // "exact": standing on a snapshot gives exactly that snapshot
+        bool  morphTeleport = false; // one-shot: put the smoothed playhead on playheadX/Y without applying
 
         // Morph runtime state (audio thread only, preserved across updateLogicBlocks)
         float morphVelX = 0.0f, morphVelY = 0.0f;
@@ -1629,7 +1655,7 @@ private:
     // Pre-allocated flat arrays — ZERO heap allocations on audio thread
     // ══════════════════════════════════════════════════════════════
     static constexpr int kMaxPlugins = 32;
-    static constexpr int kMaxParams  = 1024;
+    static constexpr int kMaxParams  = 8192;   // per plugin; Pigments alone exposes ~2.3k
 
     // O(1) plugin lookup by slot — avoids linear scan of hostedPlugins
     // Updated by rebuildPluginSlots() whenever plugins are added/removed
@@ -1663,9 +1689,15 @@ private:
     // ── Dirty-list: tracks which modbus cells were written this buffer ──
     // Avoids scanning all 32K cells in clearModBus / resolveModBus.
     struct DirtyEntry { int16_t slot; int16_t param; };
-    static constexpr int kMaxDirtyEntries = 512;  // way more than ever needed
+    // One entry per cell at most, so this can never overflow. (It was 512: with more
+    // targets than that, the extra cells were marked written but never listed, so they
+    // were never applied or cleared and stayed stuck for the session.)
+    static constexpr int kMaxDirtyEntries = kMaxPlugins * kMaxParams;
     DirtyEntry dirtyList[kMaxDirtyEntries];
     int numDirty = 0;
+    // Control rate for modulation writes (see resolveModBus): blocks per write, ~10 ms
+    int ctlDiv = 1;
+    uint32_t ctlPhase = 0;
     DirtyEntry prevDirtyList[kMaxDirtyEntries]; // last buffer's dirty cells (for base release)
     int numPrevDirty = 0;
     // WrongEQ dirty list (separate, small)
@@ -1814,6 +1846,19 @@ private:
             }
 
             float final_ = juce::jlimit (0.0f, 1.0f, base + acc.offset);
+            // What costs is the hosted plugin reacting to each change (~1.5 us per param
+            // in Pigments), not this loop. So:
+            //  - skip a write when the value is what we wrote last time and nothing else
+            //    has moved the param since;
+            //  - control rate: continuous moves go out about every 10 ms, staggered
+            //    across blocks, so small buffers don't multiply the plugin's work. Jumps
+            //    (randomize, snapshot changes) still go out at once.
+            const float delta = std::abs (final_ - paramModWritten[s][p]);
+            if (delta < 1.0e-6f && std::abs (getParamValue (pid, p) - final_) < 1.0e-6f)
+                continue;
+            if (ctlDiv > 1 && delta < 0.05f && paramModWritten[s][p] > -0.5f
+                && ((uint32_t) (s * 131 + p) + ctlPhase) % (uint32_t) ctlDiv != 0)
+                continue;
             setParamDirect (pid, p, final_);
             paramWritten[s][p] = final_;
             paramModWritten[s][p] = final_;
@@ -2154,6 +2199,8 @@ public:
         std::atomic<float> headY      { 0.5f };
         std::atomic<float> rotAngle   { 0.0f };
         std::atomic<float> modOutput  { 0.0f };  // raw shapes output -1..+1 for fill arc
+        std::atomic<float> weights[12] {};       // morph pad: each snapshot's share of the mix
+        std::atomic<int>   numWeights { 0 };
     };
     MorphReadback morphReadback[maxMorphReadback];
     std::atomic<int> numActiveMorphBlocks { 0 };

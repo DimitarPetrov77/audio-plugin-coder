@@ -360,7 +360,7 @@ function _paintParamRows(pid, val, dispText, renderKnob) {
         if (renderKnob) {
             var k = r.querySelector('.pr-knob');
             if (k && typeof buildParamKnob === 'function') {
-                k.innerHTML = buildParamKnob(val, 30, null);
+                setParamKnob(k, val, 30, null);
                 k._knobKey = null; // invalidate realtime's cache so it re-syncs after the drag
             }
             var bf = r.querySelector('.pr-bar-f');
@@ -516,31 +516,28 @@ function scrollVirtualToParam(pid) {
 // rangeInfo: { range, color, polarity, base, current? }
 // When current is provided: dot at base, live fill from base→current, faint range band
 // When current is absent: dot at val, static range band only
-function buildParamKnob(val, size, rangeInfo) {
+// Knob geometry, shared by the HTML builder (first render) and setParamKnob (live updates)
+function paramKnobGeom(val, size, rangeInfo) {
     var r = size / 2, cx = r, cy = r;
     var ir = r - 3; // inner radius for arc
     var startAngle = 135 * Math.PI / 180; // 7 o'clock
     var endAngle = 405 * Math.PI / 180;   // 5 o'clock
     var span = endAngle - startAngle;      // 270°
-    // Background track arc
-    var tPath = describeArc(cx, cy, ir, startAngle, endAngle);
+    var g = { size: size, track: describeArc(cx, cy, ir, startAngle, endAngle), value: '', band: '', bandEdge: '',
+              fill: '', fillEdge: '', tick: null, col: '' };
     // Determine knob dot position: base if modulating live, else val
     var dotVal = (rangeInfo && rangeInfo.current !== undefined && rangeInfo.base !== undefined) ? rangeInfo.base : val;
     var va = startAngle + dotVal * span;
-    // Value arc (white): from min to dot position
-    var vPath = dotVal > 0.005 ? describeArc(cx, cy, ir, startAngle, va) : '';
-    // Indicator dot position
-    var dx = cx + ir * Math.cos(va), dy = cy + ir * Math.sin(va);
-    var svg = '<svg width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '">';
-    svg += '<path d="' + tPath + '" fill="none" stroke="var(--knob-track)" stroke-width="2.5" stroke-linecap="round"/>';
-    if (vPath) svg += '<path d="' + vPath + '" fill="none" stroke="var(--knob-value)" stroke-width="2.5" stroke-linecap="round"/>';
-    // Modulation arc rendering
+    // Value arc: from min to dot position
+    if (dotVal > 0.005) g.value = describeArc(cx, cy, ir, startAngle, va);
+    g.dot = { x: (cx + ir * Math.cos(va)).toFixed(1), y: (cy + ir * Math.sin(va)).toFixed(1) };
+    // Modulation arc
     if (rangeInfo && Math.abs(rangeInfo.range) > 0.001) {
         var rng = rangeInfo.range;
         var absRng = Math.abs(rng);
         var base = rangeInfo.base !== undefined ? rangeInfo.base : val;
         var pol = rangeInfo.polarity || 'bipolar';
-        var arcCol = rangeInfo.color || 'var(--range-arc, #ff8c42)';
+        g.col = rangeInfo.color || 'var(--range-arc, #ff8c42)';
         var rInner = ir - 0.5;
         var rOuter = ir + 3;
         // 1) Static range band (faint) — shows where modulation CAN go
@@ -561,43 +558,85 @@ function buildParamKnob(val, size, rangeInfo) {
         var raStart = startAngle + rStart * span;
         var raEnd = startAngle + rEnd * span;
         if (raEnd > raStart + 0.01) {
-            var bandPath = describeArcBand(cx, cy, rInner, rOuter, raStart, raEnd);
-            svg += '<path d="' + bandPath + '" fill="' + arcCol + '" opacity="0.15"/>';
-            var outerArc = describeArc(cx, cy, rOuter, raStart, raEnd);
-            svg += '<path d="' + outerArc + '" fill="none" stroke="' + arcCol + '" stroke-width="0.5" stroke-linecap="round" opacity="0.4"/>';
+            g.band = describeArcBand(cx, cy, rInner, rOuter, raStart, raEnd);
+            g.bandEdge = describeArc(cx, cy, rOuter, raStart, raEnd);
         }
-        // 2) Dynamic fill arc (bright) — shows where modulation IS right now
-        // Fills from base to current modulated position
+        // 2) Dynamic fill arc (bright) — from base to the current modulated position
         if (rangeInfo.current !== undefined) {
             var cur = Math.max(0, Math.min(1, rangeInfo.current));
-            var fStart, fEnd;
-            if (cur >= base) {
-                fStart = base;
-                fEnd = cur;
-            } else {
-                fStart = cur;
-                fEnd = base;
-            }
+            var fStart = Math.min(cur, base), fEnd = Math.max(cur, base);
             var faStart = startAngle + fStart * span;
             var faEnd = startAngle + fEnd * span;
             if (faEnd > faStart + 0.005) {
-                var fillPath = describeArcBand(cx, cy, rInner, rOuter, faStart, faEnd);
-                svg += '<path d="' + fillPath + '" fill="' + arcCol + '" opacity="0.55"/>';
-                var fillEdge = describeArc(cx, cy, rOuter, faStart, faEnd);
-                svg += '<path d="' + fillEdge + '" fill="none" stroke="' + arcCol + '" stroke-width="1" stroke-linecap="round" opacity="0.9"/>';
+                g.fill = describeArcBand(cx, cy, rInner, rOuter, faStart, faEnd);
+                g.fillEdge = describeArc(cx, cy, rOuter, faStart, faEnd);
             }
         }
         // 3) Base marker tick
         var baseAngle = startAngle + base * span;
-        var bx1 = cx + (ir - 2) * Math.cos(baseAngle);
-        var by1 = cy + (ir - 2) * Math.sin(baseAngle);
-        var bx2 = cx + (rOuter + 1) * Math.cos(baseAngle);
-        var by2 = cy + (rOuter + 1) * Math.sin(baseAngle);
-        svg += '<line x1="' + bx1.toFixed(1) + '" y1="' + by1.toFixed(1) + '" x2="' + bx2.toFixed(1) + '" y2="' + by2.toFixed(1) + '" stroke="' + arcCol + '" stroke-width="1.2" opacity="0.7"/>';
+        g.tick = { x1: (cx + (ir - 2) * Math.cos(baseAngle)).toFixed(1), y1: (cy + (ir - 2) * Math.sin(baseAngle)).toFixed(1),
+                   x2: (cx + (rOuter + 1) * Math.cos(baseAngle)).toFixed(1), y2: (cy + (rOuter + 1) * Math.sin(baseAngle)).toFixed(1) };
     }
-    svg += '<circle cx="' + dx.toFixed(1) + '" cy="' + dy.toFixed(1) + '" r="2.5" fill="var(--knob-dot)"/>';
+    return g;
+}
+function buildParamKnob(val, size, rangeInfo) {
+    var g = paramKnobGeom(val, size, rangeInfo);
+    var svg = '<svg width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '">';
+    svg += '<path d="' + g.track + '" fill="none" stroke="var(--knob-track)" stroke-width="2.5" stroke-linecap="round"/>';
+    if (g.value) svg += '<path d="' + g.value + '" fill="none" stroke="var(--knob-value)" stroke-width="2.5" stroke-linecap="round"/>';
+    if (g.band) {
+        svg += '<path d="' + g.band + '" fill="' + g.col + '" opacity="0.15"/>';
+        svg += '<path d="' + g.bandEdge + '" fill="none" stroke="' + g.col + '" stroke-width="0.5" stroke-linecap="round" opacity="0.4"/>';
+    }
+    if (g.fill) {
+        svg += '<path d="' + g.fill + '" fill="' + g.col + '" opacity="0.55"/>';
+        svg += '<path d="' + g.fillEdge + '" fill="none" stroke="' + g.col + '" stroke-width="1" stroke-linecap="round" opacity="0.9"/>';
+    }
+    if (g.tick) svg += '<line x1="' + g.tick.x1 + '" y1="' + g.tick.y1 + '" x2="' + g.tick.x2 + '" y2="' + g.tick.y2 + '" stroke="' + g.col + '" stroke-width="1.2" opacity="0.7"/>';
+    svg += '<circle cx="' + g.dot.x + '" cy="' + g.dot.y + '" r="2.5" fill="var(--knob-dot)"/>';
     svg += '</svg>';
     return svg;
+}
+// Update a knob in place: one fixed set of SVG elements per knob, only attributes change.
+// Rebuilding it with innerHTML for every modulated knob on every frame (~600 times a
+// second with a few blocks running) kept the browser re-parsing and re-painting.
+function setParamKnob(el, val, size, rangeInfo) {
+    if (!el) return;
+    var g = paramKnobGeom(val, size, rangeInfo);
+    var k = el._knob;
+    if (!k || k.size !== size || k.svg.parentNode !== el) {
+        el.innerHTML = '<svg width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '">'
+            + '<path fill="none" stroke="var(--knob-track)" stroke-width="2.5" stroke-linecap="round"/>'
+            + '<path fill="none" stroke="var(--knob-value)" stroke-width="2.5" stroke-linecap="round"/>'
+            + '<path opacity="0.15"/>'
+            + '<path fill="none" stroke-width="0.5" stroke-linecap="round" opacity="0.4"/>'
+            + '<path opacity="0.55"/>'
+            + '<path fill="none" stroke-width="1" stroke-linecap="round" opacity="0.9"/>'
+            + '<line stroke-width="1.2" opacity="0.7"/>'
+            + '<circle r="2.5" fill="var(--knob-dot)"/></svg>';
+        var svg = el.firstChild, c = svg.children;
+        k = el._knob = { size: size, svg: svg, track: c[0], value: c[1], band: c[2], bandEdge: c[3], fill: c[4], fillEdge: c[5], tick: c[6], dot: c[7], col: null };
+        k.track.setAttribute('d', g.track);
+    }
+    var setD = function (node, d) {
+        if (node._d === d) return;
+        node._d = d;
+        if (d) { node.setAttribute('d', d); node.style.display = ''; } else node.style.display = 'none';
+    };
+    setD(k.value, g.value);
+    setD(k.band, g.band); setD(k.bandEdge, g.bandEdge);
+    setD(k.fill, g.fill); setD(k.fillEdge, g.fillEdge);
+    if (g.col !== k.col) {
+        k.col = g.col;
+        k.band.setAttribute('fill', g.col); k.fill.setAttribute('fill', g.col);
+        k.bandEdge.setAttribute('stroke', g.col); k.fillEdge.setAttribute('stroke', g.col); k.tick.setAttribute('stroke', g.col);
+    }
+    if (g.tick) {
+        k.tick.setAttribute('x1', g.tick.x1); k.tick.setAttribute('y1', g.tick.y1);
+        k.tick.setAttribute('x2', g.tick.x2); k.tick.setAttribute('y2', g.tick.y2);
+        k.tick.style.display = '';
+    } else k.tick.style.display = 'none';
+    k.dot.setAttribute('cx', g.dot.x); k.dot.setAttribute('cy', g.dot.y);
 }
 // Filled arc band between two radii (annular sector)
 function describeArcBand(cx, cy, rInner, rOuter, start, end) {
@@ -1671,7 +1710,7 @@ pse.addEventListener('contextmenu', function (e) {
                     }
                     srBlk.targetRanges[pid] = newRange;
                     var ri2 = { range: newRange, base: baseVal, color: aCol, polarity: srBlk.shapePolarity || 'bipolar' };
-                    knob.innerHTML = buildParamKnob(p.v, 30, ri2);
+                    setParamKnob(knob, p.v, 30, ri2);
                 }
                 function onUpRange() {
                     document.removeEventListener('mousemove', onMoveRange);
@@ -1817,7 +1856,7 @@ pse.addEventListener('contextmenu', function (e) {
             if (_sri) _sri.current = p.v;
         }
         var knobVal = (_sri && _sri.current !== undefined && _sri.base !== undefined) ? _sri.base : newVal;
-        knob.innerHTML = buildParamKnob(knobVal, 30, _sri);
+        setParamKnob(knob, knobVal, 30, _sri);
         var row = knob.closest('.pr');
         if (row) {
             var ve = row.querySelector('.pr-val');
@@ -1862,7 +1901,7 @@ pse.addEventListener('contextmenu', function (e) {
         }
         pushParamUndo(pid, oldVal);
         // Update visuals
-        knob.innerHTML = buildParamKnob(defaultVal, 30, null);
+        setParamKnob(knob, defaultVal, 30, null);
         var row = knob.closest('.pr');
         if (row) {
             var ve = row.querySelector('.pr-val');

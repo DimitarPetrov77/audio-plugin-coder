@@ -122,58 +122,114 @@ function morphPruneSnapValues(values, targetSet) {
 }
 
 // ── Morph Pad snapshot capture ────────────────────────────────────────────────────
-// Mirrors the Morph Lane's capture (lane_module.js _morphDoCapture) so the two blocks
-// behave the same way. `src` is 'assigned' (capture the block's existing targets) or a
-// pluginId (adopt that plugin's params as targets and capture them).
-//
-// The old implementation swept every entry in PMap — locked params included — stored the
-// whole rack in every snapshot, assigned nothing, and labelled the snapshot with whatever
-// plugin happened to come first in iteration order.
+// A snapshot is a whole state: "I have this sound, I want to get to that one". Capture
+// takes every unlocked param of every plugin (or of one plugin, or only the assigned
+// ones, from the ▾ menu) and assigns them. That stays cheap: the engine only writes a
+// param when its mixed value actually changes, so params that are the same in every
+// snapshot cost nothing while you move.
+// Values are read fresh from the plugins first: the UI only polls params that are on
+// screen, so a knob turned in a plugin's own window could otherwise be captured stale.
+function morphSourcePlugins(b, src) {
+    var ids = [];
+    if (typeof pluginBlocks === 'undefined') return ids;
+    var want = (src === 'all' || src === 'assigned') ? null : parseInt(src);
+    pluginBlocks.forEach(function (pb) {
+        if (pb.isVirtual || pb.missing) return;
+        if (want != null && pb.id !== want) return;
+        ids.push(pb.hostId !== undefined ? pb.hostId : pb.id);
+    });
+    return ids;
+}
+
+// Refresh PMap values (and display text) for these plugins from the engine
+function morphFetchFresh(hostIds) {
+    var fn = window.__juceGetNativeFunction ? window.__juceGetNativeFunction('getParams') : null;
+    if (!fn || !hostIds.length) return Promise.resolve();
+    return Promise.all(hostIds.map(function (hid) {
+        return Promise.resolve(fn(hid)).then(function (arr) {
+            (arr || []).forEach(function (x) {
+                var p = PMap[hid + ':' + x.index];
+                if (p) { p.v = x.value; if (x.disp) p.disp = x.disp; }
+            });
+        }, function () {});
+    }));
+}
+
+// Plugins whose params a capture reads: the source(s) plus every current target's
+function morphCapturePlugins(b, src) {
+    var ids = src === 'assigned' ? [] : morphSourcePlugins(b, src);
+    b.targets.forEach(function (pid) {
+        var p = PMap[pid];
+        if (p && p.hostId !== undefined && ids.indexOf(p.hostId) < 0) ids.push(p.hostId);
+    });
+    return ids;
+}
+
+// Spot on the ring for a new snapshot: the middle of the widest empty arc, so they
+// spread out (top, bottom, sides, ...) instead of crowding one corner. Existing
+// snapshots never move.
+function morphNewSnapPos(b) {
+    var R = 0.35, snaps = b.snapshots || [];
+    if (!snaps.length) return { x: 0.5, y: 0.5 + R };
+    var angs = snaps.map(function (s) { return Math.atan2(s.y - 0.5, s.x - 0.5); }).sort(function (a, c) { return a - c; });
+    var best = 0, bestGap = -1;
+    for (var i = 0; i < angs.length; i++) {
+        var a0 = angs[i], a1 = (i + 1 < angs.length) ? angs[i + 1] : angs[0] + 2 * Math.PI;
+        if (a1 - a0 > bestGap) { bestGap = a1 - a0; best = a0 + (a1 - a0) / 2; }
+    }
+    return { x: 0.5 + R * Math.cos(best), y: 0.5 + R * Math.sin(best) };
+}
+
 function morphCapture(b, src) {
-    if (!b || b.mode !== 'morph_pad') return false;
+    if (!b || b.mode !== 'morph_pad') return Promise.resolve(false);
     if (!b.snapshots) b.snapshots = [];
     if (b.snapshots.length >= 12) {
         if (typeof showToast === 'function') showToast('Max 12 snapshots', 'info', 1600);
-        return false;
+        return Promise.resolve(false);
     }
+    if (!src) src = 'all';
+    if (b._capturing) return Promise.resolve(false);
+    b._capturing = true;
+    return morphFetchFresh(morphCapturePlugins(b, src)).then(function () {
+        b._capturing = false;
+        return morphCaptureNow(b, src);
+    }, function () { b._capturing = false; return false; });
+}
+
+function morphCaptureNow(b, src) {
     pushUndoSnapshot();
-
-    var vals = {}, label = '', added = 0;
-    var hasTargets = b.targets && b.targets.size > 0;
-
-    if (src === 'assigned' && hasTargets) {
-        b.targets.forEach(function (pid) {
-            var p = PMap[pid];
-            if (p && !p.lk) vals[pid] = p.v;
-        });
-        label = 'assigned';
-    } else {
-        // Adopt a plugin's params as targets and capture them in one action — the same
-        // "capture implies assign" behaviour that makes the Lane straightforward.
-        var srcId = (src === 'assigned' || src === 'all') ? null : parseInt(src);
-        if (typeof pluginBlocks !== 'undefined') {
-            pluginBlocks.forEach(function (pb) {
-                if (srcId != null && pb.id !== srcId) return;
-                (pb.params || []).forEach(function (p) {
-                    if (p.lk || p.alk) return;
-                    vals[p.id] = p.v;
-                    if (!b.targets.has(p.id)) { assignTarget(b, p.id); added++; }
-                });
-                if (!label) label = pb.name || '';
+    var added = 0, label = '';
+    if (src !== 'assigned') {
+        // Everything (all plugins, or one): assign whatever isn't yet. assignTarget seeds
+        // earlier snapshots with the param's current value.
+        var ids = morphSourcePlugins(b, src);
+        pluginBlocks.forEach(function (pb) {
+            if (ids.indexOf(pb.hostId !== undefined ? pb.hostId : pb.id) < 0) return;
+            (pb.params || []).forEach(function (p) {
+                if (p.lk || p.alk || b.targets.has(p.id)) return;
+                assignTarget(b, p.id); added++;
             });
-        }
-        if (srcId == null) label = 'all';
+            if (!label) label = pb.name || '';
+        });
+        if (ids.length !== 1) label = 'all';
+    } else {
+        label = 'assigned';
     }
 
+    var vals = {};
+    b.targets.forEach(function (pid) {
+        var p = PMap[pid];
+        if (p && !p.lk) vals[pid] = p.v;
+    });
     if (Object.keys(vals).length === 0) {
         undoStack.pop();          // nothing captured — don't leave a no-op undo entry
         updateUndoBadge();
         if (typeof showToast === 'function')
-            showToast('Nothing to capture — assign parameters first, or pick a plugin', 'info', 2600);
+            showToast('Nothing to capture \u2014 load a plugin first', 'info', 2600);
         return false;
     }
 
-    var spos = getSnapSectorPos(b.snapshots.length);
+    var spos = morphNewSnapPos(b);
     b.snapshots.push({
         x: spos.x, y: spos.y, values: vals,
         name: 'S' + (b.snapshots.length + 1),
@@ -181,6 +237,9 @@ function morphCapture(b, src) {
         weight: 100, curve: 0, depth: 100
     });
     b._selectedSnap = b.snapshots.length - 1;
+    // Standing on the new snapshot keeps what you hear = what you just captured. The
+    // engine jumps there instead of gliding (see updateLogicBlocks: teleport).
+    if (b.morphMode === 'manual') { b.playheadX = spos.x; b.playheadY = spos.y; b._teleport = true; }
 
     renderSingleBlock(b.id);
     if (added && typeof renderAllPlugins === 'function') renderAllPlugins();
@@ -190,8 +249,7 @@ function morphCapture(b, src) {
     if (pad) { pad.classList.remove('snap-flash'); void pad.offsetWidth; pad.classList.add('snap-flash'); }
     if (typeof showToast === 'function') {
         var n = Object.keys(vals).length;
-        showToast('Captured ' + n + ' param' + (n === 1 ? '' : 's')
-                  + (added ? ' (' + added + ' newly assigned)' : ''), 'success', 2200);
+        showToast('Captured ' + n + ' param' + (n === 1 ? '' : 's') + (added ? ' (' + added + ' newly assigned)' : ''), 'success', 2200);
     }
     return true;
 }
@@ -199,17 +257,81 @@ function morphCapture(b, src) {
 // Re-capture into an existing snapshot, keeping its pad position, name and order.
 function morphUpdateSnapshot(b, si) {
     if (!b || !b.snapshots || !b.snapshots[si]) return;
-    var s = b.snapshots[si];
-    pushUndoSnapshot();
-    var n = 0;
-    b.targets.forEach(function (pid) {
-        var p = PMap[pid];
-        if (p && !p.lk) { s.values[pid] = p.v; n++; }
+    morphFetchFresh(morphCapturePlugins(b, 'assigned')).then(function () {
+        var s = b.snapshots[si];
+        if (!s) return;
+        pushUndoSnapshot();
+        var n = 0;
+        b.targets.forEach(function (pid) {
+            var p = PMap[pid];
+            if (p && !p.lk) { s.values[pid] = p.v; n++; }
+        });
+        renderSingleBlock(b.id);
+        syncBlocksToHost();
+        if (typeof showToast === 'function')
+            showToast('Updated "' + (s.name || ('S' + (si + 1))) + '" from current values (' + n + ')', 'success', 2200);
     });
-    renderSingleBlock(b.id);
-    syncBlocksToHost();
-    if (typeof showToast === 'function')
-        showToast('Updated "' + (s.name || ('S' + (si + 1))) + '" from current values (' + n + ')', 'success', 2200);
+}
+
+// What sets each snapshot apart: its params furthest from the snapshots' average.
+// Returns, per snapshot, [{ pid, d }] sorted by |d| (d = value - average).
+function morphSnapDiffs(b) {
+    var snaps = b.snapshots || [], n = snaps.length;
+    if (n < 2) return snaps.map(function () { return []; });
+    var mean = {};
+    b.targets.forEach(function (pid) {
+        var s = 0, c = 0;
+        for (var i = 0; i < n; i++) {
+            var v = snaps[i].values ? snaps[i].values[pid] : undefined;
+            if (v !== undefined) { s += v; c++; }
+        }
+        if (c) mean[pid] = s / c;
+    });
+    return snaps.map(function (sn) {
+        var list = [];
+        for (var pid in mean) {
+            var v = sn.values ? sn.values[pid] : undefined;
+            if (v === undefined) continue;
+            var d = v - mean[pid];
+            if (Math.abs(d) > 0.02) list.push({ pid: pid, d: d });
+        }
+        list.sort(function (a, c) { return Math.abs(c.d) - Math.abs(a.d); });
+        return list;
+    });
+}
+function morphDiffLabel(item) {
+    var p = PMap[item.pid];
+    return (p ? p.name : item.pid) + (item.d > 0 ? ' \u2191' : ' \u2193');
+}
+
+// Snapshot colours: one per slot, used on the pad and in the list
+var MORPH_SNAP_COLORS = ['#6FA8DC', '#E69138', '#6AA84F', '#C27BA0', '#45B5AA', '#F1C232',
+                         '#8E7CC3', '#E06666', '#76A5AF', '#B6A15C', '#A4C2F4', '#D5A6BD'];
+function morphSnapColor(i) { return MORPH_SNAP_COLORS[i % MORPH_SNAP_COLORS.length]; }
+
+// Light each snapshot (dot + list row) by its share of the current mix, as sent by the
+// engine. Only touches the DOM when a share changes noticeably.
+function morphShowMix(b, w) {
+    if (!b._mixW) b._mixW = [];
+    var changed = false;
+    for (var i = 0; i < w.length; i++) {
+        if (Math.abs((b._mixW[i] || 0) - w[i]) > 0.01) { changed = true; break; }
+    }
+    if (!changed && b._mixW.length === w.length) return;
+    b._mixW = w.slice();
+    var pad = document.querySelector('.morph-pad[data-b="' + b.id + '"]:not(.shapes-pad)');
+    var list = document.querySelector('.morph-snap-list[data-b="' + b.id + '"]');
+    for (var si = 0; si < w.length; si++) {
+        var m = w[si].toFixed(2);
+        var d = pad && pad.querySelector('.snap-dot[data-si="' + si + '"]');
+        if (d) d.style.setProperty('--mix', m);
+        var r = list && list.querySelector('.morph-snap-row[data-si="' + si + '"]');
+        if (r) {
+            r.style.setProperty('--mix', m);
+            var pctEl = r.querySelector('.morph-snap-mix');
+            if (pctEl) pctEl.textContent = w[si] >= 0.005 ? Math.round(w[si] * 100) + '%' : '';
+        }
+    }
 }
 
 // Apply a snapshot's stored values to the hosted plugins so you can HEAR it.
@@ -217,6 +339,15 @@ function morphAuditionSnapshot(b, si) {
     if (!b || !b.snapshots || !b.snapshots[si]) return;
     var s = b.snapshots[si];
     if (!s.values) return;
+    if (b.morphMode === 'manual') {
+        // The pad IS the sound in manual mode: move the playhead there instead of
+        // writing values the next nudge of the playhead would undo
+        b._selectedSnap = si;
+        b.playheadX = s.x; b.playheadY = s.y;
+        renderSingleBlock(b.id);
+        syncBlocksToHost();
+        return;
+    }
     var fn = window.__juceGetNativeFunction ? window.__juceGetNativeFunction('setParam') : null;
     var n = 0;
     for (var pid in s.values) {
@@ -364,7 +495,7 @@ function addBlock(mode) {
     if (!mode) mode = 'randomize'; var id = ++bc;
     var blk = {
         id: id, mode: mode, enabled: true, targets: new Set(), targetBases: {}, targetRanges: {}, targetRangeBases: {}, targetDepths: {}, targetCurves: {}, colorIdx: bc - 1, trigger: 'manual', beatDiv: '1/4', trigFree: false, trigHz: 1, midiMode: 'any_note', midiNote: 60, midiCC: 1, midiCh: 0, velScale: false, threshold: -12, audioSrc: 'main', rMin: 0, rMax: 100, rangeMode: 'relative', polarity: 'bipolar', quantize: false, qSteps: 12, movement: 'instant', glideMs: 200, envAtk: 10, envRel: 100, envSens: 50, envInvert: false, envFilterMode: 'flat', envFilterFreq: 50, envFilterBW: 5, loopMode: 'loop', sampleSpeed: 1.0, sampleReverse: false, jumpMode: 'restart', sampleName: '', sampleWaveform: null, expanded: true, clockSource: 'daw',
-        snapshots: [], playheadX: 0.5, playheadY: 0.5, morphMode: 'manual', exploreMode: 'wander', lfoShape: 'circle', lfoDepth: 80, lfoRotation: 0, morphSpeed: 50, morphHz: 0.5, morphAction: 'jump', stepOrder: 'cycle', morphSource: 'midi', jitter: 0, morphGlide: 200, morphTempoSync: false, morphSyncDiv: '1/4', snapRadius: 100,
+        snapshots: [], playheadX: 0.5, playheadY: 0.5, morphMode: 'manual', exploreMode: 'wander', lfoShape: 'circle', lfoDepth: 80, lfoRotation: 0, morphSpeed: 50, morphHz: 0.5, morphAction: 'jump', stepOrder: 'cycle', morphSource: 'midi', jitter: 0, morphGlide: 200, morphTempoSync: false, morphSyncDiv: '1/4', snapRadius: 100, morphKernel: 'exact',
         shapeType: 'circle', shapeTracking: 'horizontal', shapeSize: 80, shapeSpin: 0, shapeSpeed: 50, shapeHz: 0.5, shapePhaseOffset: 0, shapeRange: 'relative', shapePolarity: 'bipolar', shapeTempoSync: false, shapeSyncDiv: '1/4', shapeTrigger: 'free',
         laneTool: 'draw', laneGrid: '1/8', lanes: [],
         linkSources: [], linkMin: {}, linkMax: {}, linkBases: {}, linkSmoothMs: 0
@@ -1595,37 +1726,33 @@ function renderMorphBody(b) {
 
     h += '<div class="block-section"><span class="block-section-label">Snapshots</span>';
     h += '<div class="morph-workspace">';
+    var mixW = b._mixW || [];
 
     // ── Left: the pad ──
     h += '<div class="morph-pad-col">';
     h += '<div class="morph-pad' + (!nSnap ? ' empty' : '') + '" data-b="' + b.id + '">';
     if (b.morphMode === 'auto' && b.exploreMode === 'shapes') h += buildLfoPathSvg(b);
-    // Influence rings, always faintly visible so the reach of each snapshot is readable
-    // at a glance. snapRadius is a distance in pad coordinates (the pad spans 0..1), so a
-    // large radius legitimately extends past the pad — the layer clips it to the circle
-    // instead of letting it spill across the card.
-    if (nSnap) {
+    // Reach (Radius) of the selected snapshot. Drawing every snapshot's ring at the default
+    // radius meant rings twice the pad's size, clipped to nothing.
+    if (nSnap && b._selectedSnap >= 0) {
         var ringPct = (b.snapRadius != null ? b.snapRadius : 100) * 2;
-        h += '<div class="morph-ring-layer">';
-        for (var ri = 0; ri < nSnap; ri++) {
-            h += '<div class="radius-ring" data-si="' + ri + '" style="width:' + ringPct + '%;height:' + ringPct
-               + '%;left:' + (snaps[ri].x * 100) + '%;top:' + ((1 - snaps[ri].y) * 100) + '%"></div>';
-        }
-        h += '</div>';
+        var rs = snaps[b._selectedSnap];
+        h += '<div class="morph-ring-layer"><div class="radius-ring" data-si="' + b._selectedSnap + '" style="width:' + ringPct + '%;height:' + ringPct
+           + '%;left:' + (rs.x * 100) + '%;top:' + ((1 - rs.y) * 100) + '%;--snap-col:' + morphSnapColor(b._selectedSnap) + '"></div></div>';
     }
     if (!nSnap) {
-        h += '<div class="empty-label">Capture a snapshot to begin</div>';
+        h += '<div class="empty-label">Set up a sound,<br>then Capture</div>';
     } else {
         for (var si = 0; si < nSnap; si++) {
             var s = snaps[si];
             var selCls = (si === b._selectedSnap) ? ' sel' : (multiSel(si) ? ' msel' : '');
-            // Dot size reflects the snapshot's weight — a stronger snapshot reads as
-            // "pulls harder" without needing a number.
+            // Dot size reflects the snapshot's weight; its glow, its share of the mix
             var wt = s.weight != null ? s.weight : 100;
-            var dotSz = Math.round(12 + (Math.max(0, Math.min(200, wt)) / 100) * 6);
+            var dotSz = Math.round(14 + (Math.max(0, Math.min(200, wt)) / 100) * 6);
             h += '<div class="snap-dot' + selCls + '" data-b="' + b.id + '" data-si="' + si + '"'
+               + ' title="Click to go here \u00b7 drag to move"'
                + ' style="left:' + (s.x * 100) + '%;top:' + ((1 - s.y) * 100) + '%'
-               + ';width:' + dotSz + 'px;height:' + dotSz + 'px">'
+               + ';width:' + dotSz + 'px;height:' + dotSz + 'px;--snap-col:' + morphSnapColor(si) + ';--mix:' + (mixW[si] || 0).toFixed(2) + '">'
                + '<span class="snap-label">' + (s.name || ('S' + (si + 1))) + '</span></div>';
         }
         var playManual = (b.morphMode === 'manual') ? ' manual' : '';
@@ -1633,62 +1760,61 @@ function renderMorphBody(b) {
     }
     h += '</div></div>';
 
-    // ── Right: snapshot list + per-snapshot controls ──
+    // ── Right: snapshot list, the selected snapshot's controls, capture ──
     h += '<div class="morph-snaps-col">';
-    h += '<div class="morph-snaps-head"><span>List</span><span class="morph-snap-count">' + nSnap + '/12</span></div>';
+    h += '<div class="morph-snaps-head"><span>' + (nSnap ? 'Click a dot to go there · drag to move it' : '') + '</span><span class="morph-snap-count">' + nSnap + '/12</span></div>';
     h += '<div class="morph-snap-list" data-b="' + b.id + '">';
     if (!nSnap) {
-        h += '<div class="morph-snap-empty">No snapshots yet.<br>Capture the current sound below.</div>';
+        h += '<div class="morph-snap-empty">No snapshots yet.<br>Set up a sound and press <b>Capture</b>.<br>Change it, capture again \u2014 then move between them.</div>';
     } else {
+        var goTitle = (b.morphMode === 'manual') ? 'Go to this snapshot' : 'Audition \u2014 apply these values now';
+        var diffs = morphSnapDiffs(b);
         for (var si = 0; si < nSnap; si++) {
             var s2 = snaps[si];
             var nVals = s2.values ? Object.keys(s2.values).length : 0;
+            var mw = mixW[si] || 0;
+            var dl = diffs[si] || [];
+            var diffTxt = dl.slice(0, 2).map(morphDiffLabel).join(' \u00b7 ');
+            var diffTip = dl.length ? 'Stands out by:\n' + dl.slice(0, 8).map(morphDiffLabel).join('\n') + (dl.length > 8 ? '\n+' + (dl.length - 8) + ' more' : '') : '';
             h += '<div class="morph-snap-row' + (si === b._selectedSnap ? ' sel' : '') + (multiSel(si) ? ' msel' : '') + '"'
-               + ' draggable="true" data-b="' + b.id + '" data-si="' + si + '" title="Click to select · double-click to rename · drag to reorder">'
+               + ' draggable="true" data-b="' + b.id + '" data-si="' + si + '" style="--snap-col:' + morphSnapColor(si) + ';--mix:' + mw.toFixed(2) + '"'
+               + ' title="Click to select \u00b7 double-click to rename \u00b7 drag to reorder">'
                + '<span class="morph-snap-idx">' + (si + 1) + '</span>'
                + '<span class="morph-snap-name">' + (s2.name || ('S' + (si + 1))) + '</span>'
-               + '<span class="morph-snap-n">' + nVals + 'p</span>'
-               + '<span class="morph-snap-aud" data-b="' + b.id + '" data-si="' + si + '" title="Audition — apply these values now">▶</span>'
+               + '<span class="morph-snap-diff" title="' + diffTip.replace(/"/g, '&quot;') + '">' + diffTxt + '</span>'
+               + '<span class="morph-snap-mix">' + (mw >= 0.005 ? Math.round(mw * 100) + '%' : '') + '</span>'
+               + '<span class="morph-snap-n" title="' + nVals + ' parameters">' + nVals + 'p</span>'
+               + '<span class="morph-snap-aud" data-b="' + b.id + '" data-si="' + si + '" title="' + goTitle + '">\u25B6</span>'
                + '<span class="snap-del" data-b="' + b.id + '" data-si="' + si + '" title="Delete">&times;</span>'
                + '</div>';
         }
     }
     h += '</div>';
 
-    h += '</div>';   // snaps-col (pad | list | side)
-
-    // ── Right column: selected snapshot + capture ──
-    h += '<div class="morph-side-col">';
-    h += '<div class="morph-snaps-head"><span>Selected</span></div>';
-
-    // Per-snapshot controls — one strip of drag pills, same idiom as the lane footer.
-    // (Was a bordered panel with two 32px knobs, a labelled select row and a full-width
-    // button: four stacked elements for three values.)
     if (nSnap && b._selectedSnap >= 0) {
         var sel = snaps[b._selectedSnap];
         var selW = Math.round(sel.weight != null ? sel.weight : 100);
         var selD = Math.round(sel.depth != null ? sel.depth : 100);
         h += '<div class="morph-sel-strip">';
-        h += '<span class="morph-sel-name" title="Selected snapshot">' + (sel.name || ('S' + (b._selectedSnap + 1))) + '</span>';
-        h += '<span class="msnap-pill" data-b="' + b.id + '" data-f="weight" title="Weight \u2014 how hard this snapshot pulls (drag)">W ' + selW + '%</span>';
-        h += '<span class="msnap-pill" data-b="' + b.id + '" data-f="depth" title="Depth \u2014 scales this snapshot toward the mid-point (drag)">D ' + selD + '%</span>';
+        h += '<span class="morph-sel-name" style="--snap-col:' + morphSnapColor(b._selectedSnap) + '" title="Selected snapshot">' + (sel.name || ('S' + (b._selectedSnap + 1))) + '</span>';
+        h += '<span class="msnap-pill" data-b="' + b.id + '" data-f="weight" title="How hard this snapshot pulls (drag up/down)">Weight ' + selW + '%</span>';
+        h += '<span class="msnap-pill" data-b="' + b.id + '" data-f="depth" title="Scales this snapshot toward the mid-point (drag up/down)">Depth ' + selD + '%</span>';
         h += '<select class="morph-snap-curve" data-b="' + b.id + '" title="Falloff curve">';
         [{ v: 0, l: 'Smooth' }, { v: 1, l: 'Linear' }, { v: 2, l: 'Sharp' }, { v: 3, l: 'Late' }].forEach(function (c) {
             h += '<option value="' + c.v + '"' + ((sel.curve || 0) === c.v ? ' selected' : '') + '>' + c.l + '</option>';
         });
         h += '</select>';
-        h += '<button class="morph-snap-upd" data-b="' + b.id + '" title="Update this snapshot from current values">\u21bb</button>';
+        h += '<button class="morph-snap-upd" data-b="' + b.id + '" title="Replace this snapshot with the current sound">Update</button>';
         h += '</div>';
     }
 
-    // Capture + library
     var atMax = (nSnap >= 12);
     h += '<div class="morph-snap-btns">';
     h += '<button class="snap-add-btn" data-b="' + b.id + '"' + (atMax ? ' disabled' : '') + '>Capture</button>';
-    h += '<button class="snap-src-btn" data-b="' + b.id + '"' + (atMax ? ' disabled' : '') + ' title="Choose what to capture">▾</button>';
-    h += '<button class="snap-lib-btn" data-b="' + b.id + '"' + (atMax ? ' disabled' : '') + '>\u{1F4C2}</button>';
+    h += '<button class="snap-src-btn" data-b="' + b.id + '"' + (atMax ? ' disabled' : '') + ' title="Choose what to capture">\u25BE</button>';
+    h += '<button class="snap-lib-btn" data-b="' + b.id + '"' + (atMax ? ' disabled' : '') + ' title="Snapshot library">\u{1F4C2}</button>';
     h += '</div>';
-    h += '</div>';   // side-col
+    h += '</div>';   // snaps-col
 
     h += '</div></div>';   // workspace, block-section
 
@@ -1800,6 +1926,12 @@ function renderMorphBody(b) {
     h += buildKnobRow(
         buildBlockKnob(b.snapRadius || 100, 5, 100, 36, 'morph', 'snapRadius', b.id, 'Radius', '%')
     );
+    // Exact: standing on a snapshot gives exactly that snapshot. Soft: the original
+    // blend, kept for patches made before Exact existed (they sound as they always did).
+    var kern = b.morphKernel || 'blend';
+    h += '<div class="mv-grp morph-kernel"><span class="mv-lbl">Snapshots</span><div class="seg-inline" data-b="' + b.id + '" data-f="morphKernel">'
+       + '<button class="' + (kern === 'exact' ? 'on' : '') + '" data-v="exact" title="Standing on a snapshot gives exactly that snapshot">Exact</button>'
+       + '<button class="' + (kern !== 'exact' ? 'on' : '') + '" data-v="blend" title="Every snapshot in reach always blends in (the original behaviour)">Soft</button></div></div>';
     h += '</div>';
     h += '</div></div></div>';
     h += '</div>';   // morph-lower
@@ -2583,7 +2715,7 @@ function wireBlocks() {
         btn.onclick = function (e) {
             e.stopPropagation();
             var b = findBlock(parseInt(btn.dataset.b));
-            if (b) morphCapture(b, b._captureSource || 'assigned');
+            if (b) morphCapture(b);
         };
     });
     // Snapshot Library buttons (morph pad)
@@ -2729,7 +2861,7 @@ function wireBlocks() {
             var b = findBlock(parseInt(pill.dataset.b));
             if (!b || !b.snapshots || b._selectedSnap < 0) return;
             var key = pill.dataset.f;                       // 'weight' | 'depth'
-            var lbl = (key === 'weight') ? 'W' : 'D';
+            var lbl = (key === 'weight') ? 'Weight' : 'Depth';
             var startY = e.clientY;
             var startVal = b.snapshots[b._selectedSnap][key];
             if (startVal == null) startVal = 100;
@@ -2748,7 +2880,7 @@ function wireBlocks() {
                     var pad = document.querySelector('.morph-pad[data-b="' + b.id + '"]');
                     if (pad) morphEditTargets(b).forEach(function (i) {
                         var d = pad.querySelector('.snap-dot[data-si="' + i + '"]');
-                        if (d) { var px = 12 + (nv / 100) * 6; d.style.width = px + 'px'; d.style.height = px + 'px'; }
+                        if (d) { var px = 14 + (nv / 100) * 6; d.style.width = px + 'px'; d.style.height = px + 'px'; }
                     });
                 }
                 debouncedSync();
@@ -2788,18 +2920,18 @@ function wireBlocks() {
             e.stopPropagation();
             var b = findBlock(parseInt(btn.dataset.b)); if (!b) return;
             var items = [{
-                label: 'Assigned parameters' + ((b.targets && b.targets.size) ? ' (' + b.targets.size + ')' : ' — none yet'),
-                action: function () { b._captureSource = 'assigned'; morphCapture(b, 'assigned'); }
+                label: 'Everything',
+                action: function () { morphCapture(b, 'all'); }
             }, {
-                label: 'All plugins',
-                action: function () { b._captureSource = 'all'; morphCapture(b, 'all'); }
+                label: 'Assigned parameters' + ((b.targets && b.targets.size) ? ' (' + b.targets.size + ')' : ' \u2014 none yet'),
+                action: function () { morphCapture(b, 'assigned'); }
             }];
             if (typeof pluginBlocks !== 'undefined') {
                 pluginBlocks.forEach(function (pb) {
-                    if (pb.isVirtual) return;
+                    if (pb.isVirtual || pb.missing) return;
                     items.push({
-                        label: pb.name || ('Plugin ' + pb.id),
-                        action: function () { b._captureSource = String(pb.id); morphCapture(b, String(pb.id)); }
+                        label: 'Everything in ' + (pb.name || ('Plugin ' + pb.id)) + ' (' + pb.params.length + ')',
+                        action: function () { morphCapture(b, String(pb.id)); }
                     });
                 });
             }
@@ -2885,7 +3017,10 @@ function wireBlocks() {
                 dot.classList.add('sel');
             }
             var _pushed = false;
+            var startX = e.clientX, startY = e.clientY;
             var onMove = function (ev) {
+                // A few pixels of slack so a click doesn't nudge the snapshot
+                if (!_pushed && Math.abs(ev.clientX - startX) < 4 && Math.abs(ev.clientY - startY) < 4) return;
                 if (!_pushed) { _pushed = true; pushUndoSnapshot(); }
                 var rect = pad.getBoundingClientRect();
                 var rawX = (ev.clientX - rect.left) / rect.width;
@@ -2906,8 +3041,16 @@ function wireBlocks() {
             var onUp = function () {
                 document.removeEventListener('mousemove', onMove);
                 document.removeEventListener('mouseup', onUp);
+                if (!_pushed && b.morphMode === 'manual') {
+                    // Click: go to this snapshot
+                    b.playheadX = b.snapshots[si].x;
+                    b.playheadY = b.snapshots[si].y;
+                    var head = document.getElementById('morphHead-' + bId);
+                    if (head) { head.style.left = (b.playheadX * 100) + '%'; head.style.top = ((1 - b.playheadY) * 100) + '%'; }
+                    sendPlayhead(bId, b.playheadX, b.playheadY);
+                }
                 if (_selChanged || _pushed) renderSingleBlock(bId);
-                syncBlocksToHost();
+                if (_selChanged || _pushed || b.morphMode === 'manual') syncBlocksToHost();
             };
             document.addEventListener('mousemove', onMove);
             document.addEventListener('mouseup', onUp);
@@ -4021,6 +4164,8 @@ function syncBlocksToHost() {
             obj.morphTempoSync = !!b.morphTempoSync;
             obj.morphSyncDiv = b.morphSyncDiv || '1/4';
             obj.snapRadius = (b.snapRadius || 100) / 100;
+            obj.morphKernel = b.morphKernel || 'blend';
+            if (b._teleport) { obj.teleport = true; b._teleport = false; }   // one-shot, see morphCaptureNow
         }
         if (b.mode === 'shapes' || b.mode === 'shapes_range') {
             obj.shapeType = b.shapeType || 'circle';
@@ -4136,33 +4281,10 @@ function getMorphBlocks() {
 // Add a snapshot to a morph block from a plugin's current param values
 // pluginId: which plugin to capture values from (or null for all)
 function addSnapshotToMorphBlock(blockId, pluginId) {
+    // Same capture as the block's own button, with this plugin as the source
     var b = findBlock(blockId);
     if (!b || b.mode !== 'morph_pad') return;
-    if (!b.snapshots) b.snapshots = [];
-    if (b.snapshots.length >= 12) return;
-
-    // Capture ALL plugin params â€” not just assigned targets.
-    // Snapshots are full state captures. You can assign params later
-    // and the snapshot will already have their values stored.
-    var vals = {};
-    for (var pid in PMap) {
-        var p = PMap[pid];
-        if (p) vals[pid] = p.v;
-    }
-
-    // Source label: use the triggering plugin's name
-    var sourceName = getPluginName(pluginId) || 'Manual';
-
-    var spos = getSnapSectorPos(b.snapshots.length);
-    b.snapshots.push({ x: spos.x, y: spos.y, values: vals, name: 'S' + (b.snapshots.length + 1), source: sourceName });
-    renderSingleBlock(blockId);
-    syncBlocksToHost();
-
-    // Flash feedback
-    var pad = document.querySelector('.morph-pad[data-b="' + blockId + '"]');
-    if (pad) { pad.classList.remove('snap-flash'); void pad.offsetWidth; pad.classList.add('snap-flash'); }
-    var chips = document.querySelectorAll('.morph-snap-row[data-b="' + blockId + '"]');
-    if (chips.length) { var last = chips[chips.length - 1]; last.classList.add('just-added'); setTimeout(function () { last.classList.remove('just-added'); }, 600); }
+    morphCapture(b, String(pluginId));
 }
 
 // Get all morph lanes across all lane blocks (for snap menu)

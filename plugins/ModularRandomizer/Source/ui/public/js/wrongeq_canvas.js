@@ -5775,7 +5775,7 @@ function weqSyncVirtualParams() {
                         if (cur !== null) ri.current = cur;
                     }
                     var knVal = (ri && ri.base !== undefined) ? ri.base : newNorm;
-                    knobEl.innerHTML = buildParamKnob(knVal, 30, ri);
+                    setParamKnob(knobEl, knVal, 30, ri);
                 }
                 // Update value text and bar fill
                 var row = knobEl.closest('.pr');

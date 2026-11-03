@@ -148,6 +148,7 @@ var _modDirty = false;
 var _touchedByUI = new Set();
 // Cached visible PIDs — rebuilt at most every 100ms to avoid layout reflows
 var _visPidsCache = null, _visPidsTime = 0, _visPidsDirty = true;
+var _visRowsCache = {};   // pid -> its .pr rows, reset with the visible set
 var _setVisFn = null; // lazy ref to setVisibleParams native function
 
 // Shared visible-pids-cache rebuild — called by both refreshParamDisplay and lane processing
@@ -157,6 +158,7 @@ function _rebuildVisPids() {
     _visPidsDirty = false;
     _visPidsTime = now;
     _visPidsCache = new Set();
+    _visRowsCache = {};
     if (typeof pluginBlocks !== 'undefined') {
         for (var pi = 0; pi < pluginBlocks.length; pi++) {
             var pb = pluginBlocks[pi];
@@ -232,7 +234,12 @@ function refreshParamDisplay() {
         // A param can be on screen more than once (rack row + touched-param panel), so
         // update every instance — otherwise whichever copy comes first in the DOM would
         // be the only one that stays live.
-        var _rows = document.querySelectorAll('.pr[data-pid="' + pid + '"]');
+        // Rows are cached per visible-set rebuild (at most 100 ms old); a re-render can
+        // replace them in between, so fall back to a lookup when a cached row is gone.
+        var _rows = _visRowsCache[pid];
+        if (!_rows || (_rows.length && !_rows[0].isConnected)) {
+            _rows = _visRowsCache[pid] = document.querySelectorAll('.pr[data-pid="' + pid + '"]');
+        }
         if (!_rows.length) return;
 
         // Determine if this param is modulated
@@ -258,13 +265,15 @@ function refreshParamDisplay() {
             var row = _rows[_rIdx];
 
             // Update value text (skip for modulated params being dragged — drag handler does it)
+            if (!row._ve) { row._ve = row.querySelector('.pr-val'); row._ke = row.querySelector('.pr-knob'); row._be = row.querySelector('.pr-bar-f'); }
             if (!_touchedByUI.has(pid)) {
-                var ve = row.querySelector('.pr-val');
-                if (ve) ve.textContent = p.disp || ((p.v * 100).toFixed(0) + '%');
+                var ve = row._ve;
+                var vt = p.disp || ((p.v * 100).toFixed(0) + '%');
+                if (ve && ve._t !== vt) { ve._t = vt; ve.textContent = vt; }
             }
 
             // Update knob SVG — skip if nothing visual changed (cache key check)
-            var knobEl = row.querySelector('.pr-knob');
+            var knobEl = row._ke;
             if (knobEl && typeof buildParamKnob === 'function') {
                 var knobVal = (ri && ri.base !== undefined) ? ri.base : p.v;
                 // Build a cheap cache key from ALL values that affect the SVG output
@@ -277,14 +286,15 @@ function refreshParamDisplay() {
                 }
                 if (knobEl._knobKey !== knobKey) {
                     knobEl._knobKey = knobKey;
-                    knobEl.innerHTML = buildParamKnob(knobVal, 30, ri);
+                    setParamKnob(knobEl, knobVal, 30, ri);
                 }
             }
 
             // Update bar (skip for modulated during drag)
             if (!_touchedByUI.has(pid)) {
-                var be = row.querySelector('.pr-bar-f');
-                if (be) be.style.width = (p.v * 100) + '%';
+                var be = row._be;
+                var bw = (p.v * 100).toFixed(2) + '%';
+                if (be && be._w !== bw) { be._w = bw; be.style.width = bw; }
             }
         }
     });
@@ -450,6 +460,7 @@ function setupRtDataListener() {
                     for (var mi = 0; mi < data.morphHeads.length; mi++) {
                         var mh = data.morphHeads[mi];
                         var mb = findBlock(mh.id);
+                        if (mb && mb.mode === 'morph_pad' && mh.w && typeof morphShowMix === 'function') morphShowMix(mb, mh.w);
                         if (mb && mb.mode === 'morph_pad' && mb.morphMode !== 'manual') {
                             mb.playheadX = mh.x;
                             mb.playheadY = mh.y;
@@ -479,27 +490,14 @@ function setupRtDataListener() {
                             if (lastMpX === undefined || Math.abs(mh.x - lastMpX) > 0.0001 || Math.abs(mh.y - lastMpY) > 0.0001) {
                                 mb._lastMorphPadX = mh.x;
                                 mb._lastMorphPadY = mh.y;
-                                if (mb.snapshots && mb.snapshots.length > 0 && mb.targets && mb.targets.size > 0) {
+                                if (mb.snapshots && mb.snapshots.length > 0 && mb.targets && mb.targets.size > 0 && mh.w) {
                                     if (!mb.morphPadOutputs) mb.morphPadOutputs = {};
-                                    // Compute IDW weights (same algorithm as C++)
-                                    var radius = (mb.snapRadius != null ? mb.snapRadius : 100) / 100.0 * 0.48;
-                                    var numSnaps = Math.min(mb.snapshots.length, 12);
-                                    var mpWeights = [];
+                                    // The engine sends each snapshot's share of the mix
+                                    var numSnaps = Math.min(mb.snapshots.length, mh.w.length);
+                                    var mpWeights = mh.w;
                                     var mpTotalW = 0;
-                                    for (var si = 0; si < numSnaps; si++) {
-                                        var sdx = mh.x - mb.snapshots[si].x;
-                                        var sdy = mh.y - mb.snapshots[si].y;
-                                        var dist = Math.sqrt(sdx * sdx + sdy * sdy);
-                                        var w = 0;
-                                        if (dist < radius) {
-                                            var t = 1.0 - dist / radius;
-                                            w = t * t;
-                                        }
-                                        mpWeights.push(w);
-                                        mpTotalW += w;
-                                    }
+                                    for (var si = 0; si < numSnaps; si++) mpTotalW += mpWeights[si];
                                     if (mpTotalW > 0) {
-                                        for (var si = 0; si < numSnaps; si++) mpWeights[si] /= mpTotalW;
                                         // Only compute for VISIBLE params
                                         _rebuildVisPids();
                                         if (_visPidsCache && _visPidsCache.size > 0) {

@@ -45,6 +45,7 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                                      juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
+    const PerfScope perfScope (perfAudio);
 
     // Clear any output channels that don't have corresponding inputs
     // (standard JUCE boilerplate — prevents garbage in unused channels)
@@ -215,10 +216,15 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
     // â”€â”€ Logic Block Engine: triggers + envelope followers â”€â”€
     {
+        const PerfScope perfLogicScope (perfLogic);
         std::unique_lock<std::mutex> blockLock (blockMutex, std::try_to_lock);
+        if (! blockLock.owns_lock())
+            perfLockMisses.fetch_add (1, std::memory_order_relaxed);
         if (blockLock.owns_lock() && ! logicBlocks.empty())
         {
             clearModBus();
+            ctlDiv = juce::jmax (1, (int) std::lround (currentSampleRate * 0.010 / juce::jmax (1, buffer.getNumSamples())));
+            ++ctlPhase;
 
             float mainRms = currentRmsLevel.load();
             float scRms   = sidechainRmsLevel.load();
@@ -1029,18 +1035,19 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                     // allowing the user to manually tweak hosted plugin parameters.
                     float dsx = lb.morphSmoothX - lb.prevAppliedX;
                     float dsy = lb.morphSmoothY - lb.prevAppliedY;
-                    if (dsx * dsx + dsy * dsy > 1e-6f)
-                    {
-                        lb.prevAppliedX = lb.morphSmoothX;
-                        lb.prevAppliedY = lb.morphSmoothY;
+                    const bool headMoved = dsx * dsx + dsy * dsy > 1e-6f;
 
-                        // -- IDW Interpolation with exact radius boundary --
-                        // snapRadius is the actual distance (0.05..1.0) in pad coordinates.
-                        // Weight = (1 - dist/radius)^2 â€” drops to exactly zero at boundary.
-                        float radius = lb.snapRadius;
-                        float weights[12] = {};
-                        int numSnaps = juce::jmin ((int) lb.snapshots.size(), 12);
-                        float totalWeight = 0.0f;
+                    // -- Snapshot weights (every block, so the UI can show the mix) --
+                    // snapRadius is the actual distance (0.05..1.0) in pad coordinates.
+                    // Falloff = (1 - dist/radius)^curve, zero at the boundary. "Exact"
+                    // also divides by distance squared (Shepard), so standing on a
+                    // snapshot gives exactly that snapshot; plain falloff alone left a
+                    // nearby neighbour pulling ~70% as hard even dead on a snapshot.
+                    float radius = lb.snapRadius;
+                    float weights[12] = {};
+                    int numSnaps = juce::jmin ((int) lb.snapshots.size(), 12);
+                    float totalWeight = 0.0f;
+                    {
                         for (int si = 0; si < numSnaps; ++si) {
                             float dx = lb.morphSmoothX - lb.snapshots[si].x;
                             float dy = lb.morphSmoothY - lb.snapshots[si].y;
@@ -1060,13 +1067,23 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                 // Weight scales how hard this snapshot pulls against its
                                 // neighbours (normalisation below keeps the mix summing to 1).
                                 w *= lb.snapshots[si].weight;
+                                if (lb.morphExact)
+                                    w /= dist * dist + 1.0e-5f;
                             }
                             weights[si] = w;
                             totalWeight += w;
                         }
                         if (totalWeight > 0.0f)
-                        {
                             for (int si = 0; si < numSnaps; ++si) weights[si] /= totalWeight;
+                    }
+
+                    // -- Apply only when the smoothed playhead has moved --
+                    if (headMoved)
+                    {
+                        lb.prevAppliedX = lb.morphSmoothX;
+                        lb.prevAppliedY = lb.morphSmoothY;
+                        if (totalWeight > 0.0f)
+                        {
 
                             // -- Mix target values and apply --
                             for (size_t ti = 0; ti < lb.targets.size(); ++ti) {
@@ -1102,6 +1119,9 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                         morphReadback[morphIdx].headX.store (rbX);
                         morphReadback[morphIdx].headY.store (rbY);
                         morphReadback[morphIdx].rotAngle.store (lb.lfoRotAngle);
+                        for (int si = 0; si < numSnaps; ++si)
+                            morphReadback[morphIdx].weights[si].store (weights[si], std::memory_order_relaxed);
+                        morphReadback[morphIdx].numWeights.store (numSnaps, std::memory_order_relaxed);
                         morphIdx++;
                     }
                 }
@@ -1154,7 +1174,7 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                             morphReadback[morphIdx].blockId.store(lb.id);
                             morphReadback[morphIdx].headX.store(0.5f + dx);
                             morphReadback[morphIdx].headY.store(0.5f + dy);
-                            morphReadback[morphIdx].rotAngle.store(lb.shapeRotAngle);
+                            morphReadback[morphIdx].rotAngle.store(lb.shapeRotAngle); morphReadback[morphIdx].numWeights.store(0);
                             morphIdx++;
                         }
                         continue;
@@ -1393,7 +1413,7 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                         morphReadback[morphIdx].blockId.store(lb.id);
                         morphReadback[morphIdx].headX.store(dotX);
                         morphReadback[morphIdx].headY.store(dotY);
-                        morphReadback[morphIdx].rotAngle.store(lb.shapeRotAngle);
+                        morphReadback[morphIdx].rotAngle.store(lb.shapeRotAngle); morphReadback[morphIdx].numWeights.store(0);
                         morphReadback[morphIdx].modOutput.store(output);
                         morphIdx++;
                     }

@@ -545,6 +545,98 @@ void HostesaAudioProcessor::updateLogicBlocks(const juce::String &jsonData) {
 void HostesaAudioProcessor::updateLogicBlocks(const juce::var &parsed) {
   if (!parsed.isArray())
     return;
+  const PerfScope perfScope(perfBlockUpdate);
+
+  // Carry the audio thread's runtime state (playheads, phases, smoothing, relative
+  // bases) from an old block into its rebuilt self. Runs under blockMutex just before
+  // the swap, so it is exact: copying it while parsing (as before) raced the audio
+  // thread and handed the new block state a few ms stale, so lanes/LFOs jumped back.
+  auto carryRuntimeState = [](LogicBlock &lb, const LogicBlock &existing) {
+    lb.currentEnvValue = existing.currentEnvValue;
+    lb.lastBeat = existing.lastBeat;
+    lb.trigAccum = existing.trigAccum; // keep free-rate trigger phase across rebuilds
+    lb.lastAudioTrigSample = existing.lastAudioTrigSample;
+    lb.internalPpq = existing.internalPpq;
+
+    // Preserve sample data and playback state
+    lb.sampleData = existing.sampleData;
+    lb.samplePlayhead = existing.samplePlayhead;
+    lb.sampleDirection = existing.sampleDirection;
+
+    // Preserve relative-mode base values if mode and targets unchanged
+    // Covers both randomize/sample (rangeMode) and shapes (shapeRange)
+    bool newRelative =
+        (lb.rangeMode == "relative" || lb.shapeRange == "relative");
+    bool oldRelative = (existing.rangeMode == "relative" ||
+                        existing.shapeRange == "relative");
+    if (newRelative && oldRelative &&
+        lb.targets.size() == existing.targets.size()) {
+      // Carry over base values and last-written state smoothly
+      // Polarity changes only affect the formula, no need to reset params
+      lb.targetBaseValues = existing.targetBaseValues;
+      lb.targetLastWritten = existing.targetLastWritten;
+    }
+
+    // Preserve morph runtime state
+    lb.morphVelX = existing.morphVelX;
+    lb.morphVelY = existing.morphVelY;
+    lb.morphAngle = existing.morphAngle;
+    lb.morphLfoPhase = existing.morphLfoPhase;
+    lb.morphStepIndex = existing.morphStepIndex;
+    lb.morphSmoothX = existing.morphSmoothX;
+    lb.morphSmoothY = existing.morphSmoothY;
+    lb.prevAppliedX = existing.prevAppliedX;
+    lb.prevAppliedY = existing.prevAppliedY;
+    lb.morphNoisePhaseX = existing.morphNoisePhaseX;
+    lb.morphNoisePhaseY = existing.morphNoisePhaseY;
+    lb.morphOrbitPhase = existing.morphOrbitPhase;
+    lb.morphOrbitTarget = existing.morphOrbitTarget;
+    lb.morphPathProgress = existing.morphPathProgress;
+    lb.morphPathIndex = existing.morphPathIndex;
+    lb.lfoRotAngle = existing.lfoRotAngle;
+
+    // Preserve shapes runtime state
+    lb.shapePhase = existing.shapePhase;
+    lb.shapeRotAngle = existing.shapeRotAngle;
+    lb.smoothedRangeValues = existing.smoothedRangeValues;
+    lb.smoothedShapeDepth = existing.smoothedShapeDepth;
+    lb.shapeWasPlaying = existing.shapeWasPlaying;
+    lb.shapeWasEnabled = existing.shapeWasEnabled;
+
+    // Preserve envelope follower runtime state
+    lb.currentEnvValue = existing.currentEnvValue;
+    lb.envHpf = existing.envHpf;
+    lb.envLpf = existing.envLpf;
+
+    // Preserve lane playhead positions
+    if (lb.laneClips.size() == existing.laneClips.size()) {
+      for (size_t li = 0; li < lb.laneClips.size(); ++li) {
+        lb.laneClips[li].playhead = existing.laneClips[li].playhead;
+        lb.laneClips[li].direction = existing.laneClips[li].direction;
+        lb.laneClips[li].driftPhase = existing.laneClips[li].driftPhase;
+        lb.laneClips[li].wasPlaying = existing.laneClips[li].wasPlaying;
+        lb.laneClips[li].oneshotActive =
+            existing.laneClips[li].oneshotActive;
+        lb.laneClips[li].oneshotDone = existing.laneClips[li].oneshotDone;
+        lb.laneClips[li].midiNoteHeld = existing.laneClips[li].midiNoteHeld;
+      }
+    }
+
+    // Preserve link runtime state
+    lb.linkSmoothedValue = existing.linkSmoothedValue;
+
+    // Force prevApplied to match morphSmooth so the block rebuild
+    // doesn't trigger a spurious IDW re-application (which would
+    // overwrite any manual parameter tweaks the user has made).
+    lb.prevAppliedX = lb.morphSmoothX;
+    lb.prevAppliedY = lb.morphSmoothY;
+
+    // The copy above can shrink this below the new target count; the audio thread
+    // indexes it per target and must never resize it
+    if (lb.modeE == BlockMode::ShapesRange &&
+        lb.smoothedRangeValues.size() < lb.targets.size())
+      lb.smoothedRangeValues.resize(lb.targets.size(), 0.0f);
+  };
 
   std::vector<LogicBlock> newBlocks;
   newBlocks.reserve((size_t)parsed.size());
@@ -672,6 +764,8 @@ void HostesaAudioProcessor::updateLogicBlocks(const juce::var &parsed) {
     lb.morphTempoSync = (bool)obj->getProperty("morphTempoSync");
     lb.morphSyncDiv = obj->getProperty("morphSyncDiv").toString();
     lb.snapRadius = (float)(double)obj->getProperty("snapRadius");
+    lb.morphExact = obj->getProperty("morphKernel").toString() == "exact";
+    lb.morphTeleport = (bool)obj->getProperty("teleport");
 
     // Defaults
     if (lb.morphMode.isEmpty())
@@ -1083,91 +1177,6 @@ void HostesaAudioProcessor::updateLogicBlocks(const juce::var &parsed) {
       }
     }
 
-    // Preserve runtime state from existing blocks with matching ID
-    for (const auto &existing : logicBlocks) {
-      if (existing.id == lb.id) {
-        lb.currentEnvValue = existing.currentEnvValue;
-        lb.lastBeat = existing.lastBeat;
-        lb.trigAccum = existing.trigAccum; // keep free-rate trigger phase across rebuilds
-        lb.lastAudioTrigSample = existing.lastAudioTrigSample;
-        lb.internalPpq = existing.internalPpq;
-
-        // Preserve sample data and playback state
-        lb.sampleData = existing.sampleData;
-        lb.samplePlayhead = existing.samplePlayhead;
-        lb.sampleDirection = existing.sampleDirection;
-
-        // Preserve relative-mode base values if mode and targets unchanged
-        // Covers both randomize/sample (rangeMode) and shapes (shapeRange)
-        bool newRelative =
-            (lb.rangeMode == "relative" || lb.shapeRange == "relative");
-        bool oldRelative = (existing.rangeMode == "relative" ||
-                            existing.shapeRange == "relative");
-        if (newRelative && oldRelative &&
-            lb.targets.size() == existing.targets.size()) {
-          // Carry over base values and last-written state smoothly
-          // Polarity changes only affect the formula, no need to reset params
-          lb.targetBaseValues = existing.targetBaseValues;
-          lb.targetLastWritten = existing.targetLastWritten;
-        }
-
-        // Preserve morph runtime state
-        lb.morphVelX = existing.morphVelX;
-        lb.morphVelY = existing.morphVelY;
-        lb.morphAngle = existing.morphAngle;
-        lb.morphLfoPhase = existing.morphLfoPhase;
-        lb.morphStepIndex = existing.morphStepIndex;
-        lb.morphSmoothX = existing.morphSmoothX;
-        lb.morphSmoothY = existing.morphSmoothY;
-        lb.prevAppliedX = existing.prevAppliedX;
-        lb.prevAppliedY = existing.prevAppliedY;
-        lb.morphNoisePhaseX = existing.morphNoisePhaseX;
-        lb.morphNoisePhaseY = existing.morphNoisePhaseY;
-        lb.morphOrbitPhase = existing.morphOrbitPhase;
-        lb.morphOrbitTarget = existing.morphOrbitTarget;
-        lb.morphPathProgress = existing.morphPathProgress;
-        lb.morphPathIndex = existing.morphPathIndex;
-        lb.lfoRotAngle = existing.lfoRotAngle;
-
-        // Preserve shapes runtime state
-        lb.shapePhase = existing.shapePhase;
-        lb.shapeRotAngle = existing.shapeRotAngle;
-        lb.smoothedRangeValues = existing.smoothedRangeValues;
-        lb.smoothedShapeDepth = existing.smoothedShapeDepth;
-        lb.shapeWasPlaying = existing.shapeWasPlaying;
-        lb.shapeWasEnabled = existing.shapeWasEnabled;
-
-        // Preserve envelope follower runtime state
-        lb.currentEnvValue = existing.currentEnvValue;
-        lb.envHpf = existing.envHpf;
-        lb.envLpf = existing.envLpf;
-
-        // Preserve lane playhead positions
-        if (lb.laneClips.size() == existing.laneClips.size()) {
-          for (size_t li = 0; li < lb.laneClips.size(); ++li) {
-            lb.laneClips[li].playhead = existing.laneClips[li].playhead;
-            lb.laneClips[li].direction = existing.laneClips[li].direction;
-            lb.laneClips[li].driftPhase = existing.laneClips[li].driftPhase;
-            lb.laneClips[li].wasPlaying = existing.laneClips[li].wasPlaying;
-            lb.laneClips[li].oneshotActive =
-                existing.laneClips[li].oneshotActive;
-            lb.laneClips[li].oneshotDone = existing.laneClips[li].oneshotDone;
-            lb.laneClips[li].midiNoteHeld = existing.laneClips[li].midiNoteHeld;
-          }
-        }
-
-        // Preserve link runtime state
-        lb.linkSmoothedValue = existing.linkSmoothedValue;
-
-        // Force prevApplied to match morphSmooth so the block rebuild
-        // doesn't trigger a spurious IDW re-application (which would
-        // overwrite any manual parameter tweaks the user has made).
-        lb.prevAppliedX = lb.morphSmoothX;
-        lb.prevAppliedY = lb.morphSmoothY;
-
-        break;
-      }
-    }
     // H4 fix: parse string fields ? enum mirrors + pre-compute beat divisions
     // Called once on message thread so processBlock uses integer comparisons.
     lb.modeE = parseBlockMode(lb.mode);
@@ -1222,17 +1231,40 @@ void HostesaAudioProcessor::updateLogicBlocks(const juce::var &parsed) {
     newBlocks.push_back(std::move(lb));
   }
 
-  std::lock_guard<std::mutex> lock(blockMutex);
+  // Swap under the engine lock, holding it only for the swap. The audio thread
+  // try_locks this mutex and skips the logic engine for a block when it can't get
+  // it, so every microsecond here is modulation that might not happen.
+  std::vector<LogicBlock> oldBlocks;
+  {
+    std::lock_guard<std::mutex> lock(blockMutex);
+    for (auto &nb : newBlocks) {
+      for (const auto &old : logicBlocks)
+        if (old.id == nb.id) { carryRuntimeState(nb, old); break; }
+      // A capture parks the playhead on the new snapshot, which IS the current sound:
+      // jump there without applying. Gliding would replay the old position's mix over
+      // it (the sound swinging back) and overwrite knobs turned right after capturing.
+      if (nb.morphTeleport) {
+        nb.morphSmoothX = nb.prevAppliedX = nb.playheadX;
+        nb.morphSmoothY = nb.prevAppliedY = nb.playheadY;
+      }
+    }
+    oldBlocks.swap(logicBlocks);
+    logicBlocks.swap(newBlocks);
+  }
+  // From here on the audio thread runs the new blocks. Only this thread changes the
+  // block list and its config, so reading it unlocked is safe; and restoring dropped
+  // targets now (not before the swap) means the old blocks can't overwrite a restore.
+  const auto &newList = logicBlocks;
 
   // Restore base values for blocks that transitioned enabled→disabled
   // or lost targets (proper modulation recall behavior)
-  for (const auto &old : logicBlocks) {
+  for (const auto &old : oldBlocks) {
     if (!old.enabled || old.targetBaseValues.empty())
       continue;
 
     // Find matching new block
     const LogicBlock *newLb = nullptr;
-    for (const auto &nb : newBlocks) {
+    for (const auto &nb : newList) {
       if (nb.id == old.id) {
         newLb = &nb;
         break;
@@ -1266,17 +1298,18 @@ void HostesaAudioProcessor::updateLogicBlocks(const juce::var &parsed) {
         }
       }
     } else if (newLb != nullptr) {
-      // Check for specific targets that were removed
+      // Check for specific targets that were removed. A set keeps this linear: the
+      // nested scan was O(n^2) - millions of compares under the engine lock for a
+      // block with a few thousand targets.
+      std::unordered_set<int64_t> newKeys;
+      newKeys.reserve(newLb->targets.size() * 2);
+      for (const auto &nt : newLb->targets)
+        newKeys.insert(((int64_t)nt.pluginId << 32) | (uint32_t)nt.paramIndex);
       for (size_t ti = 0;
            ti < old.targets.size() && ti < old.targetBaseValues.size(); ++ti) {
-        bool stillPresent = false;
-        for (const auto &nt : newLb->targets) {
-          if (nt.pluginId == old.targets[ti].pluginId &&
-              nt.paramIndex == old.targets[ti].paramIndex) {
-            stillPresent = true;
-            break;
-          }
-        }
+        const bool stillPresent =
+            newKeys.count(((int64_t)old.targets[ti].pluginId << 32) |
+                          (uint32_t)old.targets[ti].paramIndex) > 0;
         if (!stillPresent) {
           setHostedParam(old.targets[ti].pluginId, old.targets[ti].paramIndex,
                          old.targetBaseValues[ti]);
@@ -1293,10 +1326,10 @@ void HostesaAudioProcessor::updateLogicBlocks(const juce::var &parsed) {
 
   // Clear paramTouched only for params belonging to blocks whose config changed
   // (prevents stale touched state while not disrupting unrelated knob drags)
-  for (auto &nb : newBlocks) {
+  for (const auto &nb : newList) {
     // Find matching old block
     const LogicBlock *oldMatch = nullptr;
-    for (auto &old : logicBlocks)
+    for (const auto &old : oldBlocks)
       if (old.id == nb.id) {
         oldMatch = &old;
         break;
@@ -1318,7 +1351,7 @@ void HostesaAudioProcessor::updateLogicBlocks(const juce::var &parsed) {
     }
 
     if (changed) {
-      for (auto &tgt : nb.targets) {
+      for (const auto &tgt : nb.targets) {
         int slot = slotForId(tgt.pluginId);
         if (slot >= 0 && tgt.paramIndex < kMaxParams)
           paramTouched[slot][tgt.paramIndex].store(false,
@@ -1327,7 +1360,7 @@ void HostesaAudioProcessor::updateLogicBlocks(const juce::var &parsed) {
     }
   }
 
-  logicBlocks = std::move(newBlocks);
+  // oldBlocks is freed here, outside the lock
 }
 
 void HostesaAudioProcessor::updateMorphPlayhead(int blockId, float x, float y) {
@@ -2391,8 +2424,9 @@ void HostesaAudioProcessor::setStateInformation(const void *data,
     // updateLogicBlocks "restore base values" for them, or carry their runtime
     // state over by block ID, would leak stale values into the new session.
     {
+      std::vector<LogicBlock> dropped; // freed after the lock is released
       std::lock_guard<std::mutex> lock(blockMutex);
-      logicBlocks.clear();
+      dropped.swap(logicBlocks);
     }
 
     // Clear existing plugins safely � audio thread doesn't hold pluginMutex.

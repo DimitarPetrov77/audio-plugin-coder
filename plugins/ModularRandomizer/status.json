@@ -5,7 +5,7 @@
     "ui_framework": "webview",
     "complexity_score": 10,
     "created_at": "2026-02-24T10:19:00Z",
-    "last_modified": "2026-11-02T01:20:00Z",
+    "last_modified": "2026-11-03T12:00:00Z",
     "description": "Mastering-grade multi-plugin parameter randomizer and modulator VST3/Standalone with integrated WrongEQ module. Hosts multiple VST3 plugins in series or parallel (bus-based routing), exposes all their parameters, and modulates them via 7 configurable logic blocks (randomize, envelope follower, sample modulator, morph pad, shapes LFO, shapes range, lane automation). Features a full parametric EQ with drawable breakpoints, wave ripple engine, multiband routing, and Linkwitz-Riley crossovers. WebView2-based UI with real-time visualization, modulation arc display, 13 themes, granular undo/redo, visibility-culled rendering, async plugin loading, hosted-plugin gesture detection, and DAW automation proxy system (2048 AP_ slots).",
     "build": {
         "formats": [
@@ -398,7 +398,8 @@
         "fireLaneTrigger",
         "getParamTextForValue",
         "setVisibleParams",
-        "updateExposeState"
+        "updateExposeState",
+        "retryMissingPlugin"
     ],
     "rt_events": [
         "__rt_data__ → { rms, scRms, bpm, playing, ppq, midi[], envLevels[], trigFired[], sampleHeads[], morphHeads[], params[], touchedParam }",
@@ -513,6 +514,16 @@
             "phase": "eq_internal_mod_engine",
             "completed_at": "2026-11-02T01:20:00Z",
             "notes": "WrongEQ gain LFO / drift / Q-mod now computed in C++ (EqInternalMod.cpp) instead of the editor: runs with the editor closed and in offline renders. Editor draws from the engine clocks with a time-based ease. setEqUiMod removed. Per-point mod depths persisted; animated Q no longer saved as base. Verified exact against the JS maths across 31 configs."
+        },
+        {
+            "phase": "robustness_missing_plugins",
+            "completed_at": "2026-11-02T03:30:00Z",
+            "notes": "Saved plugins that fail to load are kept as placeholders (Not found + Retry) with their values, targets and DAW slots. Reordered chains reload with the right ids/values; plugin ids avoid slot collisions; NaN/inf can't reach the EQ filters."
+        },
+        {
+            "phase": "big_synth_performance_morph_pad",
+            "completed_at": "2026-11-03T12:00:00Z",
+            "notes": "Stress-tested with Pigments (2,265 params). kMaxParams 1024->8192 and an unbounded dirty list (params above 1024 / beyond 512 targets were silently dead). Hosted writes skipped when unchanged plus ~10 ms control rate. Engine lock held only for the swap (0 lock misses under heavy UI syncs). UI: capped lane chips, in-place knobs, cached lookups: 238 fps with everything mapped. Morph pad: exact snapshots, capture everything with fresh values, teleport after capture, click-to-go, live mix and per-snapshot difference hints. CI resolves the plugin folder from the CMake target (Hostesa -> plugins/ModularRandomizer)."
         }
     ],
     "validation": {

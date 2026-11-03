@@ -1406,6 +1406,29 @@ void HostesaAudioProcessorEditor::timerCallback()
 
     // WrongEQ internal modulation clocks — the editor draws the animation from these
     data->setProperty ("eqGainPhase", audioProcessor.getEqModGainPhase());
+
+    // Performance readout (twice a second): audio callback and logic engine time vs
+    // the buffer's real-time budget, plus how long block updates held the engine lock
+    if (timerTickCount % 30 == 0)
+    {
+        auto take = [] (HostesaAudioProcessor::PerfAccumulator& a, juce::DynamicObject& o, const char* key)
+        {
+            const auto n = a.count.exchange (0);
+            const auto sum = a.sumNs.exchange (0);
+            const auto mx = a.maxNs.exchange (0);
+            o.setProperty (juce::String (key) + "Avg", n > 0 ? (double) sum / (double) n / 1000.0 : 0.0);
+            o.setProperty (juce::String (key) + "Max", (double) mx / 1000.0);
+            o.setProperty (juce::String (key) + "N", (int) n);
+        };
+        auto* perf = new juce::DynamicObject();
+        take (audioProcessor.perfAudio, *perf, "audio");
+        take (audioProcessor.perfLogic, *perf, "logic");
+        take (audioProcessor.perfBlockUpdate, *perf, "update");
+        perf->setProperty ("lockMisses", audioProcessor.perfLockMisses.exchange (0));
+        const double sr = audioProcessor.getSampleRate();
+        perf->setProperty ("budgetUs", sr > 0 ? audioProcessor.getBlockSize() / sr * 1.0e6 : 0.0);
+        data->setProperty ("perf", juce::var (perf));
+    }
     data->setProperty ("eqDriftTime", audioProcessor.getEqModDriftTime());
 
     // Sample rate: sent once per tick so JS EQ visualization uses actual rate (not hardcoded 48k)
@@ -1500,6 +1523,14 @@ void HostesaAudioProcessorEditor::timerCallback()
                 obj->setProperty ("y", (double) audioProcessor.morphReadback[i].headY.load());
                 obj->setProperty ("rot", (double) audioProcessor.morphReadback[i].rotAngle.load());
                 obj->setProperty ("out", (double) audioProcessor.morphReadback[i].modOutput.load());
+                const int nw = juce::jlimit (0, 12, audioProcessor.morphReadback[i].numWeights.load());
+                if (nw > 0)
+                {
+                    juce::Array<juce::var> w;
+                    for (int k = 0; k < nw; ++k)
+                        w.add (std::round (audioProcessor.morphReadback[i].weights[k].load() * 1000.0f) / 1000.0);
+                    obj->setProperty ("w", w);
+                }
                 morphArr.add (juce::var (obj));
             }
             data->setProperty ("morphHeads", juce::var (morphArr));

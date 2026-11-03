@@ -2062,6 +2062,28 @@ input[type="range"] {
     border-color: var(--accent);
 }
 
+/* Curve lane search (big lanes only) sits on its own line above the chips */
+.lane-chip-search {
+    flex: none;
+    max-width: none;
+    width: 100%;
+    margin: 2px 0;
+    box-sizing: border-box;
+}
+
+/* "+N more" — next page of a big lane's param chips */
+.lane-param-chip.lane-param-more {
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-muted);
+    border-style: dashed;
+}
+
+.lane-param-chip.lane-param-more:hover {
+    color: var(--text-primary);
+    border-color: var(--border-focus);
+}
+
 .lane-morph-scroll {
     flex: 1;
     overflow-y: auto;
@@ -3732,4 +3754,156 @@ select.lane-morph-knob {
     align-self: stretch;
     background: var(--border);
     margin: 0 4px;
+}
+
+
+/* ── Morph Pad: pad-first layout, snapshot colours, live mix ─────────
+   The pad is the instrument, so it gets the space: list, selected-snapshot controls and
+   capture share one column beside it. Each snapshot has one colour on the pad and in the
+   list, and glows by its share of the current mix (--mix, sent by the engine). */
+.morph-pad-col,
+.morph-snaps-col { height: 232px; }
+.morph-snaps-col { max-height: 232px; }
+
+.morph-pad {
+    width: 232px;
+    height: 232px;
+}
+
+.morph-pad .empty-label {
+    text-align: center;
+    line-height: 1.5;
+    padding: 4px 10px;
+    border-radius: 4px;
+    background: var(--bg-inset);
+    color: var(--text-secondary);
+}
+
+.snap-dot {
+    --mix: 0;
+    background: var(--snap-col, var(--text-muted));
+    border: 1.5px solid rgba(0, 0, 0, 0.45);
+    opacity: calc(0.6 + var(--mix) * 0.4);
+    box-shadow: 0 0 calc(var(--mix) * 16px) calc(var(--mix) * 4px) var(--snap-col, transparent);
+    transition: box-shadow .08s linear, opacity .08s linear;
+}
+
+.snap-dot:hover {
+    background: var(--snap-col, var(--text-primary));
+    filter: brightness(1.15);
+}
+
+.snap-dot.sel {
+    box-shadow: 0 0 0 2px var(--text-primary),
+                0 0 calc(var(--mix) * 16px) calc(var(--mix) * 4px) var(--snap-col, transparent);
+}
+
+.snap-dot.msel {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--text-primary) 45%, transparent),
+                0 0 calc(var(--mix) * 16px) calc(var(--mix) * 4px) var(--snap-col, transparent);
+}
+
+.snap-dot .snap-label {
+    font-size: 10px;
+    color: var(--text-secondary);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.snap-dot.sel .snap-label { color: var(--text-primary); }
+
+/* Playhead: big enough to find among the dots, readable on any snapshot colour */
+.morph-pad .playhead-dot {
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--text-primary);
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+
+.morph-pad .playhead-dot::after {
+    width: 6px;
+    height: 6px;
+    background: var(--text-primary);
+}
+
+/* Reach of the selected snapshot */
+.morph-ring-layer .radius-ring {
+    border-color: var(--snap-col, var(--morph-color));
+    opacity: 0.35;
+}
+
+/* List rows: colour badge, live share bar behind the row */
+.morph-snap-row {
+    --mix: 0;
+    position: relative;
+}
+
+/* Share of the mix: a thin bar along the bottom, so it never reads as a selection */
+.morph-snap-row::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 3px;
+    width: calc(var(--mix) * 100%);
+    background: var(--snap-col, var(--morph-color));
+    opacity: .85;
+    pointer-events: none;
+    transition: width .08s linear;
+}
+
+.morph-snap-row.sel {
+    background: color-mix(in srgb, var(--snap-col, var(--knob-value)) 16%, transparent);
+    box-shadow: inset 3px 0 0 var(--snap-col, var(--knob-value));
+}
+
+.morph-snap-row.msel {
+    background: color-mix(in srgb, var(--snap-col, var(--knob-value)) 8%, transparent);
+    box-shadow: inset 3px 0 0 color-mix(in srgb, var(--snap-col, var(--knob-value)) 50%, transparent);
+}
+
+.morph-snap-row > * { position: relative; }
+
+.morph-snap-idx {
+    color: var(--snap-col, var(--text-muted));
+    opacity: 1;
+    font-weight: 700;
+}
+
+/* What makes this snapshot different (its most distinctive params) */
+.morph-snap-row .morph-snap-name { flex: 0 1 auto; max-width: 40%; }
+.morph-snap-diff {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 9px;
+    color: var(--text-muted);
+}
+
+.morph-snap-mix {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    min-width: 28px;
+    text-align: right;
+    color: var(--snap-col, var(--text-muted));
+}
+
+.morph-sel-name {
+    max-width: 80px;
+    color: var(--snap-col, var(--text-primary));
+    font-weight: 600;
+}
+
+.morph-snap-upd {
+    font-size: 10px;
+    padding: 2px 7px;
+}
+
+.morph-kernel { margin-left: 6px; }
+
+/* Capture menu matches the rest of the UI */
+.morph-ctx .lane-add-menu-item {
+    font-family: var(--font-sans);
+    font-size: 11px;
 }

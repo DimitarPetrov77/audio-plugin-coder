@@ -390,6 +390,8 @@ juce::var HostesaAudioProcessor::compileBlocksForDsp (const juce::var& root)
             put (obj, "morphTempoSync", truthy (prop (sb, "morphTempoSync")));
             put (obj, "morphSyncDiv", orDef (prop (sb, "morphSyncDiv"), "1/4"));
             put (obj, "snapRadius", num (orDef (prop (sb, "snapRadius"), 100)) / 100.0);
+            // Blocks saved before "exact" existed keep the original blend
+            put (obj, "morphKernel", orDef (prop (sb, "morphKernel"), "blend"));
         }
 
         if (mode == "shapes" || mode == "shapes_range")

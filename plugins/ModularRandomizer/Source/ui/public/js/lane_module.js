@@ -872,8 +872,12 @@ function renderLaneBody(b) {
                 } else {
                     // ── CURVE: Param list ──
                     h += '<span class="lane-rb-label">PARAMS</span>';
+                    if (lane.pids.length > LANE_CHIP_LIMIT)
+                        h += '<input class="lane-morph-search lane-chip-search" data-b="' + b.id + '" data-li="' + li + '" type="text" placeholder="Search ' + lane.pids.length + '…" spellcheck="false" value="' + (lane._chipFilter || '').replace(/"/g, '&quot;') + '">';
                     h += '<div class="lane-param-list" id="curve-params-' + b.id + '-' + li + '">';
-                    for (var pi = 0; pi < lane.pids.length; pi++) {
+                    var curveVis = laneVisibleChips(lane);
+                    for (var cvi = 0; cvi < curveVis.idx.length; cvi++) {
+                        var pi = curveVis.idx[cvi];
                         var pp = PMap[lane.pids[pi]];
                         var shortName = pp ? pp.name : lane.pids[pi];
                         if (shortName.length > 8) shortName = shortName.substring(0, 7) + '\u2026';
@@ -893,6 +897,7 @@ function renderLaneBody(b) {
                         h += '<span class="lane-param-chip-x" data-b="' + b.id + '" data-li="' + li + '" data-pid="' + lane.pids[pi] + '">\u00D7</span>';
                         h += '</div>';
                     }
+                    if (curveVis.hidden > 0) h += laneMoreChipHtml(b, li, curveVis.hidden);
                     h += '</div>';
                     h += '<button class="lane-add-param-btn" data-b="' + b.id + '" data-li="' + li + '" title="Add parameter to this lane">+ Add</button>';
                 }
@@ -1039,10 +1044,12 @@ function renderLaneBody(b) {
                     // Right half: Params
                     h += '<div class="lane-morph-col">';
                     h += '<div class="lane-morph-col-head"><span class="lane-morph-col-label">PARAMETERS</span>';
-                    h += '<input class="lane-morph-search" data-b="' + b.id + '" data-li="' + li + '" type="text" placeholder="Search…" spellcheck="false"></div>';
+                    h += '<input class="lane-morph-search" data-b="' + b.id + '" data-li="' + li + '" type="text" placeholder="Search…" spellcheck="false" value="' + (lane._chipFilter || '').replace(/"/g, '&quot;') + '"></div>';
                     h += '<div class="lane-param-list lane-morph-scroll" id="morph-params-' + b.id + '-' + li + '">';
                     if (lane.pids && lane.pids.length > 0) {
-                        for (var mpi = 0; mpi < lane.pids.length; mpi++) {
+                        var morphVis = laneVisibleChips(lane);
+                        for (var mvi = 0; mvi < morphVis.idx.length; mvi++) {
+                            var mpi = morphVis.idx[mvi];
                             var mpp = PMap[lane.pids[mpi]];
                             var mpName = mpp ? mpp.name : lane.pids[mpi];
                             var dotCol = MP_COLS[mpi % MP_COLS.length];
@@ -1059,6 +1066,7 @@ function renderLaneBody(b) {
                             h += '<span class="lane-param-chip-x" data-b="' + b.id + '" data-li="' + li + '" data-pid="' + lane.pids[mpi] + '">&times;</span>';
                             h += '</div>';
                         }
+                        if (morphVis.hidden > 0) h += laneMoreChipHtml(b, li, morphVis.hidden);
                     }
                     h += '</div>';
                     h += '<button class="lane-add-param-btn" data-b="' + b.id + '" data-li="' + li + '" title="Add parameter">+ Add</button>';
@@ -1518,15 +1526,17 @@ function laneSetupMorphSidebar(b, li) {
 
     // Morph params search filter
     document.querySelectorAll('.lane-morph-search[data-b="' + b.id + '"][data-li="' + li + '"]').forEach(function (inp) {
+        // Filters across every mapped param (only a page of chips is in the DOM)
         inp.oninput = function () {
-            var q = inp.value.toLowerCase();
-            var container = document.getElementById('morph-params-' + b.id + '-' + li);
-            if (!container) return;
-            container.querySelectorAll('.lane-morph-param').forEach(function (chip) {
-                var nameEl = chip.querySelector('.lane-param-chip-name');
-                var name = nameEl ? nameEl.textContent.toLowerCase() : '';
-                chip.style.display = (q === '' || name.indexOf(q) >= 0) ? '' : 'none';
-            });
+            lane._chipFilter = inp.value;
+            lane._chipLimit = LANE_CHIP_LIMIT;
+            clearTimeout(lane._chipFilterTimer);
+            lane._chipFilterTimer = setTimeout(function () {
+                var caret = inp.selectionStart;
+                renderSingleBlock(b.id);
+                var again = document.querySelector('.lane-morph-search[data-b="' + b.id + '"][data-li="' + li + '"]');
+                if (again) { again.focus(); try { again.setSelectionRange(caret, caret); } catch (e) {} }
+            }, 120);
         };
         // Prevent keyboard shortcuts from firing while typing
         inp.onkeydown = function (e) { e.stopPropagation(); };
@@ -1542,7 +1552,17 @@ function laneSetupMorphSidebar(b, li) {
     });
 
     // Shared capture helper
+    // Read the plugins' current values first (see morphFetchFresh): the UI only polls
+    // params on screen, so a knob turned in the plugin's own window could be stale here.
     function _morphDoCapture(b, lane, li, filterFn) {
+        var hostIds = [];
+        (lane.pids || []).forEach(function (pid) { var p = PMap[pid]; if (p && hostIds.indexOf(p.hostId) < 0) hostIds.push(p.hostId); });
+        if (!(lane.pids && lane.pids.length) && typeof pluginBlocks !== 'undefined')
+            pluginBlocks.forEach(function (pb) { if (filterFn(pb) && !pb.isVirtual && !pb.missing) hostIds.push(pb.hostId !== undefined ? pb.hostId : pb.id); });
+        var go = function () { _morphDoCaptureNow(b, lane, li, filterFn); };
+        if (typeof morphFetchFresh === 'function') morphFetchFresh(hostIds).then(go, go); else go();
+    }
+    function _morphDoCaptureNow(b, lane, li, filterFn) {
         pushUndoSnapshot();
         if (!lane.morphSnapshots) lane.morphSnapshots = [];
         var vals = {};
@@ -2075,28 +2095,76 @@ function laneSetupFooter(b, li) {
         });
     }
 
-    // Populate static range badges for non-selected params (curve + morph)
+    // Curve lane search (only shown for big lanes; morph lanes wire theirs in the sidebar)
+    document.querySelectorAll('.lane-chip-search[data-b="' + b.id + '"][data-li="' + li + '"]').forEach(function (inp) {
+        inp.oninput = function () {
+            lane._chipFilter = inp.value;
+            lane._chipLimit = LANE_CHIP_LIMIT;
+            clearTimeout(lane._chipFilterTimer);
+            lane._chipFilterTimer = setTimeout(function () {
+                var caret = inp.selectionStart;
+                renderSingleBlock(b.id);
+                var again = document.querySelector('.lane-chip-search[data-b="' + b.id + '"][data-li="' + li + '"]');
+                if (again) { again.focus(); try { again.setSelectionRange(caret, caret); } catch (e) {} }
+            }, 120);
+        };
+        inp.onkeydown = function (e) { e.stopPropagation(); };
+        inp.onclick = function (e) { e.stopPropagation(); };
+    });
+
+    // "+N more" chip: next page of chips
+    document.querySelectorAll('.lane-param-more[data-b="' + b.id + '"][data-li="' + li + '"]').forEach(function (chip) {
+        chip.onclick = function (e) {
+            e.stopPropagation();
+            lane._chipLimit = (lane._chipLimit || LANE_CHIP_LIMIT) + LANE_CHIP_PAGE;
+            renderSingleBlock(b.id);
+        };
+    });
+
+    // Populate static range badges for the chips on screen (curve + morph). The text is
+    // cached per param: it never changes, and asking the plugin twice per chip on every
+    // render was thousands of native calls for a fully mapped synth.
     if (lane.pids) {
         var fn = _ensureParamTextFn();
-        if (fn) {
-            var rngPrefix = lane.morphMode ? 'mprng-' : 'cprng-';
-            for (var ri = 0; ri < lane.pids.length; ri++) {
-                if (lane._selectedParamIdx === ri) continue;
-                var rngEl = document.getElementById(rngPrefix + b.id + '-' + li + '-' + ri);
-                if (!rngEl) continue;
-                var parts = lane.pids[ri].split(':');
-                if (parts.length !== 2) continue;
-                (function (el, pId, pIdx) {
-                    var minP = fn(pId, pIdx, 0.0);
-                    var maxP = fn(pId, pIdx, 1.0);
-                    Promise.all([minP, maxP]).then(function (vals) {
-                        var minT = vals[0] || '0%', maxT = vals[1] || '100%';
-                        if (el) el.textContent = minT + '\u2026' + maxT;
-                    });
-                })(rngEl, parseInt(parts[0]), parseInt(parts[1]));
-            }
-        }
+        var rngPrefix = lane.morphMode ? 'mprng-' : 'cprng-';
+        var wrap = document.getElementById((lane.morphMode ? 'morph-params-' : 'curve-params-') + b.id + '-' + li);
+        if (wrap) wrap.querySelectorAll('.lane-param-range').forEach(function (rngEl) {
+            var ri = parseInt(rngEl.id.substring((rngPrefix + b.id + '-' + li + '-').length));
+            var pid = lane.pids[ri];
+            if (!pid) return;
+            if (_laneRangeText[pid]) { rngEl.textContent = _laneRangeText[pid]; return; }
+            var parts = pid.split(':');
+            if (!fn || parts.length !== 2) return;
+            Promise.all([fn(parseInt(parts[0]), parseInt(parts[1]), 0.0), fn(parseInt(parts[0]), parseInt(parts[1]), 1.0)]).then(function (vals) {
+                var txt = (vals[0] || '0%') + '\u2026' + (vals[1] || '100%');
+                _laneRangeText[pid] = txt;
+                rngEl.textContent = txt;
+            });
+        });
     }
+}
+
+// Lanes with a whole synth mapped would render thousands of chips (tens of thousands of
+// DOM nodes that every frame then has to lay out and paint). Render a page of them, always
+// including the selected one, plus a "+N more" chip; search filters across all of them.
+var LANE_CHIP_LIMIT = 40, LANE_CHIP_PAGE = 200;
+var _laneRangeText = {};   // pid -> "min…max" display text
+function laneVisibleChips(lane) {
+    var q = (lane._chipFilter || '').toLowerCase();
+    var limit = lane._chipLimit || LANE_CHIP_LIMIT;
+    var idx = [], total = 0;
+    for (var i = 0; i < lane.pids.length; i++) {
+        if (q) {
+            var p = PMap[lane.pids[i]];
+            if ((p ? p.name : lane.pids[i]).toLowerCase().indexOf(q) < 0) continue;
+        }
+        total++;
+        if (idx.length < limit || i === lane._selectedParamIdx) idx.push(i);
+    }
+    return { idx: idx, hidden: total - idx.length };
+}
+function laneMoreChipHtml(b, li, hidden) {
+    return '<div class="lane-param-chip lane-param-more" data-b="' + b.id + '" data-li="' + li + '" title="Show more">+' + hidden + ' more</div>';
 }
 
 // -"-"- Preset shapes menu -"-"-

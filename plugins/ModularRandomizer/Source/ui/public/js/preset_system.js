@@ -621,7 +621,7 @@ function _applySnapshotFromParamMap(entry, paramMap, laneTarget) {
                 vals[pid] = p.v;
             }
         });
-        var spos = getSnapSectorPos(b.snapshots.length);
+        var spos = morphNewSnapPos(b);
         if (typeof pushUndoSnapshot === 'function') pushUndoSnapshot();
         b.snapshots.push({
             x: spos.x, y: spos.y,
@@ -738,7 +738,7 @@ function loadSnapshotFromLibrary(entry) {
                         vals[pid] = p.v;
                     }
                 });
-                var spos = getSnapSectorPos(b.snapshots.length);
+                var spos = morphNewSnapPos(b);
                 b.snapshots.push({
                     x: spos.x, y: spos.y,
                     values: vals,
@@ -1038,6 +1038,7 @@ function buildGlobalPresetData() {
                 morphGlide: b.morphGlide != null ? b.morphGlide : 200,
                 morphTempoSync: !!b.morphTempoSync, morphSyncDiv: b.morphSyncDiv || '1/4',
                 snapRadius: b.snapRadius != null ? b.snapRadius : 100,
+                morphKernel: b.morphKernel || 'blend',
                 shapeType: b.shapeType || 'circle', shapeTracking: b.shapeTracking || 'horizontal',
                 shapeSize: b.shapeSize != null ? b.shapeSize : 80, shapeSpin: b.shapeSpin != null ? b.shapeSpin : 0,
                 shapeSpeed: b.shapeSpeed != null ? b.shapeSpeed : 50, shapeHz: b.shapeHz != null ? b.shapeHz : 0.5, shapePhaseOffset: b.shapePhaseOffset || 0,
@@ -1222,6 +1223,7 @@ function applyGlobalPreset(data, presetName) {
                 morphGlide: sb.morphGlide != null ? sb.morphGlide : 200,
                 morphTempoSync: !!sb.morphTempoSync, morphSyncDiv: sb.morphSyncDiv || '1/4',
                 snapRadius: sb.snapRadius != null ? sb.snapRadius : 100,
+                morphKernel: sb.morphKernel || 'blend',
                 shapeType: sb.shapeType || 'circle', shapeTracking: sb.shapeTracking || 'horizontal',
                 shapeSize: sb.shapeSize != null ? sb.shapeSize : 80, shapeSpin: sb.shapeSpin != null ? sb.shapeSpin : 0,
                 shapeSpeed: sb.shapeSpeed != null ? sb.shapeSpeed : 50, shapeHz: sb.shapeHz != null ? sb.shapeHz : 0.5, shapePhaseOffset: sb.shapePhaseOffset || 0,

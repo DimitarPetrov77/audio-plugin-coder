@@ -63,6 +63,50 @@ to perfect the existing WebView UI instead.
   plugin put back → Retry → reopened, with targets, lock, morph snapshot, values and DAW
   slots intact at every step; all earlier self-check sessions still match.
 
+### Big-synth performance + morph pad pass (stress-tested with Pigments, 2,265 params)
+- **Engine limits that silently broke big synths:** params above index 1024 could not be
+  modulated at all (`kMaxParams`), and more than 512 modulated params per block overflowed
+  the dirty list — the extra cells were never applied *or cleared*, so they stayed stuck.
+  `kMaxParams` is now 8192 and the dirty list can hold every cell.
+- **Where audio time goes:** Hostesa's own modulation of 2,265 params costs ~0.35 ms per
+  block; the expensive part is the hosted plugin reacting to each change (~1.5 µs per param
+  in Pigments, ~3.3 ms per 512-sample block when all of them move). Unchanged values are no
+  longer written, and continuous moves go out at a ~10 ms control rate (staggered), so
+  small buffers don't multiply the plugin's work; jumps still go out immediately.
+- `updateLogicBlocks`' removed-target check was O(n²) under the engine lock; now linear.
+- **UI:** lanes rendered one chip per mapped param (18k DOM nodes for two lanes, plus two
+  native text lookups per chip per render). Now a page of 40 + "+N more", search across all,
+  range text cached. Modulated knobs were rebuilt with `innerHTML` every frame; now updated
+  in place. Result with every block type mapped to all of Pigments: full render 136–320 ms →
+  23–30 ms, frame p95 16.8 ms (79 fps) → 4.3 ms (238 fps), DOM 22k → 2.4k elements.
+- Built-in perf readout (`__rt_data__.perf`): audio/logic time vs budget, block-update lock
+  time, lock misses.
+- **Morph pad:**
+  - "Exact" weighting (Shepard): standing on a snapshot gives exactly that snapshot
+    (verified: error 0.0000 on Pigments). New blocks use it; older blocks keep "Soft" (the
+    original blend) and can switch.
+  - Capture stays "capture everything": a snapshot is a whole state ("I have this sound,
+    I want to get to that one"). That is cheap, because the engine only writes a param
+    when its mixed value changes. Measured with full-state snapshots of all 2,265 Pigments
+    params, about 40 of them differing: dragging costs ~0.35 ms of audio time per block.
+  - After a capture, the engine's playhead jumps to the new snapshot instead of gliding
+    there (one-shot `teleport`). Gliding replayed the old position's mix over the sound you
+    had just captured, and overwrote knobs turned right after capturing.
+  - Values are read fresh from the engine before every capture (morph pad and morph lane),
+    because the UI only polls params on screen.
+  - Each list row names what makes that snapshot different: its params furthest from the
+    snapshots' average (top two shown, top eight in the tooltip).
+- **Engine lock:** `updateLogicBlocks` now holds `blockMutex` only to carry runtime state and
+  swap the block lists. Restoring dropped params and freeing the old blocks happen after
+  unlocking. Lock misses under 46 UI syncs in 5 s: 0. The carry also used to read the
+  audio thread's state unlocked and hand the rebuilt blocks state a few ms stale, so lanes
+  and LFOs jumped back slightly on every sync.
+  - Clicking a dot goes there; dragging moves it.
+  - Each snapshot has a colour, and dots and list rows show their live share of the mix
+    (the engine sends the weights).
+  - New snapshots fill the widest empty arc of the pad.
+  - The pad is bigger, and the list and controls share one column.
+
 ### Not covered yet
 - Exposed `lane.N.speed` maps to a field the DSP never reads (no effect).
 - Not yet tested in a DAW: headless block automation, sample reload, missing plugins.
