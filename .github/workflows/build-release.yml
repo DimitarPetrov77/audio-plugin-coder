@@ -49,6 +49,17 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      - name: Resolve plugin folder
+        shell: bash
+        run: |
+          # The CMake target and its folder under plugins/ can differ
+          # (Hostesa is built from plugins/ModularRandomizer)
+          PLUGIN="${{ inputs.plugin_name || 'Hostesa' }}"
+          DIR=$(grep -lE "juce_add_plugin\s*\(\s*${PLUGIN}([[:space:]]|$)" plugins/*/CMakeLists.txt | head -1 | cut -d/ -f2)
+          [ -n "$DIR" ] || DIR="$PLUGIN"
+          echo "PLUGIN_DIR=$DIR" >> "$GITHUB_ENV"
+          echo "Plugin $PLUGIN is in plugins/$DIR"
+
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
 
@@ -92,8 +103,8 @@ jobs:
         run: |
           $plugin = "${{ inputs.plugin_name || 'Hostesa' }}"
           $version = "${{ inputs.version || '1.0.0' }}"
-          $issPath = "plugins/$plugin/installer/windows.iss"
-          $distDir = "plugins/$plugin/dist"
+          $issPath = "plugins/$env:PLUGIN_DIR/installer/windows.iss"
+          $distDir = "plugins/$env:PLUGIN_DIR/dist"
           
           if (Test-Path $issPath) {
             # Create dist directory
@@ -118,8 +129,8 @@ jobs:
             New-Item -ItemType Directory -Path "$stagingDir\VST3" -Force | Out-Null
             Copy-Item -Path $vst3Dir -Destination "$stagingDir\VST3\" -Recurse
             if ($exePath) { Copy-Item $exePath "$stagingDir\" }
-            if (Test-Path "plugins/$plugin/installer/LICENSE.txt") {
-              Copy-Item "plugins/$plugin/installer/LICENSE.txt" "$stagingDir\"
+            if (Test-Path "plugins/$env:PLUGIN_DIR/installer/LICENSE.txt") {
+              Copy-Item "plugins/$env:PLUGIN_DIR/installer/LICENSE.txt" "$stagingDir\"
             }
             Compress-Archive -Path "$stagingDir\*" -DestinationPath "$distDir\${plugin}-${version}-Windows.zip"
             Remove-Item -Path $stagingDir -Recurse -Force
@@ -130,7 +141,7 @@ jobs:
         run: |
           $plugin = "${{ inputs.plugin_name || 'Hostesa' }}"
           $version = "${{ inputs.version || '1.0.0' }}"
-          $distDir = "plugins/$plugin/dist"
+          $distDir = "plugins/$env:PLUGIN_DIR/dist"
           $zipDir = "$distDir/${plugin}-${version}-Windows-Portable"
           
           New-Item -ItemType Directory -Path "$zipDir/VST3" -Force | Out-Null
@@ -144,8 +155,8 @@ jobs:
           if ($exePath) { Copy-Item $exePath "$zipDir/" }
           
           # Copy LICENSE
-          if (Test-Path "plugins/$plugin/installer/LICENSE.txt") {
-            Copy-Item "plugins/$plugin/installer/LICENSE.txt" "$zipDir/"
+          if (Test-Path "plugins/$env:PLUGIN_DIR/installer/LICENSE.txt") {
+            Copy-Item "plugins/$env:PLUGIN_DIR/installer/LICENSE.txt" "$zipDir/"
           }
           
           # Create README
@@ -179,7 +190,7 @@ jobs:
         with:
           name: windows-${{ inputs.plugin_name || 'Hostesa' }}
           path: |
-            plugins/${{ inputs.plugin_name || 'Hostesa' }}/dist/*
+            plugins/${{ env.PLUGIN_DIR }}/dist/*
           retention-days: 30
 
   # ============================================
@@ -197,6 +208,17 @@ jobs:
         with:
           submodules: recursive
           fetch-depth: 0
+
+      - name: Resolve plugin folder
+        shell: bash
+        run: |
+          # The CMake target and its folder under plugins/ can differ
+          # (Hostesa is built from plugins/ModularRandomizer)
+          PLUGIN="${{ inputs.plugin_name || 'Hostesa' }}"
+          DIR=$(grep -lE "juce_add_plugin\s*\(\s*${PLUGIN}([[:space:]]|$)" plugins/*/CMakeLists.txt | head -1 | cut -d/ -f2)
+          [ -n "$DIR" ] || DIR="$PLUGIN"
+          echo "PLUGIN_DIR=$DIR" >> "$GITHUB_ENV"
+          echo "Plugin $PLUGIN is in plugins/$DIR"
 
       - name: Configure CMake
         run: |
@@ -217,7 +239,7 @@ jobs:
         run: |
           PLUGIN="${{ inputs.plugin_name || 'Hostesa' }}"
           VERSION="${{ inputs.version || '1.0.0' }}"
-          DIST_DIR="plugins/$PLUGIN/dist"
+          DIST_DIR="plugins/$PLUGIN_DIR/dist"
           STAGING="$DIST_DIR/staging"
           
           mkdir -p "$STAGING/vst3" "$STAGING/au" "$STAGING/app" "$DIST_DIR"
@@ -299,7 +321,7 @@ jobs:
         run: |
           PLUGIN="${{ inputs.plugin_name || 'Hostesa' }}"
           VERSION="${{ inputs.version || '1.0.0' }}"
-          DIST_DIR="plugins/$PLUGIN/dist"
+          DIST_DIR="plugins/$PLUGIN_DIR/dist"
           ZIP_DIR="$DIST_DIR/${PLUGIN}-${VERSION}-macOS-Portable"
           
           mkdir -p "$ZIP_DIR/VST3" "$ZIP_DIR/AU" "$ZIP_DIR/App"
@@ -314,8 +336,8 @@ jobs:
           [ -d "$APP_PATH" ]  && cp -R "$APP_PATH"  "$ZIP_DIR/App/"
           
           # Copy license
-          [ -f "plugins/$PLUGIN/installer/LICENSE.txt" ] && \
-            cp "plugins/$PLUGIN/installer/LICENSE.txt" "$ZIP_DIR/"
+          [ -f "plugins/$PLUGIN_DIR/installer/LICENSE.txt" ] && \
+            cp "plugins/$PLUGIN_DIR/installer/LICENSE.txt" "$ZIP_DIR/"
           
           # Create README
           cat > "$ZIP_DIR/README.txt" << EOF
@@ -356,7 +378,7 @@ jobs:
         with:
           name: macos-${{ inputs.plugin_name || 'Hostesa' }}
           path: |
-            plugins/${{ inputs.plugin_name || 'Hostesa' }}/dist/*
+            plugins/${{ env.PLUGIN_DIR }}/dist/*
           retention-days: 30
 
   # ============================================
@@ -374,6 +396,17 @@ jobs:
         with:
           submodules: recursive
           fetch-depth: 0
+
+      - name: Resolve plugin folder
+        shell: bash
+        run: |
+          # The CMake target and its folder under plugins/ can differ
+          # (Hostesa is built from plugins/ModularRandomizer)
+          PLUGIN="${{ inputs.plugin_name || 'Hostesa' }}"
+          DIR=$(grep -lE "juce_add_plugin\s*\(\s*${PLUGIN}([[:space:]]|$)" plugins/*/CMakeLists.txt | head -1 | cut -d/ -f2)
+          [ -n "$DIR" ] || DIR="$PLUGIN"
+          echo "PLUGIN_DIR=$DIR" >> "$GITHUB_ENV"
+          echo "Plugin $PLUGIN is in plugins/$DIR"
 
       - name: Install Dependencies
         run: |
@@ -407,7 +440,7 @@ jobs:
         run: |
           PLUGIN="${{ inputs.plugin_name || 'Hostesa' }}"
           VERSION="${{ inputs.version || '1.0.0' }}"
-          DIST_DIR="plugins/$PLUGIN/dist"
+          DIST_DIR="plugins/$PLUGIN_DIR/dist"
           STAGING="$DIST_DIR/${PLUGIN}-${VERSION}-Linux"
           
           mkdir -p "$STAGING/VST3"
@@ -426,8 +459,8 @@ jobs:
           fi
           
           # Copy license
-          if [ -f "plugins/$PLUGIN/installer/LICENSE.txt" ]; then
-            cp "plugins/$PLUGIN/installer/LICENSE.txt" "$STAGING/"
+          if [ -f "plugins/$PLUGIN_DIR/installer/LICENSE.txt" ]; then
+            cp "plugins/$PLUGIN_DIR/installer/LICENSE.txt" "$STAGING/"
           fi
           
           # Create tar.gz
@@ -443,7 +476,7 @@ jobs:
         with:
           name: linux-${{ inputs.plugin_name || 'Hostesa' }}
           path: |
-            plugins/${{ inputs.plugin_name || 'Hostesa' }}/dist/*.tar.gz
+            plugins/${{ env.PLUGIN_DIR }}/dist/*.tar.gz
           retention-days: 30
 
   # ============================================

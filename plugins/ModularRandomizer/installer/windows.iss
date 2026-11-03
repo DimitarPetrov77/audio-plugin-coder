@@ -47,12 +47,12 @@ Name: "standalone"; Description: "Standalone App";   Types: full custom
 
 [Files]
 ; VST3 plugin — always installed to Common Files\VST3
-Source: "{#BuildDir}\plugins\Hostesa\Hostesa_artefacts\Release\VST3\Hostesa.vst3\*"; \
+Source: "{#BuildDir}\plugins\ModularRandomizer\Hostesa_artefacts\Release\VST3\Hostesa.vst3\*"; \
   DestDir: "{commoncf64}\VST3\Hostesa.vst3"; \
   Components: vst3; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Standalone app — installed to user-chosen directory
-Source: "{#BuildDir}\plugins\Hostesa\Hostesa_artefacts\Release\Standalone\Hostesa.exe"; \
+Source: "{#BuildDir}\plugins\ModularRandomizer\Hostesa_artefacts\Release\Standalone\Hostesa.exe"; \
   DestDir: "{app}"; \
   Components: standalone; Flags: ignoreversion
 

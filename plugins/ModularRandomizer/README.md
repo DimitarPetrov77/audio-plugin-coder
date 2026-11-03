@@ -1,6 +1,7 @@
-# Modular Randomizer
+# Hostesa
 
 A modular parameter modulation engine and plugin host — built as a VST3 plugin with JUCE 8 and a WebView2 interface.
+(The source lives in `plugins/ModularRandomizer/`; the plugin it builds is **Hostesa**.)
 
 Load any VST3 instruments or effects, assign their parameters to **Logic Blocks**, and modulate everything in real time through randomization, envelope following, automation lanes, morph pads, and geometric LFO shapes.
 
@@ -11,7 +12,13 @@ Load any VST3 instruments or effects, assign their parameters to **Logic Blocks*
 ### Plugin Hosting
 - Load and chain multiple VST3 plugins in series or **parallel routing** with per-bus volume, mute, and solo
 - Full parameter discovery: every hosted plugin's parameters appear in a searchable, scrollable rack
-- Plugin state is saved and restored with the DAW project automatically
+- Plugin state is saved and restored with the DAW project automatically — and a saved session
+  runs fully (modulation, WrongEQ movement, DAW automation) even if the editor is never opened
+- Big plugins: up to 8,192 parameters per hosted plugin can be modulated (tested with Arturia
+  Pigments, 2,265 parameters)
+- A plugin that can't be loaded (not installed on this machine) stays in the session as a
+  **Not found** card with **Retry**: its settings, modulation targets and DAW slots are kept and
+  come back when it loads
 - Crash-isolated hosting — a misbehaving plugin is disabled without taking down the session
 
 ### Logic Blocks
@@ -22,9 +29,21 @@ Six modulation modes, each assignable to any combination of hosted plugin parame
 | **Randomize** | Random values on trigger (tempo, MIDI, audio). Absolute or relative range, optional glide and quantize |
 | **Envelope** | Audio envelope follower with attack/release/sensitivity, optional bandpass filter, sidechain input |
 | **Sample** | Load an audio file and use its waveform as a modulation source. Loop, one-shot, or ping-pong |
-| **Morph Pad** | XY pad with up to 8 snapshots. IDW blending, auto-explore (wander/shapes), triggered sequencing |
+| **Morph Pad** | XY pad with up to 12 snapshots — capture whole states and move between them. Exact recall, live mix display, auto-explore (wander/shapes/orbit/path), triggered sequencing |
 | **Shapes** | Geometric LFO paths (circle, figure-8, triangle, star, spiral, butterfly, etc.) with tempo sync, spin, and phase control |
 | **Lane** | Drawable automation curves and morph lanes — the most powerful mode (see below) |
+
+### Morph Pad
+- **Capture** takes a snapshot of the whole state (every unlocked parameter of every plugin, or one
+  plugin / only assigned parameters from the ▾ menu). Set up a sound, capture, change it, capture
+  again — then move between them.
+- **Click a snapshot** to go to it; drag it to move it. With **Exact** snapshots (default for new
+  pads) standing on a snapshot gives exactly that sound; **Soft** keeps the original always-blend
+  behaviour of older projects.
+- Each snapshot has its own colour; the pad and list show live how much each one contributes, and
+  each row names the parameters that make that snapshot different.
+- Values are read straight from the plugins when capturing, so knobs turned in a plugin's own
+  window are captured correctly.
 
 ### Automation Lanes
 Each lane block can contain multiple sub-lanes running independently:
@@ -73,7 +92,9 @@ Each lane block can contain multiple sub-lanes running independently:
 Source/
 ├── PluginProcessor.cpp/h    — Plugin hosting, state serialization, lane clip parsing
 ├── ProcessBlock.cpp         — Audio-rate modulation engine (zero-allocation)
-├── PluginHosting.cpp        — VST3 scan, load, crash isolation
+├── PluginHosting.cpp        — VST3 scan, load, crash isolation, missing-plugin placeholders
+├── StateRestore.cpp         — Runs a saved session without the editor; exact DAW slot map
+├── EqInternalMod.cpp        — WrongEQ's own gain LFO / drift / Q-mod, on the audio thread
 ├── PluginEditor.cpp/h       — WebView2 bridge with native function API
 ├── ParameterIDs.hpp         — Parameter ID constants
 └── ui/public/
@@ -107,29 +128,49 @@ Source/
 ```
 
 ### Key Design Decisions
-- **Zero-allocation audio thread** — All DSP runs without heap allocation or mutex contention
+- **Zero-allocation audio thread** — All DSP runs without heap allocation or mutex contention; the
+  UI swaps in new block settings holding the engine lock only for the swap itself
 - **Additive modulation bus** — Multiple blocks can modulate the same parameter simultaneously
+- **Cheap writes to hosted plugins** — A parameter is only written when its value changes, and
+  continuous modulation goes out at a ~10 ms control rate, so big synths (which recompute on every
+  parameter change) stay light even with thousands of mapped parameters
 - **Two-layer meta-modulation** — Blocks can modulate other blocks' parameters
 - **O(visible) UI scaling** — Virtual scroll, dirty marking, and batched IPC handle plugins with 2000+ parameters
 - **SEH crash isolation** — Plugin hosting and scanning wrapped in structured exception handlers
 
 ---
 
-## Build
+## Install
 
-**Requirements:**
-- JUCE 8 (placed in `_tools/JUCE/` relative to the parent build system)
-- CMake 3.22+
-- Visual Studio 2022 (Windows)
-- Microsoft WebView2 SDK (1.0.1901.177)
+### From a release (no build tools needed)
+Download from the repository's **Releases** page (or from a finished **Build and Release** run under
+**Actions → Artifacts**):
+- **Windows:** run the `Hostesa-…-Setup.exe` installer, or extract the Portable ZIP and copy the
+  `Hostesa.vst3` folder to `C:\Program Files\Common Files\VST3\`
+- **macOS:** open the `.pkg`, or copy `Hostesa.vst3` to `/Library/Audio/Plug-Ins/VST3/`
+- **Linux:** extract the tar.gz and copy `Hostesa.vst3` to `~/.vst3/`
 
+Then rescan plugins in your DAW. Windows needs the WebView2 Runtime (built into Windows 11).
+
+### Build and install from source (Windows)
+**Requirements:** JUCE 8 in `_tools/JUCE/`, CMake 3.22+, Visual Studio 2022, the WebView2 SDK.
+
+From the repository root, in an **administrator** PowerShell (installing writes to Program Files):
 ```powershell
-# From the repository root
-cmake -B build -G "Visual Studio 17 2022"
-cmake --build build --config Release --target Hostesa_VST3
+powershell -ExecutionPolicy Bypass -File .\scripts\build-and-install.ps1 -PluginName ModularRandomizer
 ```
+This builds the VST3 and Standalone and copies `Hostesa.vst3` to `C:\Program Files\Common Files\VST3\`.
+Add `-NoInstall` to only build. Outputs:
+- VST3: `build/plugins/ModularRandomizer/Hostesa_artefacts/Release/VST3/Hostesa.vst3`
+- Standalone: `build/plugins/ModularRandomizer/Hostesa_artefacts/Release/Standalone/Hostesa.exe`
 
-**Output:** `build/plugins/Hostesa/Hostesa_artefacts/Release/VST3/Hostesa.vst3`
+### Automated builds (GitHub Actions)
+`.github/workflows/build-release.yml` builds Windows (installer + portable ZIP), macOS (universal
+`.pkg`) and Linux:
+- **Any branch, on demand:** Actions → *Build and Release* → *Run workflow* (plugin name `Hostesa`).
+  The packages are attached to the run as artifacts for 30 days.
+- **A release:** push a tag such as `v1.8.0` — the same build runs and publishes a GitHub Release
+  with the installers.
 
 ---
 
