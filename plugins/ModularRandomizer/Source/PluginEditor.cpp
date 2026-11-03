@@ -1406,6 +1406,7 @@ void HostesaAudioProcessorEditor::timerCallback()
 
     // WrongEQ internal modulation clocks — the editor draws the animation from these
     data->setProperty ("eqGainPhase", audioProcessor.getEqModGainPhase());
+    data->setProperty ("eqFs", audioProcessor.getEqProcessRate());
 
     // Performance readout (twice a second): audio callback and logic engine time vs
     // the buffer's real-time budget, plus how long block updates held the engine lock

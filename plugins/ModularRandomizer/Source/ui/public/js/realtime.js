@@ -312,6 +312,13 @@ function setupRtDataListener() {
                 rtData.ppq = data.ppq || 0;
                 // WrongEQ internal modulation clocks (the engine computes the modulation)
                 rtData.eqGainPhase = data.eqGainPhase || 0;
+                // Draw the EQ curve at the rate the filters really run at (it was fixed
+                // at 48 kHz, so near the top it drifted from the audio at 44.1/96 kHz or
+                // with oversampling)
+                if (data.eqFs > 0 && typeof _WEQ_REF_FS !== 'undefined' && Math.abs(data.eqFs - _WEQ_REF_FS) > 1) {
+                    _WEQ_REF_FS = data.eqFs;
+                    if (typeof weqDrawCanvas === 'function') weqDrawCanvas();
+                }
                 rtData.eqDriftTime = data.eqDriftTime || 0;
                 // Sync actual sample rate from C++ for EQ curve accuracy
                 if (data.sr && data.sr > 0 && typeof _WEQ_REF_FS !== 'undefined')

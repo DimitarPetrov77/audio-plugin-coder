@@ -2681,12 +2681,30 @@ void HostesaAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                         float gain = eqGains[i];
                         float Q    = juce::jlimit (0.025f, 40.0f, eqQs[i]);
                         int   ft   = eqTypes[i];
-                        int   ns   = eqStages[i];
+
+                        // Slope (12/24/48 dB/oct) applies to LP/HP only: an order-2N
+                        // Butterworth from N SVF stages with the classic per-stage Qs. The
+                        // band's Q is the resonance and goes on the sharpest stage, so at
+                        // Q 0.707 the cutoff is exactly -3 dB. (Repeating one identical
+                        // stage put the cutoff at -6/-12 dB and compounded resonance; on a
+                        // bell or shelf it multiplied the gain: +6 dB at 48 dB/oct was +24.)
+                        // Mirrored by weqStageQs() in wrongeq_canvas.js.
+                        const bool steep = (ft == 1 || ft == 2);
+                        const int  ns    = steep ? eqStages[i] : 1;
+                        float stageQ[maxBiquadStages];
+                        if (ns == 1)
+                            stageQ[0] = Q;
+                        else
+                        {
+                            for (int st = 0; st < ns; ++st)
+                                stageQ[st] = 1.0f / (2.0f * std::cos ((2.0f * st + 1.0f) * juce::MathConstants<float>::pi / (4.0f * ns)));
+                            stageQ[ns - 1] = juce::jlimit (0.025f, 80.0f, stageQ[ns - 1] * Q / 0.70710678f);
+                        }
 
                         // Set target coefficients + compute per-sample deltas (once per buffer)
                         for (int st = 0; st < ns; ++st)
                             for (int ch = 0; ch < juce::jmin (nCh, (int) maxEqChannels); ++ch)
-                                eqBiquads[i][st][ch].setTarget (freq, gain, Q, ft, svfSR, nSamp);
+                                eqBiquads[i][st][ch].setTarget (freq, gain, stageQ[st], ft, svfSR, nSamp);
 
                         // Per-sample: step coefficients, then tick audio
                         for (int ch = 0; ch < juce::jmin (nCh, (int) maxEqChannels); ++ch)

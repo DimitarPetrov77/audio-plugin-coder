@@ -1489,9 +1489,9 @@ function weqRenderPanel() {
                 h += '</div>';
             }
 
-            // ── Slope selector ──
-            {
-                var ptSlope = pt.slope || 1;
+            // ── Slope selector (LP/HP only: on a bell or shelf, extra stages just multiplied the gain) ──
+            var ptSlope = pt.slope || 1;
+            if (rType === 'LP' || rType === 'HP') {
                 h += '<div class="weq-card-types weq-card-slope">';
                 h += '<button class="weq-type-btn' + (ptSlope === 1 ? ' active' : '') + '" data-weqslope="' + ri + ':1" title="12 dB/oct">12</button>';
                 h += '<button class="weq-type-btn' + (ptSlope === 2 ? ' active' : '') + '" data-weqslope="' + ri + ':2" title="24 dB/oct">24</button>';
@@ -1658,7 +1658,30 @@ function weqCanvasSetup() {
 
 // Actual sample rate from C++ (updated via __rt_data__.sr). Default 48kHz until first update.
 // Previously hardcoded — caused wrong curve shape at 44.1kHz/96kHz near Nyquist.
-var _WEQ_REF_FS = 48000;
+var _WEQ_REF_FS = 48000;   // replaced by the engine's real EQ rate (rtData eqFs)
+
+// Slope (12/24/48 dB/oct) applies to LP/HP only: an order-2N Butterworth from N stages
+// with the classic per-stage Qs; the band's Q is the resonance, on the sharpest stage.
+// Mirrors ProcessBlock.cpp (processSVFs). Returns one Q per stage.
+function weqStageQs(type, slope, q) {
+    var n = (type === 'LP' || type === 'HP') ? (slope === 4 ? 4 : (slope === 2 ? 2 : 1)) : 1;
+    if (n === 1) return [q];
+    var qs = [];
+    for (var st = 0; st < n; st++) qs.push(1 / (2 * Math.cos((2 * st + 1) * Math.PI / (4 * n))));
+    qs[n - 1] = Math.max(0.025, Math.min(80, qs[n - 1] * q / Math.SQRT1_2));
+    return qs;
+}
+// Coefficients of every stage of one band (a single entry unless it's a steep LP/HP)
+function _weqBandStageCoeffs(band, gainOverride) {
+    var qs = weqStageQs(band.type || 'Bell', band.slope || 1, Math.max(0.025, band.q || 0.707));
+    if (qs.length === 1) return [_weqBandCoeffs(band, gainOverride)];
+    return qs.map(function (q) { return _weqBandCoeffs(Object.assign({}, band, { q: q }), gainOverride); });
+}
+function _weqStagesDBAt(cs, xPos) {
+    var t = 0;
+    for (var i = 0; i < cs.length; i++) t += _weqBandDBAt(cs[i], xPos);
+    return t;
+}
 
 function _weqBiquadDB(b0, b1, b2, a0, a1, a2, w) {
     // H(e^jw) = (b0 + b1*e^-jw + b2*e^-2jw) / (a0 + a1*e^-jw + a2*e^-2jw)
@@ -1786,17 +1809,15 @@ function weqEvalAtX(xPos) {
         if (pts[i].mute) continue;
         var pt = pts[i].type || 'Bell';
         var isGainBased = (pt === 'Bell' || pt === 'LShf' || pt === 'HShf');
-        // Slope cascading: N identical biquads → N × single_biquad_dB
-        var slopeN = pts[i].slope || 1;
         if (isGainBased) {
             // Per-band depth → warp → steps on the gain, exactly like the DSP.
             var g = weqYToDB(pts[i].y) * depthScale;
             g = Math.max(-weqDBRangeMax, Math.min(weqDBRangeMax, g));
             g = _weqApplyWarp(g);
             g = _weqApplySteps(g);
-            total += _weqBandDB(xPos, pts[i], g) * slopeN;
+            total += _weqStagesDBAt(_weqBandStageCoeffs(pts[i], g), xPos);
         } else {
-            total += _weqBandDB(xPos, pts[i]) * slopeN;
+            total += _weqStagesDBAt(_weqBandStageCoeffs(pts[i]), xPos);
         }
     }
 
@@ -1837,9 +1858,7 @@ function _weqBuildCurveEval() {
             g = _weqApplySteps(g);
             gOverride = g;
         }
-        var c = _weqBandCoeffs(dp, gOverride);
-        c.slope = dp.slope || 1;
-        ctxs.push(c);
+        ctxs.push(_weqBandStageCoeffs(dp, gOverride));
     }
     var tiltActive = Math.abs(weqGlobalTilt) > 0.5;
     var tiltDB = (weqGlobalTilt / 100) * 12;
@@ -1847,7 +1866,7 @@ function _weqBuildCurveEval() {
     var gHigh = Math.pow(10, tiltDB / 20);
     return function (xNorm) {
         var total = 0;
-        for (var b = 0; b < ctxs.length; b++) total += _weqBandDBAt(ctxs[b], xNorm) * ctxs[b].slope;
+        for (var b = 0; b < ctxs.length; b++) total += _weqStagesDBAt(ctxs[b], xNorm);
         if (tiltActive) {
             var f = weqXToFreq(xNorm);
             var r = f / 632;
@@ -2629,7 +2648,6 @@ function weqDrawCanvas() {
             if (isSel) {
                 var _selBand = _weqDisplayBand(pt); // follow live modulation
                 var _selGainBased = (ptType === 'Bell' || ptType === 'LShf' || ptType === 'HShf');
-                var _selSlope = _selBand.slope || 1;
                 // Mirror weqEvalAtX's per-band processing so the highlight == this band's
                 // exact contribution to the summed curve.
                 var _selGain;
@@ -2639,13 +2657,13 @@ function weqDrawCanvas() {
                     _selGain = _weqApplyWarp(_selGain);
                     _selGain = _weqApplySteps(_selGain);
                 }
-                var _selCoeffs = _weqBandCoeffs(_selBand, _selGain); // coeffs once, not per pixel
+                var _selCoeffs = _weqBandStageCoeffs(_selBand, _selGain); // coeffs once, not per pixel
                 var _selRes = weqAnimRafId ? Math.max(90, Math.floor(W / 3)) : Math.max(160, Math.floor(W / 2));
                 var _selX = new Float32Array(_selRes + 1);
                 var _selY = new Float32Array(_selRes + 1);
                 for (var _sb = 0; _sb <= _selRes; _sb++) {
                     var _sxN = _sb / _selRes;
-                    var _sdb = _weqBandDBAt(_selCoeffs, _sxN) * _selSlope;
+                    var _sdb = _weqStagesDBAt(_selCoeffs, _sxN);
                     _selX[_sb] = _sxN * W;
                     _selY[_sb] = weqYtoCanvas(weqDBtoY(_sdb), H);
                 }
@@ -2710,7 +2728,6 @@ function weqDrawCanvas() {
                 detailLabel = slopeDB + 'dB/oct';
             } else {
                 detailLabel = weqFmtDB(dbVal) + 'dB  Q' + ptQ.toFixed(2);
-                if (ptSl > 1) detailLabel += '  ×' + ptSl;
             }
             ctx.fillStyle = isSel ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.35)';
             ctx.font = '8px "Share Tech Mono", monospace';

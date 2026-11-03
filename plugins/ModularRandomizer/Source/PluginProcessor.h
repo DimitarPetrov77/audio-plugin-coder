@@ -451,6 +451,13 @@ public:
         published once per block so the editor can draw the animation in lock-step. */
     double getEqModGainPhase() const { return eqIntModGainPhaseOut.load (std::memory_order_relaxed); }
     double getEqModDriftTime() const { return eqIntModDriftTimeOut.load (std::memory_order_relaxed); }
+    /** Rate the EQ filters actually run at (sample rate x oversampling), for the curve display */
+    double getEqProcessRate() const
+    {
+        return eqOversamplerReady.load (std::memory_order_acquire)
+             ? currentSampleRate * (double) (1 << eqOversampleOrder.load (std::memory_order_relaxed))
+             : currentSampleRate;
+    }
 
     /** Timing of audio-thread work, accumulated by the audio thread and read (and reset)
         by the editor for its performance readout. Lock-free, a few ns per block. */
