@@ -3,7 +3,9 @@
 ; Build with: ISCC.exe windows.iss
 
 #define PluginName    "Hostesa"
-#define PluginVersion "1.0.0"
+#ifndef PluginVersion
+  #define PluginVersion "1.0.0"   ; CI passes /DPluginVersion
+#endif
 #define Publisher     "Dimitar Petrov"
 #define PublisherURL  "https://dimitarp.com"
 

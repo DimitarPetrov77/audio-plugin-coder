@@ -102,7 +102,7 @@ jobs:
         shell: pwsh
         run: |
           $plugin = "${{ inputs.plugin_name || 'Hostesa' }}"
-          $version = "${{ inputs.version || '1.0.0' }}"
+          $version = "${{ inputs.version || github.ref_name }}" -replace '^v', ''   # tag v1.8.0 -> 1.8.0
           $issPath = "plugins/$env:PLUGIN_DIR/installer/windows.iss"
           $distDir = "plugins/$env:PLUGIN_DIR/dist"
           
@@ -140,7 +140,7 @@ jobs:
         shell: pwsh
         run: |
           $plugin = "${{ inputs.plugin_name || 'Hostesa' }}"
-          $version = "${{ inputs.version || '1.0.0' }}"
+          $version = "${{ inputs.version || github.ref_name }}" -replace '^v', ''   # tag v1.8.0 -> 1.8.0
           $distDir = "plugins/$env:PLUGIN_DIR/dist"
           $zipDir = "$distDir/${plugin}-${version}-Windows-Portable"
           
@@ -238,7 +238,7 @@ jobs:
       - name: Create macOS Installer Package
         run: |
           PLUGIN="${{ inputs.plugin_name || 'Hostesa' }}"
-          VERSION="${{ inputs.version || '1.0.0' }}"
+          VERSION="${{ inputs.version || github.ref_name }}"; VERSION="${VERSION#v}"   # tag v1.8.0 -> 1.8.0
           DIST_DIR="plugins/$PLUGIN_DIR/dist"
           STAGING="$DIST_DIR/staging"
           
@@ -320,7 +320,7 @@ jobs:
       - name: Create portable ZIP
         run: |
           PLUGIN="${{ inputs.plugin_name || 'Hostesa' }}"
-          VERSION="${{ inputs.version || '1.0.0' }}"
+          VERSION="${{ inputs.version || github.ref_name }}"; VERSION="${VERSION#v}"   # tag v1.8.0 -> 1.8.0
           DIST_DIR="plugins/$PLUGIN_DIR/dist"
           ZIP_DIR="$DIST_DIR/${PLUGIN}-${VERSION}-macOS-Portable"
           
@@ -439,7 +439,7 @@ jobs:
       - name: Package Linux binaries
         run: |
           PLUGIN="${{ inputs.plugin_name || 'Hostesa' }}"
-          VERSION="${{ inputs.version || '1.0.0' }}"
+          VERSION="${{ inputs.version || github.ref_name }}"; VERSION="${VERSION#v}"   # tag v1.8.0 -> 1.8.0
           DIST_DIR="plugins/$PLUGIN_DIR/dist"
           STAGING="$DIST_DIR/${PLUGIN}-${VERSION}-Linux"
           
